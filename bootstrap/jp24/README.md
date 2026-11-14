@@ -36,6 +36,8 @@ marker = bootstrap.verify_ssh(
 
 `flash()` requires verified JP24 identity, mains power, a matching SHA-256, a verified backup/recovery procedure, and an explicit confirmation callback. The native writer separately requires the literal phrase `FLASH JP24 /data`. It writes only the `data` partition and then reboots. Do not connect the callback until the desktop UI has a clear, affirmative confirmation dialog.
 
+The native writer validates a regular, exactly 256 MiB ext4 image before opening USB or erasing `/data`, holds that same file descriptor for streaming, and requires a valid final device response. This size is a project profile, not a size reported by imbupd.
+
 SSH verification uses the repository's `core.ssh_service.SshService`: it pins only the expected host-key fingerprint provided by the caller, then confirms authenticated root SSH on port 2222. A listening port alone is not success.
 
 ## Dependencies
@@ -60,6 +62,8 @@ Use `payload/alsa-boot-hook.c`, `payload/99-prime4-mod.conf`, and `payload/boot-
 The image builder validates the public-key format, expected paths, ext4 health, the encryption feature, and prints a SHA-256. `build_image()` returns the image size and SHA-256 to the installer. The installer must independently validate these values before offering a flash confirmation.
 
 ## Evidence and release gates
+
+The Vault has two conflicting storage observations: one root-shell record reports `/data` as 56 MB, while a later note reports that a 256 MiB image was written and EngineX ran successfully. The current update-mode protocol exposes no partition-size property and the latest query did not establish the target capacity. Resolve that discrepancy before enabling any write. The Vault lists UART/U-Boot USB Mass Storage as a possible eMMC access route, but it has not been validated as a JP24 recovery procedure.
 
 - The Vault records a successful JP24 SSH setup on port 2222 using the ALSA hook and `imbupd` data-image transfer.
 - That does not yet establish a redistributable, independently reproducible Prime-Unlimited bootstrap package.
