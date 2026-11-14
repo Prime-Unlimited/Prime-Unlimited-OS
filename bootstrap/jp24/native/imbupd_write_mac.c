@@ -65,9 +65,8 @@
 #define DATA_IMAGE_SIZE_256_MIB ((off_t)256 * 1024 * 1024)
 
 static libusb_device_handle *g_dev;
-
-/* The vendor increments a single sequence counter before every request. */
-static uint16_t g_sequence;
+/* Vendor updater increments one sequence counter before each request. */
+static uint16_t g_sequence = 0;
 
 static uint16_t next_sequence(void) {
     return ++g_sequence;
@@ -78,8 +77,7 @@ static uint16_t next_sequence(void) {
  *   0x00  uint32 LE  Magic (IMBUPD_MAGIC_REQ or IMBUPD_MAGIC_RESP)
  *   0x04  uint32 LE  Opcode
  *   0x08  uint64 LE  Reserved (0, or total size for write-start)
- *   0x10  uint16 LE  Sequence number
- *   0x12  uint16 LE  Padding (0)
+ *   0x10  uint32 LE  Sequence number (counter increments as uint16)
  *   0x14  uint16 LE  Padding (0) / Status in response
  *   0x16  uint16 LE  Packet size (total including header)
  *   0x18  ...        Payload
@@ -108,12 +106,12 @@ static int usb_read(void *buf, int len, int timeout) {
 }
 
 static void build_header(unsigned char *pkt, uint32_t opcode,
-                          uint16_t seq, uint16_t pkt_size) {
+                          uint32_t seq, uint16_t pkt_size) {
     memset(pkt, 0, 0x18);
     uint32_t magic = IMBUPD_MAGIC_REQ;
     memcpy(pkt + 0x00, &magic, 4);
     memcpy(pkt + 0x04, &opcode, 4);
-    memcpy(pkt + 0x10, &seq, 2);
+    memcpy(pkt + 0x10, &seq, 4);
     memcpy(pkt + 0x16, &pkt_size, 2);
 }
 
@@ -148,7 +146,8 @@ static int get_property(const char *name, char *out, int out_size) {
     if (n < 0) return -1;
 
     uint32_t response_opcode;
-    uint16_t response_seq, status;
+    uint32_t response_seq;
+    uint16_t status;
     memcpy(&response_opcode, resp + 0x04, sizeof(response_opcode));
     memcpy(&response_seq, resp + 0x10, sizeof(response_seq));
     memcpy(&status, resp + 0x14, 2);
@@ -157,8 +156,8 @@ static int get_property(const char *name, char *out, int out_size) {
                 name, response_opcode, response_seq, request_seq);
         return -1;
     }
-    if (status == STATUS_ERROR) {
-        fprintf(stderr, "Property '%s': not found\n", name);
+    if (status != STATUS_OK) {
+        fprintf(stderr, "Property '%s': unexpected status 0x%04x\n", name, status);
         return -1;
     }
 
@@ -190,7 +189,8 @@ static int erase_part(const char *part_name) {
     if (n < 0) return -1;
 
     uint32_t response_opcode;
-    uint16_t response_seq, status;
+    uint32_t response_seq;
+    uint16_t status;
     memcpy(&response_opcode, resp + 0x04, sizeof(response_opcode));
     memcpy(&response_seq, resp + 0x10, sizeof(response_seq));
     memcpy(&status, resp + 0x14, 2);
@@ -199,8 +199,8 @@ static int erase_part(const char *part_name) {
                 response_opcode, response_seq, request_seq);
         return -1;
     }
-    if (status == STATUS_ERROR) {
-        fprintf(stderr, "Erase failed for '%s'\n", part_name);
+    if (status != STATUS_OK) {
+        fprintf(stderr, "Erase failed for '%s' (status=0x%04x)\n", part_name, status);
         return -1;
     }
 
@@ -223,9 +223,9 @@ static int validate_data_image(const char *image_path, int *fd_out, off_t *size_
         close(fd);
         return -1;
     }
-    if (st.st_size != EXPECTED_DATA_IMAGE_SIZE) {
-        fprintf(stderr, "Refusing image size %lld; expected exactly %lld bytes (256 MiB).\n",
-                (long long)st.st_size, (long long)EXPECTED_DATA_IMAGE_SIZE);
+    if (st.st_size != DATA_IMAGE_SIZE_64_MIB && st.st_size != DATA_IMAGE_SIZE_256_MIB) {
+        fprintf(stderr, "Refusing image size %lld; expected exactly 64 MiB or 256 MiB.\n",
+                (long long)st.st_size);
         close(fd);
         return -1;
     }
@@ -271,7 +271,8 @@ static int write_part(const char *part_name, int fd, off_t file_size) {
     uint64_t total = (uint64_t)file_size;
     memcpy(start_pkt + 0x08, &total, 8);
     uint16_t s = next_sequence();
-    memcpy(start_pkt + 0x10, &s, 2);
+    uint32_t sequence = s;
+    memcpy(start_pkt + 0x10, &sequence, 4);
     memcpy(start_pkt + 0x16, &start_size, 2);
     /* Partition name at offset 0x28 */
     memcpy(start_pkt + 0x28, part_name, name_len);
@@ -287,7 +288,8 @@ static int write_part(const char *part_name, int fd, off_t file_size) {
         return -1;
     }
     uint32_t response_opcode;
-    uint16_t response_seq, response_status;
+    uint32_t response_seq;
+    uint16_t response_status;
     memcpy(&response_opcode, resp + 0x04, sizeof(response_opcode));
     memcpy(&response_seq, resp + 0x10, sizeof(response_seq));
     memcpy(&response_status, resp + 0x14, sizeof(response_status));
@@ -331,9 +333,11 @@ static int write_part(const char *part_name, int fd, off_t file_size) {
 
     free(chunk);
 
-    /* Send completion: single null byte */
-    unsigned char zero = 0;
-    usb_write(&zero, 1, TIMEOUT_SHORT);
+    /* The vendor updater ends the raw stream with a zero-length bulk OUT transfer. */
+    if (usb_write(NULL, 0, TIMEOUT_SHORT) != 0) {
+        fprintf(stderr, "Could not send the zero-length stream terminator.\n");
+        return -1;
+    }
 
     /* Read final status */
     n = usb_read(resp, sizeof(resp), TIMEOUT_LONG);
@@ -358,7 +362,6 @@ static int do_reboot(void) {
     unsigned char pkt[MAX_PKT];
     unsigned char resp[MAX_PKT];
     uint16_t pkt_size = 0x18 + 4;
-
     printf("Rebooting device...\n");
 
     build_header(pkt, OP_REBOOT, next_sequence(), pkt_size);
@@ -458,8 +461,8 @@ int main(int argc, char **argv) {
 
     } else if (strcmp(argv[1], "write") == 0) {
         /* Safety check: device must be on mains power */
-        char version[64] = {0};
         char power[64] = {0};
+        char version[64] = {0};
         if (get_property("version", version, sizeof(version)) != 0 ||
             strcmp(version, "1.4.2") != 0) {
             fprintf(stderr, "ERROR: Unexpected imbupd protocol version ('%s').\n", version);
