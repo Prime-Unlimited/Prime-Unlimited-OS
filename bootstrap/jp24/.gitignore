@@ -1,0 +1,6 @@
+build/
+*.img
+*.so
+*.pub
+id_ed25519*
+id_rsa*

@@ -17,12 +17,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "pytest-cov>=6", "ruff>=0.8", "pyinstaller>=6.11"]
+jp24 = ["PyUSB>=1.2,<2"]
 
 [project.gui-scripts]
 prime-unlimited-os = "app.main:main"
 
 [tool.setuptools.packages.find]
-include = ["app*", "core*"]
+include = ["app*", "core*", "bootstrap*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
