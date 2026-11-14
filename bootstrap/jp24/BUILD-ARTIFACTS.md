@@ -69,7 +69,10 @@ A pasted Claude-session transcript reports a 64 MiB `/data` write from a Linux V
 - The write-start response echoed sequence 4 and returned status 5. The tool proceeded to stream 67,108,864 bytes in 1 MiB chunks, sent a completion step, then received a final response with sequence 4 and status 1.
 - The transcript reports the unit rebooted normally, with LEDs continuing a running-light pattern. SSH success was not reported.
 
-This trace is strong evidence that status 5 is an accepted write-start/in-progress response for that tool and that the final success response is status 1. The current native writer's `status == 1` check at write start is therefore too strict for this observed flow. The observed request sequence 3 then 4 is consistent with a shared, incrementing connection sequence after two property queries; the current native writer instead used isolated fixed sequence ranges. This explains the rejected start response as a plausible protocol mismatch, but does not establish the exact on-device state or prove this session's transcript is from the current physical device.
+This trace shows status 5 was accepted as the write-start response by the reported tool, followed by final status 1. The native writer's former `status == 1` start check was too strict for this flow. The observed sequence 3 then 4 follows two property queries and matches the vendor's per-connection counter, which starts from zeroed context and increments before each request. The writer has now been changed to query version and power first, use one pre-incrementing sequence counter, and accept status 5 for write start while still requiring matching opcode/sequence and final status 1. This is a code-level change based on the pasted trace, not a hardware-verified repair.
+
+
+The updated writer passed a C syntax-only compilation on the workstation. It has not been run against USB hardware. No new transfer was started by this session.
 
 ### Older local image associated with the pasted path
 
