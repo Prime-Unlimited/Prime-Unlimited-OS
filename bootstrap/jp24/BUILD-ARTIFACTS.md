@@ -4,7 +4,7 @@
 
 - Profile: 256 MiB ext4 image labeled `data`, built from the JP24 payload on the developer workstation.
 - Local path: `bootstrap/jp24/build/prime4-g2-ssh.img` (generated output; not committed or uploaded).
-- SHA-256: `b40124ebb0d930a1a90abb1724caf7836d9f66ef03dfcbc00bafc3f5d0c2480c`.
+- SHA-256: `669d18ef7df9930eb5f01144af43f84548d877ec09d8081fd3ab3b9b9a93294c`.
 - Build inputs included the ALSA hook with constructor activation, `99-prime4-mod.conf`, `boot-activate.sh`, and the installer's Ed25519 public key. No private key is included in the image.
 
 ## Checks performed
@@ -25,8 +25,8 @@ This recorded artifact is 256 MiB. The builder and writer now also accept an exa
 ## Additional local build: 64 MiB profile
 
 - Path: `bootstrap/jp24/build/prime4-g2-ssh-64.img` (generated output; not committed or uploaded).
-- SHA-256: `f48ec3d4e0c450853b1302249021784867341a19378bd87282695a268f8ad693`.
-- The builder completed the ext4 filesystem check and confirmed the `encrypt` feature.
+- SHA-256: `c0fd695de9d7ab28554a8820adb1dc1d5616e18a95481677004b0e3fccddce75`.
+- The builder completed the ext4 filesystem check and confirmed the `encrypt` feature. Both profiles use 4096-byte ext4 blocks, matching the Vault recipe.
 - The same source payload and public SSH key were used as the 256 MiB profile.
 
 The installer and native preflight now allow exactly 64 MiB and 256 MiB images. These are observed working image sizes, not a measurement of maximum `/data` capacity. Neither local artifact has been written to hardware.
