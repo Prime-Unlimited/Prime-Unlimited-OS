@@ -6,7 +6,7 @@ Standalone integration module for the Denon DJ Prime 4 G2 (JP24). It is designed
 
 The module recognizes the imbupd USB transport (`15e4:d014`, interface class `ff/61/7a`) and queries the protocol. A matching VID:PID or protocol version alone identifies only the transport. JP24 identity is accepted only from the exact imbupd product code `JP24`, or from the exact USB manufacturer/product strings `DENON DJ` / `PRIME 4 G2`, together with a successful `1.4.2` protocol response and the expected imbupd interface.
 
-A read-only macOS IORegistry inspection of the connected controller confirmed vendor ID `5604` (`0x15e4`), product ID `53268` (`0xd014`), manufacturer `DENON DJ`, product `PRIME 4 G2`, and the `ff/61/7a` interface signature. No serial number is recorded here. The standalone C query still needs USB access permission to collect protocol properties. Identity evidence by itself does not establish a safe write: the verified `/data` backup and recovery gate remains mandatory.
+A read-only macOS IORegistry inspection of the connected controller confirmed vendor ID `5604` (`0x15e4`), product ID `53268` (`0xd014`), manufacturer `DENON DJ`, product `PRIME 4 G2`, and the `ff/61/7a` interface signature. No serial number is recorded here. The standalone C query still needs USB access permission to collect protocol properties. Before writing, the installer requires explicit acknowledgement that the complete `/data` partition will be replaced; no backup is available.
 
 Hardware query result (2026-11-14; serial omitted): imbupd returned `version: 1.4.2` and `power-source: mains`; the `product` and `serial` properties returned `not found`. The USB descriptor pair independently identifies the connected model, so the missing imbupd product property is not the remaining identity blocker. The current native tool implements partition erase/write, but no `/data` read-back or backup path has been verified.
 
@@ -40,7 +40,7 @@ marker = bootstrap.verify_ssh(
 )
 ```
 
-`flash()` requires verified JP24 identity, mains power, a matching SHA-256, a verified backup/recovery procedure, and an explicit confirmation callback. The native writer separately requires the literal phrase `FLASH JP24 /data`. It writes only the `data` partition and then reboots. Do not connect the callback until the desktop UI has a clear, affirmative confirmation dialog.
+`flash()` requires verified JP24 identity, mains power, a matching SHA-256, an explicit `data_loss_acknowledged` flag, and an explicit confirmation callback. The confirmation text states that no backup exists and the complete `/data` partition will be replaced. The native writer separately requires the literal phrase `FLASH JP24 /data`. It writes only the `data` partition and then reboots.
 
 The native writer accepts only regular ext4 images of exactly 64 MiB or 256 MiB before opening USB or erasing `/data`, holds the same file descriptor for streaming, and requires a valid final device response. These are explicit observed image profiles; imbupd does not report the target partition capacity.
 
@@ -74,7 +74,7 @@ The Vault has two storage notes that need reconciliation: one root-shell summary
 - The Vault records a successful JP24 SSH setup on port 2222 using the ALSA hook and `imbupd` data-image transfer.
 - That does not yet establish a redistributable, independently reproducible Prime-Unlimited bootstrap package.
 - The imbupd query returned version `1.4.2` and mains power; `product` and `serial` were not found. Exact host-visible USB manufacturer/product descriptors independently confirmed the connected unit as JP24.
-- `/data` replacement is destructive. A tested backup and recovery path is still required before production writing is enabled.
+- `/data` replacement is destructive. The raw partition has no backup; the plan and confirmation must record the user's explicit data-loss acknowledgement.
 - The official firmware updater is documented for firmware recovery, but its ability to restore the original `/data` state is unverified.
 - No flash has been run by this module during development.
 
@@ -104,7 +104,7 @@ See [BUILD-ARTIFACTS.md](./BUILD-ARTIFACTS.md) for the local 256 MiB image SHA-2
 
 ### Backup and recovery status from the Vault
 
-The Vault documents no raw `/data` backup or restore procedure. `PC Update Mode - eMMC Zugang.md` says normal `reboot update` enters the proprietary updater, not U-Boot UMS; UMS is only a theoretical route through UART/U-Boot or a boot-failure fallback. `Notfall - Zurück zur Originalfirmware.md` describes the signed-firmware recovery path as expected, but explicitly says restoring `/data` has not been demonstrated. The Vault elsewhere says normal firmware updates leave `/data` untouched, so reinstalling firmware cannot currently be counted on to restore a replaced or damaged `/data`. This is not a verified recovery plan for replacing `/data`. Keep the backup/recovery gate false until a raw backup and a restore path are proven on this JP24.
+The Vault documents no raw `/data` backup or restore procedure. `PC Update Mode - eMMC Zugang.md` says normal `reboot update` enters the proprietary updater, not U-Boot UMS; UMS is only a theoretical route through UART/U-Boot or a boot-failure fallback. `Notfall - Zurück zur Originalfirmware.md` describes the signed-firmware recovery path as expected, but explicitly says restoring `/data` has not been demonstrated. The Vault elsewhere says normal firmware updates leave `/data` untouched, so reinstalling firmware cannot currently be counted on to restore a replaced or damaged `/data`. This is not a verified recovery plan for replacing `/data`. Proceeding therefore carries accepted data loss without a verified `/data` recovery route.
 
 
 ### Original firmware package inspection
