@@ -97,3 +97,6 @@ The current JP24 payload declares both hook function names and both version stri
 The report also gives an example 64 MiB ext4 image recipe (`16384 × 4096-byte blocks`) transferred to `data` using Firmware Update Mode. This is a separate successful hardware report and is useful evidence, but it does not measure the partition's maximum capacity. It does not resolve the conflicting 56 MB versus 256 MiB records already noted above. Keep the write path disabled until capacity, backup, and recovery are established. The example SSH command disables host-key checking; this project must continue to pin a verified host key instead.
 
 References: [EngineX hook implementation](https://github.com/Cd1s/EngineX-OS/blob/main/tools/ui-mod/engine_ui_hook.c); [JP24 ALSA hook](./payload/alsa-boot-hook.c); [JP24 activation script](./payload/boot-activate.sh).
+
+
+See [BUILD-ARTIFACTS.md](./BUILD-ARTIFACTS.md) for the local 256 MiB image SHA-256 and the offline ELF/filesystem checks performed on the generated artifact. The image itself is intentionally not committed.
