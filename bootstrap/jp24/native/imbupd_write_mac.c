@@ -26,6 +26,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <sys/stat.h>
 #include <libusb.h>
 
 /* USB device identifiers */
@@ -59,6 +60,7 @@
 /* Reboot payload magic */
 #define REBOOT_MAGIC     0xA55A0101
 #define WRITE_CONFIRMATION "FLASH JP24 /data"
+#define EXPECTED_DATA_IMAGE_SIZE ((off_t)256 * 1024 * 1024)
 
 static libusb_device_handle *g_dev;
 
@@ -183,25 +185,46 @@ static int erase_part(const char *part_name) {
     return 0;
 }
 
-/* Write an image file to a partition */
-static int write_part(const char *part_name, const char *image_path) {
-    int fd = open(image_path, O_RDONLY);
+/* Validate the complete image before USB is opened or data is erased. */
+static int validate_data_image(const char *image_path, int *fd_out, off_t *size_out) {
+    int fd = open(image_path, O_RDONLY | O_NOFOLLOW);
     if (fd < 0) {
         perror(image_path);
         return -1;
     }
-
-    off_t file_size = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-
-    if (file_size <= 0) {
-        fprintf(stderr, "Empty image file\n");
+    struct stat st;
+    unsigned char ext4_magic[2];
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        fprintf(stderr, "Image must be a regular file.\n");
         close(fd);
         return -1;
     }
+    if (st.st_size != EXPECTED_DATA_IMAGE_SIZE) {
+        fprintf(stderr, "Refusing image size %lld; expected exactly %lld bytes (256 MiB).\n",
+                (long long)st.st_size, (long long)EXPECTED_DATA_IMAGE_SIZE);
+        close(fd);
+        return -1;
+    }
+    if (pread(fd, ext4_magic, sizeof(ext4_magic), 1080) != (ssize_t)sizeof(ext4_magic) ||
+        ext4_magic[0] != 0x53 || ext4_magic[1] != 0xEF) {
+        fprintf(stderr, "Image does not have the expected ext4 superblock magic.\n");
+        close(fd);
+        return -1;
+    }
+    if (lseek(fd, 0, SEEK_SET) < 0) {
+        perror("lseek image");
+        close(fd);
+        return -1;
+    }
+    *fd_out = fd;
+    *size_out = st.st_size;
+    return 0;
+}
 
+/* Write a prevalidated, already-open image file to a partition. */
+static int write_part(const char *part_name, int fd, off_t file_size) {
     printf("Writing '%s' to partition '%s' (%lld bytes)...\n",
-           image_path, part_name, (long long)file_size);
+           "validated image", part_name, (long long)file_size);
 
     /* Send write-start header: opcode WRITE_PART, total size at 0x08,
        partition name at 0x28 (header is 0x28 bytes for write-start) */
@@ -225,20 +248,29 @@ static int write_part(const char *part_name, const char *image_path) {
     memcpy(start_pkt + 0x28, part_name, name_len);
 
     unsigned char resp[MAX_PKT];
-    if (usb_write(start_pkt, start_size, TIMEOUT_SHORT) < 0) {
-        close(fd);
+    if (usb_write(start_pkt, start_size, TIMEOUT_SHORT) != start_size) {
+        fprintf(stderr, "Short USB write for write-start packet.\n");
         return -1;
     }
     int n = usb_read(resp, sizeof(resp), TIMEOUT_LONG);
     if (n < 0x18) {
         fprintf(stderr, "No response to write-start\n");
-        close(fd);
+        return -1;
+    }
+    uint32_t response_opcode;
+    uint16_t response_seq, response_status;
+    memcpy(&response_opcode, resp + 0x04, sizeof(response_opcode));
+    memcpy(&response_seq, resp + 0x10, sizeof(response_seq));
+    memcpy(&response_status, resp + 0x14, sizeof(response_status));
+    if (memcmp(resp, IMBUPD_MAGIC_RESP, 4) != 0 || response_opcode != OP_WRITE_PART ||
+        response_seq != s || response_status == STATUS_ERROR) {
+        fprintf(stderr, "Device rejected or mismatched write-start response.\n");
         return -1;
     }
 
     /* Stream data in CHUNK_SIZE chunks */
     unsigned char *chunk = malloc(CHUNK_SIZE);
-    if (!chunk) { close(fd); return -1; }
+        if (!chunk) return -1;
 
     off_t written = 0;
     while (written < file_size) {
@@ -250,13 +282,12 @@ static int write_part(const char *part_name, const char *image_path) {
         if (rd <= 0) {
             fprintf(stderr, "Read error at offset %lld\n", (long long)written);
             free(chunk);
-            close(fd);
             return -1;
         }
 
-        if (usb_write(chunk, rd, TIMEOUT_LONG) < 0) {
+        if (usb_write(chunk, rd, TIMEOUT_LONG) != rd) {
+            fprintf(stderr, "Short USB write while streaming image.\n");
             free(chunk);
-            close(fd);
             return -1;
         }
 
@@ -269,7 +300,6 @@ static int write_part(const char *part_name, const char *image_path) {
     printf("\n");
 
     free(chunk);
-    close(fd);
 
     /* Send completion: single null byte */
     unsigned char zero = 0;
@@ -277,13 +307,16 @@ static int write_part(const char *part_name, const char *image_path) {
 
     /* Read final status */
     n = usb_read(resp, sizeof(resp), TIMEOUT_LONG);
-    if (n >= 0x18) {
-        uint16_t status;
-        memcpy(&status, resp + 0x14, 2);
-        if (status == STATUS_ERROR) {
-            fprintf(stderr, "Write failed!\n");
-            return -1;
-        }
+    if (n < 0x18 || memcmp(resp, IMBUPD_MAGIC_RESP, 4) != 0) {
+        fprintf(stderr, "Missing or invalid final write response.\n");
+        return -1;
+    }
+    memcpy(&response_opcode, resp + 0x04, sizeof(response_opcode));
+    memcpy(&response_seq, resp + 0x10, sizeof(response_seq));
+    memcpy(&response_status, resp + 0x14, sizeof(response_status));
+    if (response_opcode != OP_WRITE_PART || response_seq != s || response_status != STATUS_OK) {
+        fprintf(stderr, "Device did not confirm the completed write.\n");
+        return -1;
     }
 
     printf("Write complete.\n");
@@ -347,9 +380,16 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    int image_fd = -1;
+    off_t image_size = 0;
+    if (strcmp(argv[1], "write") == 0 &&
+        validate_data_image(argv[3], &image_fd, &image_size) != 0)
+        return 1;
+
     int r = libusb_init(NULL);
     if (r != 0) {
         fprintf(stderr, "libusb_init failed: %s\n", libusb_strerror(r));
+        if (image_fd >= 0) close(image_fd);
         return 1;
     }
 
@@ -358,6 +398,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Device not found (VID=%04x PID=%04x).\n", VID, PID);
         fprintf(stderr, "Is the Prime 4 G2 in Firmware Update Mode?\n");
         libusb_exit(NULL);
+        if (image_fd >= 0) close(image_fd);
         return 1;
     }
 
@@ -368,6 +409,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Cannot claim interface: %s\n", libusb_strerror(r));
         libusb_close(g_dev);
         libusb_exit(NULL);
+        if (image_fd >= 0) close(image_fd);
         return 1;
     }
 
@@ -396,7 +438,7 @@ int main(int argc, char **argv) {
         } else {
             ret = erase_part("data");
             if (ret == 0)
-                ret = write_part("data", argv[3]);
+                ret = write_part("data", image_fd, image_size);
         }
 
     } else if (strcmp(argv[1], "reboot") == 0) {
@@ -410,5 +452,6 @@ int main(int argc, char **argv) {
     libusb_release_interface(g_dev, 0);
     libusb_close(g_dev);
     libusb_exit(NULL);
+    if (image_fd >= 0) close(image_fd);
     return ret;
 }
