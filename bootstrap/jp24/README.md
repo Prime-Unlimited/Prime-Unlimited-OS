@@ -10,6 +10,8 @@ A read-only macOS IORegistry inspection of the connected controller confirmed ve
 
 Hardware query result (2026-11-14; serial omitted): imbupd returned `version: 1.4.2` and `power-source: mains`; the `product` and `serial` properties returned `not found`. The USB descriptor pair independently identifies the connected model, so the missing imbupd product property is not the remaining identity blocker. The current native tool implements partition erase/write, but no `/data` read-back or backup path has been verified.
 
+The [Denon DJ PRIME 4 G2 FAQ](https://support.denondj.com/en/support/solutions/articles/69000882239-prime-4-g2-frequently-asked-questions) says its computer-based Firmware Update Mode can be used for advanced troubleshooting or recovery from a failed firmware update. It does not document restoring a raw `/data` partition. Therefore official firmware reinstall is a possible system-recovery route, not a verified `/data` backup/recovery plan.
+
 This is a known blocker, not an installer option that can be overridden by manual selection.
 
 ## Module interface
@@ -63,4 +65,5 @@ The image builder validates the public-key format, expected paths, ext4 health, 
 - That does not yet establish a redistributable, independently reproducible Prime-Unlimited bootstrap package.
 - The imbupd query returned version `1.4.2` and mains power; `product` and `serial` were not found. Exact host-visible USB manufacturer/product descriptors independently confirmed the connected unit as JP24.
 - `/data` replacement is destructive. A tested backup and recovery path is still required before production writing is enabled.
+- The official firmware updater is documented for firmware recovery, but its ability to restore the original `/data` state is unverified.
 - No flash has been run by this module during development.
