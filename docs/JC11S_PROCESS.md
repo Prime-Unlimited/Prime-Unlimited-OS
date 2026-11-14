@@ -1,36 +1,36 @@
-# Prime Unlimited OS — Prime 4+ (JC11S) Prozessdokumentation
+# Prime Unlimited OS — Prime 4+ (JC11S) Process Documentation
 
-**Stand:** 14.11.2026 · **Status:** Technische Bestandsaufnahme, **keine freigegebene Installationsanleitung**.
+**Updated:** November 14, 2026 · **Status:** Technical record, **not a production-ready installation guide**.
 
-## 1. Ziel und Geltungsbereich
+## 1. Purpose and scope
 
-Dieses Dokument hält die bisherige Arbeit am Denon DJ Prime 4+ (JC11S) fest: Fastboot-Zugang, `/data`-Image, PRIMEBOMB V1–V4, Testergebnisse, späterer erfolgreicher SSH-Zugang über EngineX OS und die Voraussetzungen für einen reproduzierbaren Prime-Unlimited-OS-Installer.
+This document records the work performed on the Denon DJ Prime 4+ (JC11S): Fastboot access, the ext4 `/data` image, PRIMEBOMB V1–V4 experiments, observed results, the later successful SSH access using EngineX OS, and prerequisites for a reproducible Prime Unlimited OS installer.
 
-**Beweisgrenze:** Die alte PRIMEBOMB-Payload hat SSH in keinem der vier dokumentierten Versuche nachweislich aktiviert. Der später erfolgreiche EngineX-Zugang ist separat zu betrachten. Die exakten Änderungen, mit denen EngineX auf JC11S installiert wurde, liegen in der vorliegenden historischen V1–V4-Dokumentation nicht vor.
+**Evidence boundary:** None of the four original PRIMEBOMB builds demonstrably enabled SSH. The subsequent working EngineX installation is a separate development phase. The original V1–V4 report did not document the exact EngineX adaptation steps; a separate successful-installation report is available and should be retained as a primary reference.
 
-## 2. Hardware und Fastboot
+## 2. Hardware and Fastboot
 
-| Merkmal | Dokumentierter Wert |
+| Property | Recorded value |
 |---|---|
-| Gerät | Denon DJ Prime 4+ |
-| Gerätefamilie | JC11S |
+| Device | Denon DJ Prime 4+ |
+| Board family | JC11S |
 | SoC | Rockchip RK3288 |
-| Architektur | ARMv7 / ARM32 |
-| Ausgangs-Firmware der V1–V4-Versuche | Engine OS 5.0.4 |
-| Später gemeldete Firmware | Engine OS 5.3.0; EngineX-Weboberfläche v5.3.0.2 |
-| Fastboot-Seriennummer des Testgeräts | A12506258617421 |
-| Slot | a |
-| Fastboot-Modus | Bootloader, `is-userspace: no` |
-| Partition | `data`, ext4 |
-| Partitionsgröße | 2.413.280.768 Byte (`0x8fd7be00`) |
-| Fastboot auf WSL2 | 34.0.5-debian |
-| Test-Image | 2.306.867.200 Byte (2.200 MiB), Label `az01-data` |
+| Architecture | ARMv7 / ARM32 |
+| Firmware during V1–V4 experiments | Engine OS 5.0.4 |
+| Later reported firmware | Engine OS 5.3.0; EngineX web interface v5.3.0.2 |
+| Test device Fastboot serial | A12506258617421 |
+| Active slot | a |
+| Fastboot mode | Bootloader; `is-userspace: no` |
+| Target partition | `data`, ext4 |
+| Reported partition size | 2,413,280,768 bytes (`0x8fd7be00`) |
+| Fastboot version under WSL2 | 34.0.5-debian |
+| Original experimental image | 2,306,867,200 bytes (2,200 MiB), label `az01-data` |
 
-Der Fastboot-Modus wurde laut Versuchsprotokoll beim Einschalten mit **SHIFT + EJECT auf der rechten Deckseite** erreicht. Das ist ein historischer Gerätebefund, keine allgemeine Zusage für alle Firmwarestände.
+The experiment log reports entering Fastboot by holding **SHIFT + EJECT on the right deck while powering on**. This is a device-specific observation, not a guarantee for every firmware release.
 
-Die Seriennummer identifiziert **ein einzelnes Testgerät** und ist **keine Modellkennung**. Der spätere Installer muss mehrere echte Fastboot-Identifikatoren auswerten und bei Unklarheit abbrechen. Die konkrete `getvar product`-Ausgabe wurde noch nicht dokumentiert.
+The serial number identifies one test unit, **not** a model. The installer must verify genuine device identifiers and refuse ambiguous devices. A definitive `fastboot getvar product` response has not yet been recorded.
 
-### Diagnostische, nicht schreibende Fastboot-Abfragen
+### Read-only Fastboot diagnostics
 
 ```sh
 fastboot devices
@@ -41,161 +41,166 @@ fastboot getvar partition-type:data
 fastboot getvar partition-size:data
 ```
 
-Die Ausgabe von `getvar all` kann Seriennummern und andere Geräteinformationen enthalten; vor Veröffentlichung redigieren. Die Abfragen allein sichern **keine** Partition.
+Fastboot may write results to stderr. Redact serial numbers and other device-specific identifiers before publishing diagnostic logs. These commands do **not** back up any partition.
 
-## 3. Arbeitsumgebung und Ausgangsimage
+## 3. Build environment and original working image
 
-Die historischen Versuche wurden unter **WSL2 Ubuntu** mit Fastboot, ext4-Werkzeugen, `debugfs` und `e2fsck` durchgeführt. Das Arbeitsimage hieß `work/data-jc11s.img` und war ein 2.200-MiB-ext4-Image. Es ist **kein Originalbackup** des Prime.
+The historical tests used **Ubuntu under WSL2**, Fastboot, ext4 utilities, `debugfs`, and `e2fsck`. The working file was `work/data-jc11s.img`, a 2,200-MiB ext4 image. It was **not a factory backup**.
 
-Ein `fastboot fetch data` war mit der eingesetzten Umgebung nicht verfügbar. Es liegt kein verifiziertes vollständiges Original-`/data`-Backup vor. **Ein Flash von `data` kann Einstellungen, WLAN-Konfiguration und weitere lokale Daten überschreiben.**
+`fastboot fetch data` was unsupported in the tested setup. No verified full original `/data` backup or recovery procedure existed. **Flashing `data` can erase settings, Wi-Fi configuration, library metadata, and other local content.** A separate music SSD does not protect the `/data` partition.
 
-Vor einer späteren öffentlichen Installation sind Backup, Recovery und Dateisystemprüfung Pflicht. Die externe Musik-SSD ist kein Ersatz für ein Backup der `data`-Partition.
+A validated backup and recovery procedure is a release blocker for an unattended or public installer.
 
-## 4. Boot-, Mount- und Overlay-Mechanismus
+## 4. Boot, mount, and overlay sequence
 
-Aus der früheren Firmwareanalyse:
+The earlier firmware investigation indicated the following order:
 
-1. `az0x-data-mkfs.service` läuft vor dem Mount von `/data`.
-2. `data.mount` stellt `/data` bereit.
-3. `overlayfs-setup.service` benötigt `/data`.
-4. `/etc` wird als Overlay mit Upperdir `/data/system/etc/overlay` eingebunden.
-5. Neue Unit-Dateien im Overlay sind möglicherweise erst sichtbar, nachdem systemd bereits Teile seiner Abhängigkeiten geladen hat.
+1. `az0x-data-mkfs.service` runs before the `/data` mount.
+2. `data.mount` makes `/data` available.
+3. `overlayfs-setup.service` depends on `/data`.
+4. `/etc` is overlaid using upperdir `/data/system/etc/overlay`.
+5. New systemd unit files in that overlay may become visible **after** systemd has already loaded some dependency information.
 
-Ein `systemctl daemon-reload` nach dem Overlay-Mount war in der unveränderten Firmware nicht nachgewiesen. Diese Reihenfolge ist eine wesentliche Fehlerhypothese, **keine bestätigte Ursache** für die späteren WLAN-Probleme.
+A `systemctl daemon-reload` following the overlay mount was not established for the stock firmware. This timing is a plausible explanation for failed activation, **not a proven root cause** of the later Wi-Fi regressions.
 
-## 5. Ursprüngliche PRIMEBOMB-Payload
+## 5. Original PRIMEBOMB payload
 
-Die statische Prüfung des Arbeitsimages dokumentierte:
+Static examination of the experimental image found:
 
-| Datei / Komponente | Funktion |
+| File or component | Intended purpose |
 |---|---|
-| `/ssh/freemymprime.so` | ARM32-Preload-Bibliothek, Modus 0755 |
-| `/ssh/setup.sh` | Einrichtungs- und Startskript, Modus 0755 |
-| `/ssh/sshd_config` | SSH-Konfiguration |
-| `/ssh/authorized_keys` | Public Keys für SSH-Login |
-| `/system/etc/overlay/ld.so.preload` | Verweis auf `/data/ssh/freemymprime.so` |
-| `freemymprime.service` | Dienst mit Boot-Symlink |
+| `/ssh/freemymprime.so` | ARM32 preload library, mode 0755 |
+| `/ssh/setup.sh` | Setup and launch script, mode 0755 |
+| `/ssh/sshd_config` | SSH server configuration |
+| `/ssh/authorized_keys` | Allowed SSH public keys |
+| `/system/etc/overlay/ld.so.preload` | References `/data/ssh/freemymprime.so` |
+| `freemymprime.service` | Service with boot-time symlink |
 
-Die Preload-Bibliothek sollte einen Marker setzen, protokollieren, forken und `/data/ssh/setup.sh` starten. **Ihre tatsächliche Ausführung wurde nie belegt.** Der Marker wurde vor erfolgreichem `exec` gesetzt und hätte allein keinen Erfolg bewiesen.
+The preload constructor was intended to set a marker, log, fork, and run `/data/ssh/setup.sh`. **Actual execution on the device was never verified.** The marker was set before successful `exec`, so its existence alone would not have proved the setup script ran.
 
-Das Setup sollte einen SSH-Host-Key erzeugen, einen Root-Passworthash setzen und SSH starten. Historisch waren außerdem ein ungeschützter Telnet-Fallback auf TCP 2323 und ein HTTP-Server auf TCP 8080 mit `/data` als Dokumentwurzel vorgesehen. **Beide Fallbacks sind für eine öffentliche Version ungeeignet und dürfen nicht übernommen werden.** Auch ein festes Root-Testpasswort darf nicht in einen öffentlichen Installer.
+The setup attempted to generate a server host key, modify the root password hash, and start SSH. Historical debug fallbacks included unauthenticated BusyBox Telnet on TCP 2323 and an HTTP server exposing `/data` on TCP 8080. **These are unsafe for public distribution and must not be included in Prime Unlimited OS.** The historical fixed root test password must likewise never be shipped.
 
-## 6. Vollständige Versionschronik V1–V4
+## 6. Experimental version history
 
-### V1 — direkter SSH-Start
+### V1 — direct SSH startup
 
-- Ausgangsimage mit Preload, Setup, SSH-Konfiguration und Passwortlogin.
-- Setup versuchte `/usr/sbin/sshd -f /data/ssh/sshd_config` direkt zu starten.
-- Image-SHA-256 (vor V2 gemessen): `0eaebfea606f0b8875de10504002d5d0df38a7c0e43ad1a4ff7fcd8c2d942a2a`.
-- Fastboot: Sparse 1/1, 1.836 KB; Schreiben 71,420 s; Gesamt 72,734 s; `OKAY`.
-- AVB-Warnung enthielt den unplausiblen Wert `140730698971296`.
-- **Ergebnis:** Engine OS startete; WLAN-IP `192.168.178.67`; TCP 22, 2323 und 8080 wurden abgewiesen. Kein SSH-Nachweis.
+- Initial image with preload library, setup script, SSH configuration, and password login.
+- Setup tried to execute `/usr/sbin/sshd -f /data/ssh/sshd_config` directly.
+- SHA-256 measured before V2: `0eaebfea606f0b8875de10504002d5d0df38a7c0e43ad1a4ff7fcd8c2d942a2a`.
+- Fastboot: sparse 1/1, 1,836 KB; write 71.420 seconds; total 72.734 seconds; `OKAY`.
+- Unexplained AVB warning included the implausible value `140730698971296`.
+- **Result:** Engine OS booted, Wi-Fi address `192.168.178.67`; TCP ports 22, 2323, and 8080 refused connections. No evidence of working SSH.
 
-### V2 — systemd-Reload und Dienst-Restart
+### V2 — systemd reload and service restart
 
-- Ausgangspunkt: Kopie von V1; erhaltene V1-Kopie ist **kein** Originalbackup.
-- Setup rief zuerst `systemctl daemon-reload`, dann `systemctl restart sshd.service` auf; direkter SSH-Start als Fallback.
-- Overlay-Drop-in: `/etc/systemd/system/sshd.service.d/10-freemymprime.conf` mit `ExecStart=/usr/sbin/sshd -D -f /data/ssh/sshd_config`.
-- **Kein** zusätzlicher Boot-Wants-Symlink für `sshd.service`.
-- Ein fehlerhafter `debugfs`-Ersetzungsversuch hinterließ zunächst ein 75-Byte-`setup.sh`; vor dem Flash erkannt und durch Neuaufbau behoben.
-- Geprüftes Setup: 1.860 Byte, Modus 0755; Drop-in: 75 Byte, Modus 0644.
-- `e2fsck -fn`: ohne Fehler; Image 2.306.867.200 Byte.
-- Fastboot: Sparse 1/1, 1.844 KB; Schreiben 67,420 s; Gesamt 68,075 s; `OKAY`.
-- AVB-Warnwert `140733051970544`.
-- **Ergebnis:** WLAN erreichbar, TCP 22/2323/8080 abgewiesen. Kein SSH-Nachweis. Nach Rückflash von V3 auf V2 war WLAN wieder bedienbar.
+- Built from a copy of V1; the preserved V1 copy was **not** a factory backup.
+- Setup first called `systemctl daemon-reload`, then `systemctl restart sshd.service`; direct SSH startup remained as a fallback.
+- Overlay drop-in `/etc/systemd/system/sshd.service.d/10-freemymprime.conf` set `ExecStart=/usr/sbin/sshd -D -f /data/ssh/sshd_config`.
+- No additional boot `multi-user.target.wants` symlink for `sshd.service` was included.
+- A failed `debugfs` replacement attempt temporarily produced a 75-byte `setup.sh`; the error was caught and corrected **before flashing** by rebuilding the image.
+- Verified setup script: 1,860 bytes, mode 0755. Drop-in: 75 bytes, mode 0644.
+- `e2fsck -fn`: clean. Image: 2,306,867,200 bytes.
+- Fastboot: sparse 1/1, 1,844 KB; write 67.420 seconds; total 68.075 seconds; `OKAY`.
+- AVB warning value: `140733051970544`.
+- **Result:** Wi-Fi remained available, but TCP ports 22, 2323, and 8080 refused connections. No working SSH. A later rollback from V3 to V2 restored Wi-Fi operation.
 
-### V3 — Boot-Symlink, Unit-Kopie und Host-Key
+### V3 — systemd boot symlink, unit copy, and host key
 
-- Übernahme der `sshd.service`-Unit in das Overlay.
-- Boot-Symlink: `multi-user.target.wants/sshd.service -> /etc/systemd/system/sshd.service`.
-- Unter WSL generierter SSH-**Host**-Key unter `/ssh/ssh_host_ed25519_key`, Modus 0600 (kein Client-Login-Key).
-- V2-Drop-in und `systemctl restart` blieben.
-- Unit: 356 Byte, Modus 0644; Host-Key: 411 Byte, Modus 0600.
-- `e2fsck -fn`: ohne Fehler.
+- Added a copy of the firmware's `sshd.service` to the overlay.
+- Added `multi-user.target.wants/sshd.service -> /etc/systemd/system/sshd.service`.
+- Generated an SSH **server host key** on WSL and installed it at `/ssh/ssh_host_ed25519_key`, mode 0600. This was **not** the client login key.
+- Retained the V2 drop-in and `systemctl restart`.
+- Unit: 356 bytes, mode 0644. Host key: 411 bytes, mode 0600.
+- `e2fsck -fn`: clean.
 - SHA-256: `96fe223eab4898858da3631180328b7b722f17eaedeacd846377b5580c4c0523`.
-- Fastboot: Sparse 1/1, 1.856 KB; Schreiben 67,171 s; Gesamt 68,075 s; `OKAY`.
-- AVB-Warnwert `140731954370624`.
-- **Ergebnis:** WLAN-Schalter nach Boot nicht bedienbar. `.67:22` „No route to host“, `.107:22` Timeout. SSH-Status mangels Netzwerk nicht feststellbar. Nach Rückflash auf V2 WLAN wieder funktionsfähig.
+- Fastboot: sparse 1/1, 1,856 KB; write 67.171 seconds; total 68.075 seconds; `OKAY`.
+- AVB warning value: `140731954370624`.
+- **Result:** Wi-Fi toggle could no longer be enabled. SSH at `.67:22` returned “No route to host”; `.107:22` timed out. The server state could not be established without network access. Flashing V2 again restored Wi-Fi.
 
-### V4 — Start statt Restart
+### V4 — start instead of restart
 
-- Frischer Neuaufbau aus V2 mit Unit, Boot-Symlink, Drop-in und Host-Key wie V3.
-- Im Setup `systemctl restart sshd.service` durch `systemctl start sshd.service` ersetzt.
-- Historische Konfiguration: `PasswordAuthentication yes`, `PermitRootLogin yes`, `AuthorizedKeysFile /data/ssh/authorized_keys`.
-- `debugfs` meldete bei mehreren Ersetzungsversuchen „Ext2 file already exists“; danach frischer Aufbau in einer Python-gesteuerten `debugfs`-Sitzung.
-- Geprüftes Setup: 1.858 Byte, Modus 0755; Host-Key: 411 Byte, Modus 0600.
-- `e2fsck -fn`: ohne Fehler; Image 2.306.867.200 Byte.
-- Fastboot: Sparse 1/1, 1.856 KB; Schreiben 66,985 s; Gesamt 68,202 s; `OKAY`.
-- AVB-Warnwert `140721357274304`; keine SHA-256-Prüfsumme protokolliert.
-- **Ergebnis:** WLAN erneut nicht einschaltbar, SSH auf `.107:22` Timeout. Der Wechsel von `restart` auf `start` behob die Regression nicht.
+- Rebuilt from V2 with the same unit, symlink, drop-in, and host key as V3.
+- Changed `systemctl restart sshd.service` to `systemctl start sshd.service` in the setup script.
+- Historical settings still included `PasswordAuthentication yes`, `PermitRootLogin yes`, and `AuthorizedKeysFile /data/ssh/authorized_keys`.
+- Several `debugfs` replacement attempts reported “Ext2 file already exists”; the image was subsequently rebuilt in a Python-driven `debugfs` session.
+- Verified setup: 1,858 bytes, mode 0755; host key: 411 bytes, mode 0600.
+- `e2fsck -fn`: clean; image: 2,306,867,200 bytes.
+- Fastboot: sparse 1/1, 1,856 KB; write 66.985 seconds; total 68.202 seconds; `OKAY`.
+- AVB warning value: `140721357274304`. No V4 SHA-256 was recorded.
+- **Result:** Wi-Fi toggle remained unusable and SSH to `.107:22` timed out. Replacing `restart` with `start` did not fix the regression.
 
-### Vergleich
+### Comparison
 
-| Version | WLAN | SSH | Bewertung |
+| Version | Wi-Fi after boot | SSH result | Assessment |
 |---|---|---|---|
-| V1 | erreichbar | Port 22 abgewiesen | fehlgeschlagen |
-| V2 | erreichbar | Port 22 abgewiesen | Netzwerk-Baseline, kein SSH |
-| V3 | WLAN-Schalter defekt | nicht beurteilbar | Regression |
-| V4 | WLAN-Schalter defekt | nicht beurteilbar | Regression |
+| V1 | Available | Port 22 refused | SSH not enabled |
+| V2 | Available | Port 22 refused | Network baseline only |
+| V3 | Wi-Fi toggle unusable | Inconclusive without network | Regression |
+| V4 | Wi-Fi toggle unusable | Timed out | Regression persisted |
 
-**Wichtig:** Ein `fastboot flash data` mit `OKAY` belegt lediglich den gemeldeten Schreibvorgang, nicht die Funktion der Payload nach dem Boot.
+**Important:** Fastboot reporting `OKAY` confirms a reported write operation; it does **not** prove that a boot payload ran successfully.
 
-## 7. Späterer erfolgreicher SSH-Zugang (getrennte Entwicklungsphase)
+## 7. Later successful EngineX SSH installation — separate phase
 
-In einer späteren Sitzung wurde EngineX OS auf dem JC11S-Gerät erfolgreich gestartet. Beobachtungen:
+A later installation of EngineX OS on JC11S produced the following confirmed observations:
 
-- SSH-Login als `root` mit privatem Client-Schlüssel gelang.
-- Beispiel der protokollierten Anmeldung (IP nur als historischer LAN-Wert):
+- Root SSH login with a private Ed25519 client key succeeded.
+- Historical example, using the device's temporary LAN address:
+
   ```sh
   ssh -i ~/.ssh/enginex_prime4plus root@192.168.178.67
   ```
-- Prompt nach Login: `root@prime4plus:~#`.
-- EngineX-Weboberfläche war unter `http://192.168.178.67:8080` erreichbar und zeigte `v5.3.0.2`.
-- USB-Speicher und Musikbibliothek wurden im Webinterface angezeigt.
 
-**Nicht belegt:** vollständige Flash-Kommandofolge, exakte Ausgangsimages, EngineX-Patches für JC11S, SSH-Autostart-Mechanismus, Lizenz- und Redistributionsrechte. Deshalb ist daraus derzeit **noch kein reproduzierbarer Prime-Unlimited-Fastboot-Installer** ableitbar.
+- Shell prompt: `root@prime4plus:~#`.
+- Web interface: `http://192.168.178.67:8080`, version `v5.3.0.2`.
+- EngineX services and UI behavior were observed during the successful session.
 
-## 8. Technische Risiken und Sicherheitsentscheidungen
+**Important distinction:** The dedicated *EngineXPRIME4PLUS.md* installation report documents the successful image creation, diagnostic repairs, and actual flashed image `userdata-diagnose.img` in more detail. Its later cleaned end-to-end procedure was **not independently rerun** as a fresh installation. The historical V1–V4 attempts must not be presented as the working EngineX procedure.
 
-1. `/data` überschreiben ist potenziell destruktiv. Ohne validiertes Backup und Recovery kein unbeaufsichtigter Flash.
-2. Kein eingebautes gemeinsames Root-Passwort; stattdessen individuelle SSH-Ed25519-Schlüssel.
-3. Private SSH-Schlüssel bleiben auf dem Benutzerrechner; nur der öffentliche Schlüssel wird übertragen.
-4. Kein unauthentifizierter Telnet- oder HTTP-Fallback.
-5. Keine proprietären Firmware-Images, geheimen Schlüssel oder fremden Binärdateien ohne Rechteklärung im öffentlichen Repo.
-6. Firmware-, Geräte- und Partitionsidentität vor jeder Installation verifizieren; unbekannte Geräte sperren.
-7. Jede Mod mit Version, Kompatibilität, Integritätsprüfung und Deinstallations-/Rollback-Strategie dokumentieren.
-8. WLAN, normaler Engine-OS-Start, Musikbibliothek und SSH müssen nach Installation separat getestet werden.
+Do not assume upstream EngineX binaries or Denon firmware can be redistributed without checking licenses and permissions.
 
-## 9. Anforderungen an den zukünftigen Windows-/macOS-Installer
+## 8. Security and recovery decisions
 
-Geplanter Ablauf (Design, **nicht implementiert**):
+1. Flashing `/data` can destroy local content. No unattended flash without validated backup and recovery.
+2. SSH is **mandatory** for the Prime Unlimited OS bootstrap and cannot be skipped.
+3. Use per-user Ed25519 keys; keep private keys on the host and inject only public keys.
+4. Do not ship shared root passwords, unauthenticated Telnet, or public debug HTTP servers.
+5. Never commit proprietary firmware, third-party binaries without permission, private keys, or credentials.
+6. Verify firmware, device identity, partition layout, and image integrity before any write; refuse unknown devices.
+7. Test normal Engine OS boot, Wi-Fi, music library, and authenticated SSH independently.
+8. Subsequent mod deployment uses SSH/SFTP rather than reflashing `/data` whenever the mod permits it.
 
-1. Fastboot-Gerät erkennen und genau eine unterstützte Gerätekennung bestätigen.
-2. JC11S oder JP24 anhand verifizierter Eigenschaften auswählen; nie anhand der Seriennummer oder nur der Partitionsgröße.
-3. Firmwareversion, Partitionslayout und freien Zielbereich prüfen.
-4. Backup und Wiederherstellbarkeit prüfen; Risiken klar anzeigen.
-5. Individuelles Ed25519-Schlüsselpaar erzeugen oder vorhandenen Public Key übernehmen.
-6. Ausschließlich gerätespezifische, getestete Dateien aus einem nachvollziehbaren Build bereitstellen.
-7. Image vor Flash statisch prüfen (Dateisystem, Dateirechte, Hash, erwartete Pfade).
-8. Flash erst nach ausdrücklicher Bestätigung und bestandenen Sicherheitsprüfungen.
-9. Nach Reboot WLAN, SSH-Key-Login und reguläre Engine-Funktionen verifizieren.
-10. Installationsprotokoll und diagnostische Informationen ohne Geheimnisse speichern.
+## 9. Windows/macOS installer requirements
 
-## 10. Noch zu beschaffende Daten
+**Proposed design; not yet implemented:**
 
-- [ ] Vollständige, bereinigte `fastboot getvar all`-Ausgabe des JC11S.
-- [ ] Exakte Fastboot-/Build-Schritte der **erfolgreichen** EngineX-Installation.
-- [ ] Rechtlich nutzbare SSH-Payload bzw. eigenständige Implementierung.
-- [ ] Verifizierter Backup- und Recovery-Weg für `/data`.
-- [ ] Nachweis, welche Dateien und Services auf dem funktionierenden Gerät SSH aktivieren.
-- [ ] Validierte Kompatibilitätsmatrix für Engine OS 5.0.4 und 5.3.0.
-- [ ] JP24-Dokumentation von Brownie als **separater Gerätebericht**.
-- [ ] Tests unter Windows und macOS auf echter Hardware.
+1. Detect the connected USB update transport and verify exactly one supported device.
+2. Select JC11S Fastboot or JP24 imbupd through validated device profiles; never infer model identity from a serial number or partition size alone.
+3. Check supported firmware, target partition, and backup/recovery prerequisites.
+4. Generate or securely import a user-specific Ed25519 public key with access to the matching private key.
+5. Obtain a pinned, licensed, integrity-checked device-specific bootstrap package.
+6. Inject the public key and tested SSH startup configuration into the image.
+7. Validate filesystem, permissions, hashes, and expected paths.
+8. Require explicit user confirmation before destructive writing.
+9. Reboot and verify an authenticated SSH session using a trusted host key.
+10. Unlock the mod manager **only after SSH succeeds**; all subsequent supported mods are transferred and installed over SSH.
 
-## 11. Quellen- und Änderungsstand
+## 10. Outstanding verification
 
-**Historische Primärquelle:** „PRIMEBOMB V1–V4 – technische Dokumentation“, Stand 05.11.2026. Die dort dokumentierten Messungen, Kommandos, Beobachtungen und offenen Fragen wurden übernommen und als historische Versuchsreihe gekennzeichnet.
+- [ ] Record and redact the complete JC11S `fastboot getvar all` output.
+- [ ] Preserve and validate the exact successful EngineX build and repair scripts.
+- [ ] Confirm rights to use or redistribute required SSH/bootstrap components.
+- [ ] Verify a complete `/data` backup and recovery path.
+- [ ] Reproduce the cleaned bootstrap from scratch on JC11S.
+- [ ] Establish compatibility beyond the observed Engine OS 5.3.0 / EngineX 5.3.0.2 combination.
+- [ ] Integrate JP24 findings as a **separate device profile**, not as JC11S Fastboot steps.
+- [ ] Test the desktop installer on real Windows and macOS hosts.
+- [ ] Confirm successful SSH reconnect after an additional normal device reboot.
 
-**Zusätzlicher Projektstand aus der anschließenden Zusammenarbeit:** späterer erfolgreicher EngineX-SSH-Login und EngineX-Weboberfläche auf JC11S. Die hierfür nötigen reproduzierbaren Build- und Flashdetails sind noch nicht vollständig dokumentiert.
+## 11. Source record
 
-**Diese Datei ersetzt weder eine verifizierte Installationsanleitung noch einen Wiederherstellungsplan.**
+- Historical primary source: **“PRIMEBOMB V1–V4 – technische Dokumentation”**, dated November 5, 2026.
+- Later primary source: **“EngineX OS mit Root-SSH auf dem Denon DJ PRIME 4+”**, dated November 7, 2026.
+- Companion project document: `docs/BOOTSTRAP_SPEC.md`.
+
+This file is an engineering record. It is **not** a verified recovery guide or a release-ready installer procedure.
