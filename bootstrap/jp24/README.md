@@ -105,3 +105,8 @@ See [BUILD-ARTIFACTS.md](./BUILD-ARTIFACTS.md) for the local 256 MiB image SHA-2
 ### Backup and recovery status from the Vault
 
 The Vault documents no raw `/data` backup or restore procedure. `PC Update Mode - eMMC Zugang.md` says normal `reboot update` enters the proprietary updater, not U-Boot UMS; UMS is only a theoretical route through UART/U-Boot or a boot-failure fallback. `Notfall - Zurück zur Originalfirmware.md` describes the signed-firmware recovery path as expected, but explicitly says restoring `/data` has not been demonstrated. The Vault elsewhere says normal firmware updates leave `/data` untouched, so reinstalling firmware cannot currently be counted on to restore a replaced or damaged `/data`. This is not a verified recovery plan for replacing `/data`. Keep the backup/recovery gate false until a raw backup and a restore path are proven on this JP24.
+
+
+### Original firmware package inspection
+
+The locally available `PRIME4G2-5.1.1-Update.img` AZ0x manifest contains `BOOT` boot1/boot2, `PARR recovery`, `PART boot`, and `PART rootfs` entries only. It contains no `/data` partition image and exposes no GPT entry or exact `/data` capacity. This package therefore cannot serve as a raw `/data` backup or resolve the target partition size. The original firmware package was inspected read-only and was not copied into this repository.
