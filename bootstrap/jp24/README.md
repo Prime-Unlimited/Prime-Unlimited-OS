@@ -16,7 +16,7 @@ The [Denon DJ PRIME 4 G2 FAQ](https://support.denondj.com/en/support/solutions/a
 
 The current [EngineX installer](https://github.com/Cd1s/EngineX-OS/blob/main/cmd/enginex-installer/main.go) handles JP24/AZ04 through a separate USB mode, `1cc5:2027` (`modeAZ`), and builds a fixed 64 MiB `/data` image. The code does not query partition capacity in that path; its comment attributes the 64 MiB size to a SYSTEM ONE hardware test. EngineX's Fastboot path does query `partition-size:data` for JC11S, but that is not the G2 path. Its [USB writer](https://github.com/Cd1s/EngineX-OS/blob/main/tools/az01-packer/host-install-usbupdate.py) speaks the `1cc5:2027` protocol, not this project's `15e4:d014` imbupd transport.
 
-This is useful evidence that EngineX has a second AZ04 update transport, but it does **not** establish the JP24 `/data` capacity or resolve the Vault's 56 MB versus 256 MiB observations. The 64 MiB value is an image-size choice in code, not a capacity measurement for this G2.
+This is useful evidence that EngineX has a second AZ04 update transport, but its 64 MiB value alone does **not** establish the JP24 `/data` capacity. A separate user-provided report describes a 64 MiB image transferred to `data` on PRIME 4 G2 hardware; earlier project notes also report success with a 256 MiB image. These are observed working image sizes, not measurements of the partition's maximum capacity, and do not establish a backup or recovery path.
 
 This is a known blocker, not an installer option that can be overridden by manual selection.
 
@@ -42,7 +42,7 @@ marker = bootstrap.verify_ssh(
 
 `flash()` requires verified JP24 identity, mains power, a matching SHA-256, a verified backup/recovery procedure, and an explicit confirmation callback. The native writer separately requires the literal phrase `FLASH JP24 /data`. It writes only the `data` partition and then reboots. Do not connect the callback until the desktop UI has a clear, affirmative confirmation dialog.
 
-The native writer validates a regular, exactly 256 MiB ext4 image before opening USB or erasing `/data`, holds that same file descriptor for streaming, and requires a valid final device response. This size is a project profile, not a size reported by imbupd.
+The native writer accepts only regular ext4 images of exactly 64 MiB or 256 MiB before opening USB or erasing `/data`, holds the same file descriptor for streaming, and requires a valid final device response. These are explicit observed image profiles; imbupd does not report the target partition capacity.
 
 SSH verification uses the repository's `core.ssh_service.SshService`: it pins only the expected host-key fingerprint provided by the caller, then confirms authenticated root SSH on port 2222. A listening port alone is not success.
 
@@ -59,11 +59,11 @@ On macOS with Homebrew: `brew install libusb pkg-config e2fsprogs`; install Zig 
 
 The current build helpers are Bash scripts intended for macOS and Linux. A native Windows build adapter is not included yet.
 
-Build the read-only/native protocol tool from the repository root with `./bootstrap/jp24/build-native.sh`. Build the image with `./bootstrap/jp24/build-image.sh /path/to/installer-key.pub [output-image]`.
+Build the read-only/native protocol tool from the repository root with `./bootstrap/jp24/build-native.sh`. Build a 256 MiB image with `./bootstrap/jp24/build-image.sh /path/to/installer-key.pub [output-image]`; to build the smaller reported profile, set `DATA_SIZE_MB=64` before running the script. The Python API accepts `size_mib=64` or `size_mib=256` and defaults to 256 MiB.
 
 ## Build inputs and image
 
-Use `payload/alsa-boot-hook.c`, `payload/99-prime4-mod.conf`, and `payload/boot-activate.sh` with `build-image.sh`. The installer supplies the user's **public** Ed25519 key. The 256 MiB ext4 image contains the ALSA hook and a key-only SSH service on port 2222. Private keys, generated images, and third-party EngineX binaries are not stored here.
+Use `payload/alsa-boot-hook.c`, `payload/99-prime4-mod.conf`, and `payload/boot-activate.sh` with `build-image.sh`. The installer supplies the user's **public** Ed25519 key. Either supported ext4 image profile contains the ALSA hook and a key-only SSH service on port 2222. Private keys, generated images, and third-party EngineX binaries are not stored here.
 
 The image builder validates the public-key format, expected paths, ext4 health, the encryption feature, and prints a SHA-256. `build_image()` returns the image size and SHA-256 to the installer. The installer must independently validate these values before offering a flash confirmation.
 
