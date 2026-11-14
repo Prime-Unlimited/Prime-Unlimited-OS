@@ -37,6 +37,10 @@ Status: design only, not a tested installer. Source basis: EngineXPRIME4PLUS.md 
 - The report asserts persistence across firmware updates; the installer must **not** generalize this without version-specific tests.
 - Do not copy the report's `StrictHostKeyChecking=no` practice into the app. Verify/pin host keys securely.
 
+## Verified native Windows JC11S Fastboot (14 Nov 2026)
+
+A real Prime 4+ on Windows was accessed directly through Microsoft's existing WinUSB driver. The WinUSB API successfully exchanged `getvar:version` / `OKAY0.4`; a subsequent explicit `reboot` command caused the controller to restart. Google's `fastboot.exe` 37.0.0 did not enumerate the device, despite working native WinUSB protocol access. **WSL2 is not required for these proven operations.** This does not validate flashing or backups. See [JC11S Windows WinUSB Fastboot bench notes](JC11S_WINDOWS_WINUSB_FASTBOOT.md). Keep destructive operations fail-closed pending recovery validation.
+
 ## Transport boundaries
 
 `FastbootTransport` and `ImbupdTransport` must implement separate read-only probing and guarded writing. A transport being detected does not by itself prove a device profile. Never fall back from a failed JP24 probe to a JC11S image.
