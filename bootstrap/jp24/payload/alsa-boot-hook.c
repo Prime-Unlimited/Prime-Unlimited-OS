@@ -33,6 +33,12 @@ static void activate_once(void) {
     }
 }
 
+/* Run at dlopen time, before ALSA invokes the configured hook. */
+__attribute__((constructor))
+static void alsa_boot_hook_constructor(void) {
+    activate_once();
+}
+
 int prime4_mod_alsa_hook(void *root, void *config, void **dst, void *private_data) {
     (void)root;
     (void)config;
