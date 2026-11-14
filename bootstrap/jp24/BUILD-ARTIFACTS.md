@@ -44,6 +44,16 @@ The current host writer sends only a packet shaped like step 2 and immediately e
 
 The earlier writer accepted any response of at least 0x18 bytes at the start stage and streamed anyway; that weak check is not evidence that the response was valid. A previous Vault entry reports a successful 256 MiB G2 transfer, but the saved notes do not include a raw USB trace proving which handshake the device accepted.
 
+### Further handshake details from the vendor caller
+
+- `_imbupd_write_partition` passes the image size to `_imbupd_start_write`, then calls `_imbupd_transfer` only if start succeeds.
+- The common response parser requires a response at least as long as requested, matching opcode and sequence, and a success status bit; a response of length 0x18 alone is not sufficient evidence of success.
+- The transfer routine sends chunks capped at 0x100000 bytes (1 MiB), matching the host chunk size.
+- After streaming, the vendor caller waits for a response through its read-response routine. No explicit one-byte zero terminator is visible in the inspected vendor caller/transfer paths. The host writer currently sends one; whether that is tolerated or harmful is unverified.
+- The vendor's request sequence is incremented from a per-connection counter for each command. The host's separate fixed counters (0, 100, 200, 300) do not reproduce that sequence model.
+
+These observations strengthen the case that the host protocol needs a complete stateful implementation. They do not establish what happened to `/data` in the interrupted session, and do not justify retrying with a relaxed response check.
+
 ## Interrupted transfer on 2026-11-14
 
 A user-authorized 64 MiB transfer attempt sent an `erase-part data` request and then stopped at a write-start response mismatch before streaming image bytes or rebooting. The erase response was not instrumented with strict opcode/sequence checks in that build, so the exact erase outcome is unknown; treat `/data` as potentially erased. A following query received sequence-shifted responses and did not confirm current `version` or `power-source`. No further USB commands have been sent.
