@@ -65,7 +65,7 @@ Build the read-only/native protocol tool from the repository root with `./bootst
 
 Use `payload/alsa-boot-hook.c`, `payload/99-prime4-mod.conf`, and `payload/boot-activate.sh` with `build-image.sh`. The installer supplies the user's **public** Ed25519 key. Either supported ext4 image profile contains the ALSA hook and a key-only SSH service on port 2222. Private keys, generated images, and third-party EngineX binaries are not stored here.
 
-The image builder validates the public-key format, expected paths, ext4 health, the encryption feature, and prints a SHA-256. `build_image()` returns the image size and SHA-256 to the installer. The installer must independently validate these values before offering a flash confirmation.
+The image builder uses 4 KiB ext4 blocks, validates the public-key format, expected paths, ext4 health, the encryption feature, and prints a SHA-256. `build_image()` returns the image size and SHA-256 to the installer. The installer must independently validate these values before offering a flash confirmation.
 
 ## Evidence and release gates
 
@@ -110,3 +110,10 @@ The Vault documents no raw `/data` backup or restore procedure. `PC Update Mode 
 ### Original firmware package inspection
 
 The locally available `PRIME4G2-5.1.1-Update.img` AZ0x manifest contains `BOOT` boot1/boot2, `PARR recovery`, `PART boot`, and `PART rootfs` entries only. It contains no `/data` partition image and exposes no GPT entry or exact `/data` capacity. This package therefore cannot serve as a raw `/data` backup or resolve the target partition size. The original firmware package was inspected read-only and was not copied into this repository.
+
+
+### Interrupted transfer on 2026-11-14
+
+A user-authorized 64 MiB transfer attempt reached the native writer. The tool sent an `erase-part data` request, then rejected the subsequent write-start response because opcode/sequence/status did not match its assumptions. The command exited before streaming image bytes or rebooting. The erase response was not instrumented with strict opcode/sequence checks in that build, so the exact erase outcome is unknown; treat `/data` as potentially erased. A following query found shifted response sequence numbers and did not confirm current `version`/`power-source`. No further USB commands should be sent until the transport is resynchronized and the device state is known.
+
+The older local writer only required a response length before streaming, while the current reverse-engineering note explicitly says the vendor `_imbupd_write_partition` and `_imbupd_stream_partition` routines remain unanalyzed. The pasted `az01-signed-fs` analysis concerns signed test-app containers and does not explain this `imbupd` write-start response. The corrected local images now match the documented 4 KiB ext4 block size; their new hashes are recorded in `BUILD-ARTIFACTS.md`.
