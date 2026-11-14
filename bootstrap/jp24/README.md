@@ -8,6 +8,8 @@ The module recognizes the imbupd USB transport (`15e4:d014`, interface class `ff
 
 A read-only macOS IORegistry inspection of the connected controller confirmed vendor ID `5604` (`0x15e4`), product ID `53268` (`0xd014`), manufacturer `DENON DJ`, product `PRIME 4 G2`, and the `ff/61/7a` interface signature. No serial number is recorded here. The standalone C query still needs USB access permission to collect protocol properties. Identity evidence by itself does not establish a safe write: the verified `/data` backup and recovery gate remains mandatory.
 
+Hardware query result (2026-11-14; serial omitted): imbupd returned `version: 1.4.2` and `power-source: mains`; the `product` and `serial` properties returned `not found`. The USB descriptor pair independently identifies the connected model, so the missing imbupd product property is not the remaining identity blocker. The current native tool implements partition erase/write, but no `/data` read-back or backup path has been verified.
+
 This is a known blocker, not an installer option that can be overridden by manual selection.
 
 ## Module interface
@@ -59,6 +61,6 @@ The image builder validates the public-key format, expected paths, ext4 health, 
 
 - The Vault records a successful JP24 SSH setup on port 2222 using the ALSA hook and `imbupd` data-image transfer.
 - That does not yet establish a redistributable, independently reproducible Prime-Unlimited bootstrap package.
-- The imbupd `product` property has not returned a JP24 code; the exact host-visible USB manufacturer/product descriptors were independently confirmed on the connected unit.
+- The imbupd query returned version `1.4.2` and mains power; `product` and `serial` were not found. Exact host-visible USB manufacturer/product descriptors independently confirmed the connected unit as JP24.
 - `/data` replacement is destructive. A tested backup and recovery path is still required before production writing is enabled.
 - No flash has been run by this module during development.
