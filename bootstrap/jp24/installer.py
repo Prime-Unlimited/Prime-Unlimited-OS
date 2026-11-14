@@ -21,7 +21,7 @@ class FlashPlan:
     inspection: Jp24Inspection
     image: Path
     expected_sha256: str
-    backup_recovery_verified: bool
+    data_loss_acknowledged: bool
 
 
 class Jp24Bootstrap:
@@ -55,16 +55,16 @@ class Jp24Bootstrap:
             raise WriteBlockedError(f"Device identity/power gate failed: {current.detail}")
         if current != plan.inspection:
             raise WriteBlockedError("The device evidence changed after inspection. Run the setup flow again.")
-        if not plan.backup_recovery_verified:
-            raise WriteBlockedError("A verified /data backup and recovery procedure is required before writing.")
+        if not plan.data_loss_acknowledged:
+            raise WriteBlockedError("Explicit acknowledgement that the complete /data partition will be replaced is required.")
         allowed_image_sizes = {64 * 1024 * 1024, 256 * 1024 * 1024}
         if not plan.image.is_file() or plan.image.stat().st_size not in allowed_image_sizes:
             raise WriteBlockedError("The validated JP24 image is missing or has an unsupported size.")
         if not plan.expected_sha256 or self._sha256(plan.image) != plan.expected_sha256.lower():
             raise WriteBlockedError("The image checksum does not match the validated build artifact.")
         message = (
-            "This will erase and replace the Prime 4 G2 /data partition. "
-            "Confirm only after reviewing the backup and recovery plan. Type: "
+            "This will erase and replace the complete Prime 4 G2 /data partition. "
+            "No backup exists. Type to authorize this irreversible data loss: "
             + self.CONFIRMATION_TEXT
         )
         if confirm(message) != self.CONFIRMATION_TEXT:
