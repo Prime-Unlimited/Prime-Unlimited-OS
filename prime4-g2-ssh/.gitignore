@@ -1,0 +1,10 @@
+# Generated image and compiled target library
+alsa-trigger/prime4-data.img
+alsa-trigger/libalsa-boot-hook.so
+
+# Never store SSH credentials in the repository
+ssh/*
+!ssh/connect.sh
+*.pem
+id_ed25519
+id_rsa
