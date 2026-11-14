@@ -134,14 +134,23 @@ static int get_property(const char *name, char *out, int out_size) {
     uint16_t pkt_size = 0x18 + name_len;
     static uint16_t seq = 0;
 
-    build_header(pkt, OP_GET_PROPERTY, seq++, pkt_size);
+    uint16_t request_seq = seq++;
+    build_header(pkt, OP_GET_PROPERTY, request_seq, pkt_size);
     memcpy(pkt + 0x18, name, name_len);
 
     int n = send_recv(pkt, pkt_size, resp, sizeof(resp), TIMEOUT_SHORT);
     if (n < 0) return -1;
 
-    uint16_t status;
+    uint32_t response_opcode;
+    uint16_t response_seq, status;
+    memcpy(&response_opcode, resp + 0x04, sizeof(response_opcode));
+    memcpy(&response_seq, resp + 0x10, sizeof(response_seq));
     memcpy(&status, resp + 0x14, 2);
+    if (response_opcode != OP_GET_PROPERTY || response_seq != request_seq) {
+        fprintf(stderr, "Property '%s': mismatched response (opcode=0x%08x seq=%u expected_seq=%u).\n",
+                name, response_opcode, response_seq, request_seq);
+        return -1;
+    }
     if (status == STATUS_ERROR) {
         fprintf(stderr, "Property '%s': not found\n", name);
         return -1;
@@ -169,14 +178,23 @@ static int erase_part(const char *part_name) {
 
     printf("Erasing partition '%s'...\n", part_name);
 
-    build_header(pkt, OP_ERASE_PART, seq++, pkt_size);
+    uint16_t request_seq = seq++;
+    build_header(pkt, OP_ERASE_PART, request_seq, pkt_size);
     memcpy(pkt + 0x18, part_name, name_len);
 
     int n = send_recv(pkt, pkt_size, resp, sizeof(resp), TIMEOUT_LONG);
     if (n < 0) return -1;
 
-    uint16_t status;
+    uint32_t response_opcode;
+    uint16_t response_seq, status;
+    memcpy(&response_opcode, resp + 0x04, sizeof(response_opcode));
+    memcpy(&response_seq, resp + 0x10, sizeof(response_seq));
     memcpy(&status, resp + 0x14, 2);
+    if (response_opcode != OP_ERASE_PART || response_seq != request_seq) {
+        fprintf(stderr, "Erase rejected: mismatched response (opcode=0x%08x seq=%u expected_seq=%u).\n",
+                response_opcode, response_seq, request_seq);
+        return -1;
+    }
     if (status == STATUS_ERROR) {
         fprintf(stderr, "Erase failed for '%s'\n", part_name);
         return -1;
@@ -195,6 +213,7 @@ static int validate_data_image(const char *image_path, int *fd_out, off_t *size_
     }
     struct stat st;
     unsigned char ext4_magic[2];
+    uint32_t ext4_log_block_size;
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
         fprintf(stderr, "Image must be a regular file.\n");
         close(fd);
@@ -209,6 +228,12 @@ static int validate_data_image(const char *image_path, int *fd_out, off_t *size_
     if (pread(fd, ext4_magic, sizeof(ext4_magic), 1080) != (ssize_t)sizeof(ext4_magic) ||
         ext4_magic[0] != 0x53 || ext4_magic[1] != 0xEF) {
         fprintf(stderr, "Image does not have the expected ext4 superblock magic.\n");
+        close(fd);
+        return -1;
+    }
+    if (pread(fd, &ext4_log_block_size, sizeof(ext4_log_block_size), 1048) !=
+            (ssize_t)sizeof(ext4_log_block_size) || ext4_log_block_size != 2) {
+        fprintf(stderr, "Image must use 4096-byte ext4 blocks (s_log_block_size=2).\n");
         close(fd);
         return -1;
     }
@@ -265,7 +290,8 @@ static int write_part(const char *part_name, int fd, off_t file_size) {
     memcpy(&response_status, resp + 0x14, sizeof(response_status));
     if (memcmp(resp, IMBUPD_MAGIC_RESP, 4) != 0 || response_opcode != OP_WRITE_PART ||
         response_seq != s || response_status != STATUS_OK) {
-        fprintf(stderr, "Device rejected or mismatched write-start response.\n");
+        fprintf(stderr, "Write-start rejected/mismatched: opcode=0x%08x seq=%u status=0x%04x expected_seq=%u.\n",
+                response_opcode, response_seq, response_status, s);
         return -1;
     }
 
