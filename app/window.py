@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.logo import PrimeUnlimitedLogo
 from core.device_detection import DetectionState
 from core.diagnostic_service import DiagnosticReport, UsbDiagnosticService
 from core.diagnostics import redact
@@ -49,7 +50,7 @@ class DeviceCard(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(10)
-        layout.addWidget(label(profile.display_name, "title"))
+        layout.addWidget(label(profile.display_name, "cardTitle"))
         layout.addWidget(label(f"Hardware profile  {profile.hardware_profile}", "muted"))
         layout.addWidget(label(f"USB transport  {profile.transport}", "muted"))
         layout.addStretch()
@@ -65,9 +66,10 @@ class SelectionPage(QWidget):
     def __init__(self) -> None:
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(54, 42, 54, 42)
-        layout.setSpacing(16)
-        layout.addWidget(label("PRIME-UNLIMITED OS", "eyebrow"))
+        layout.setContentsMargins(58, 34, 58, 38)
+        layout.setSpacing(14)
+        self.logo = PrimeUnlimitedLogo()
+        layout.addWidget(self.logo)
         layout.addWidget(label("Select your device", "title"))
         layout.addWidget(
             label(
@@ -147,10 +149,17 @@ class WorkflowPage(QWidget):
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(30, 30, 30, 30)
+        sidebar = QWidget()
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(0, 0, 10, 0)
+        sidebar_layout.setSpacing(18)
+        self.logo = PrimeUnlimitedLogo(compact=True)
+        sidebar_layout.addWidget(self.logo)
         self.steps = QListWidget()
         self.steps.setFixedWidth(240)
         self.steps.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        outer.addWidget(self.steps)
+        sidebar_layout.addWidget(self.steps, 1)
+        outer.addWidget(sidebar)
 
         panel = QFrame()
         panel.setObjectName("card")

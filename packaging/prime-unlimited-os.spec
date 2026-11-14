@@ -5,6 +5,7 @@ from PyInstaller.utils.hooks import collect_data_files
 
 project_root = os.path.abspath(os.path.join(SPECPATH, ".."))
 datas = collect_data_files("app")
+datas.append((os.path.join(project_root, "assets", "prime-unlimited-logo.svg"), "assets"))
 
 a = Analysis(
     [os.path.join(project_root, "app", "main.py")],

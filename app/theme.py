@@ -3,8 +3,10 @@
 STYLESHEET = """
 QWidget { background: #101419; color: #eaf2f8; font-family: Inter, Segoe UI, sans-serif; }
 QMainWindow { background: #0b0f13; }
+QLabel { background: transparent; }
 QLabel#eyebrow { color: #29d3ff; font-weight: 700; letter-spacing: 2px; }
 QLabel#title { font-size: 30px; font-weight: 700; }
+QLabel#cardTitle { font-size: 23px; font-weight: 700; }
 QLabel#subtitle, QLabel#muted { color: #94a5b3; font-size: 14px; }
 QFrame#card { background: #171d24; border: 1px solid #26313b; border-radius: 16px; }
 QFrame#card:hover { border-color: #29d3ff; background: #19232b; }

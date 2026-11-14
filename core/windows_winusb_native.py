@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import ctypes
 import uuid
-import winreg
 from ctypes import wintypes
+from dataclasses import dataclass
 
 from core.windows_fastboot import (
     InterfaceDescriptor,
@@ -26,6 +26,8 @@ ERROR_SEM_TIMEOUT = 121
 ERROR_NO_MORE_ITEMS = 259
 ERROR_OPERATION_ABORTED = 995
 ERROR_DEVICE_NOT_CONNECTED = 1167
+ERROR_IO_PENDING = 997
+ERROR_NOT_FOUND = 1168
 
 DIGCF_PRESENT = 0x00000002
 DIGCF_DEVICEINTERFACE = 0x00000010
@@ -37,8 +39,16 @@ GENERIC_WRITE = 0x40000000
 FILE_SHARE_READ = 0x00000001
 FILE_SHARE_WRITE = 0x00000002
 OPEN_EXISTING = 3
-FILE_ATTRIBUTE_NORMAL = 0x00000080
+FILE_FLAG_OVERLAPPED = 0x40000000
 PIPE_TRANSFER_TIMEOUT = 3
+WAIT_OBJECT_0 = 0
+WAIT_TIMEOUT = 258
+WAIT_FAILED = 0xFFFFFFFF
+CANCEL_GRACE_MS = 1000
+
+# Pathological drivers may fail to complete cancellation promptly. Retaining the
+# Python buffers is safer than releasing memory while the kernel can still use it.
+_ORPHANED_TRANSFERS: list[PendingTransfer] = []
 
 
 class GUID(ctypes.Structure):
@@ -102,6 +112,23 @@ class WINUSB_PIPE_INFORMATION(ctypes.Structure):
     ]
 
 
+class OVERLAPPED(ctypes.Structure):
+    _fields_ = [
+        ("Internal", ctypes.c_size_t),
+        ("InternalHigh", ctypes.c_size_t),
+        ("Offset", wintypes.DWORD),
+        ("OffsetHigh", wintypes.DWORD),
+        ("hEvent", wintypes.HANDLE),
+    ]
+
+
+@dataclass
+class PendingTransfer:
+    buffer: object
+    overlapped: OVERLAPPED
+    event_handle: object
+
+
 def _configure_functions(setupapi, kernel32, winusb) -> None:
     setupapi.SetupDiGetClassDevsW.argtypes = [
         ctypes.POINTER(GUID),
@@ -160,6 +187,19 @@ def _configure_functions(setupapi, kernel32, winusb) -> None:
     kernel32.CreateFileW.restype = wintypes.HANDLE
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CreateEventW.restype = wintypes.HANDLE
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.GetOverlappedResult.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(OVERLAPPED),
+        ctypes.POINTER(wintypes.DWORD),
+        wintypes.BOOL,
+    ]
+    kernel32.GetOverlappedResult.restype = wintypes.BOOL
+    kernel32.CancelIoEx.argtypes = [wintypes.HANDLE, ctypes.POINTER(OVERLAPPED)]
+    kernel32.CancelIoEx.restype = wintypes.BOOL
 
     winusb.WinUsb_Initialize.argtypes = [wintypes.HANDLE, ctypes.POINTER(ctypes.c_void_p)]
     winusb.WinUsb_Initialize.restype = wintypes.BOOL
@@ -192,15 +232,20 @@ def _configure_functions(setupapi, kernel32, winusb) -> None:
         ctypes.POINTER(ctypes.c_ubyte),
         wintypes.ULONG,
         ctypes.POINTER(wintypes.ULONG),
-        ctypes.c_void_p,
+        ctypes.POINTER(OVERLAPPED),
     ]
     winusb.WinUsb_WritePipe.restype = wintypes.BOOL
     winusb.WinUsb_ReadPipe.argtypes = winusb.WinUsb_WritePipe.argtypes
     winusb.WinUsb_ReadPipe.restype = wintypes.BOOL
 
 
-def _raise_windows_error(action: str) -> None:
-    code = ctypes.get_last_error()
+def _last_error() -> int:
+    getter = getattr(ctypes, "get_last_error", None)
+    return getter() if getter is not None else 0
+
+
+def _raise_windows_error(action: str, code: int | None = None) -> None:
+    code = _last_error() if code is None else code
     message = f"{action} failed with Windows error {code}."
     if code == ERROR_ACCESS_DENIED:
         raise WinUsbAccessError(message)
@@ -215,13 +260,15 @@ class NativeWinUsbConnection:
     def __init__(self, path: str, kernel32, winusb) -> None:
         self.kernel32 = kernel32
         self.winusb = winusb
+        self.pipe_timeouts: dict[int, int] = {}
+        self.pending: list[PendingTransfer] = []
         self.file_handle = kernel32.CreateFileW(
             path,
             GENERIC_READ | GENERIC_WRITE,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             None,
             OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
+            FILE_FLAG_OVERLAPPED,
             None,
         )
         invalid_handle = ctypes.c_void_p(-1).value
@@ -264,42 +311,104 @@ class NativeWinUsbConnection:
             ctypes.byref(value),
         ):
             _raise_windows_error("Setting the WinUSB pipe timeout")
+        self.pipe_timeouts[pipe_id] = timeout_ms
 
     def write_pipe(self, pipe_id: int, data: bytes) -> int:
         buffer = (ctypes.c_ubyte * len(data)).from_buffer_copy(data)
-        transferred = wintypes.ULONG()
-        if not self.winusb.WinUsb_WritePipe(
-            self.interface_handle,
+        return self._overlapped_transfer(
+            "WinUsb_WritePipe",
+            self.winusb.WinUsb_WritePipe,
             pipe_id,
             buffer,
             len(data),
-            ctypes.byref(transferred),
-            None,
-        ):
-            _raise_windows_error("WinUsb_WritePipe")
-        return transferred.value
+        )
 
     def read_pipe(self, pipe_id: int, size: int) -> bytes:
         buffer = (ctypes.c_ubyte * size)()
-        transferred = wintypes.ULONG()
-        if not self.winusb.WinUsb_ReadPipe(
+        transferred = self._overlapped_transfer(
+            "WinUsb_ReadPipe",
+            self.winusb.WinUsb_ReadPipe,
+            pipe_id,
+            buffer,
+            size,
+        )
+        return bytes(buffer[:transferred])
+
+    def _overlapped_transfer(self, action, function, pipe_id, buffer, size) -> int:
+        event_handle = self.kernel32.CreateEventW(None, True, False, None)
+        if not event_handle:
+            _raise_windows_error("Creating a WinUSB transfer event")
+        overlapped = OVERLAPPED()
+        overlapped.hEvent = event_handle
+        transfer = PendingTransfer(buffer, overlapped, event_handle)
+        completed = function(
             self.interface_handle,
             pipe_id,
             buffer,
             size,
-            ctypes.byref(transferred),
             None,
+            ctypes.byref(overlapped),
+        )
+        if not completed:
+            error = _last_error()
+            if error != ERROR_IO_PENDING:
+                self.kernel32.CloseHandle(event_handle)
+                _raise_windows_error(action, error)
+            timeout_ms = self.pipe_timeouts.get(pipe_id, 2000)
+            wait_result = self.kernel32.WaitForSingleObject(event_handle, timeout_ms)
+            if wait_result == WAIT_TIMEOUT:
+                cancelled = self._cancel_pending_transfer(transfer)
+                detail = "cancelled" if cancelled else "retained safely pending cancellation"
+                raise WinUsbTimeout(f"{action} timed out after a bounded wait and was {detail}.")
+            if wait_result == WAIT_FAILED:
+                error = _last_error()
+                self._cancel_pending_transfer(transfer)
+                _raise_windows_error(f"Waiting for {action}", error)
+            if wait_result != WAIT_OBJECT_0:
+                self._cancel_pending_transfer(transfer)
+                raise WinUsbError(f"Waiting for {action} returned unexpected status {wait_result}.")
+        transferred = wintypes.DWORD()
+        if not self.kernel32.GetOverlappedResult(
+            self.file_handle,
+            ctypes.byref(overlapped),
+            ctypes.byref(transferred),
+            False,
         ):
-            _raise_windows_error("WinUsb_ReadPipe")
-        return bytes(buffer[: transferred.value])
+            error = _last_error()
+            self.kernel32.CloseHandle(event_handle)
+            _raise_windows_error(action, error)
+        self.kernel32.CloseHandle(event_handle)
+        return transferred.value
+
+    def _cancel_pending_transfer(self, transfer: PendingTransfer) -> bool:
+        cancelled = self.kernel32.CancelIoEx(self.file_handle, ctypes.byref(transfer.overlapped))
+        cancel_error = _last_error() if not cancelled else 0
+        if not cancelled and cancel_error != ERROR_NOT_FOUND:
+            self.pending.append(transfer)
+            return False
+        wait_result = self.kernel32.WaitForSingleObject(transfer.event_handle, CANCEL_GRACE_MS)
+        if wait_result == WAIT_OBJECT_0:
+            self.kernel32.CloseHandle(transfer.event_handle)
+            return True
+        else:
+            self.pending.append(transfer)
+            return False
 
     def close(self) -> None:
+        for transfer in self.pending:
+            self.kernel32.CancelIoEx(self.file_handle, ctypes.byref(transfer.overlapped))
         if self.interface_handle:
             self.winusb.WinUsb_Free(self.interface_handle)
             self.interface_handle = ctypes.c_void_p()
         if self.file_handle:
             self.kernel32.CloseHandle(self.file_handle)
             self.file_handle = None
+        for transfer in self.pending:
+            if self.kernel32.WaitForSingleObject(transfer.event_handle, CANCEL_GRACE_MS) == WAIT_OBJECT_0:
+                self.kernel32.CloseHandle(transfer.event_handle)
+            else:
+                _ORPHANED_TRANSFERS.append(transfer)
+        self.pending.clear()
 
 
 class NativeWinUsbApi:
@@ -322,6 +431,8 @@ class NativeWinUsbApi:
 
     @staticmethod
     def _interface_class_guids() -> list[GUID]:
+        import winreg
+
         path = r"SYSTEM\CurrentControlSet\Control\DeviceClasses"
         result: list[GUID] = []
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as key:

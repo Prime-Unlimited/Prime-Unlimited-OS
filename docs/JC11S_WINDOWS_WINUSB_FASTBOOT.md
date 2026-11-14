@@ -51,6 +51,12 @@ Do **not** hardcode the device instance serial or these interface GUIDs as unive
 
 The proof-of-concept used C# P/Invoke from PowerShell to call `kernel32.dll` (`CreateFile`, `CloseHandle`) and `winusb.dll` (`WinUsb_Initialize`, `WinUsb_Free`, `WinUsb_QueryInterfaceSettings`, `WinUsb_QueryPipe`, `WinUsb_SetPipePolicy`, `WinUsb_WritePipe`, `WinUsb_ReadPipe`). No custom USB driver was installed.
 
+### Desktop backend handle and I/O requirements
+
+Follow-up testing of the Python desktop backend confirmed that `CreateFileW` must use `FILE_FLAG_OVERLAPPED` (`0x40000000`) for all three registered interfaces. Opening the same paths with only `FILE_ATTRIBUTE_NORMAL` caused `WinUsb_Initialize` to fail with Windows error 6; opening with `FILE_FLAG_OVERLAPPED` succeeded.
+
+The application therefore uses asynchronous WinUSB reads and writes with a separate event and `OVERLAPPED` structure for each transfer. It waits for the configured pipe timeout, calls `CancelIoEx` on timeout, and uses a bounded cancellation grace period. The buffer, event, and `OVERLAPPED` state remain alive until completion or confirmed cancellation. This prevents indefinitely blocked diagnostic workers and prevents releasing a buffer while Windows may still reference it.
+
 ## Scope, implementation and safety
 
 - Implement this as a Windows-only native WinUSB transport for **JC11S**; retain existing safe detection and a separate JP24 imbupd transport. macOS requires a separate implementation, not WinUSB.
