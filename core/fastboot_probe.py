@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
-_LINE = re.compile(r"^(?:\(bootloader\)\s*)?([\w.-]+):\s*(.*?)\s*$")
+_LINE = re.compile(r"^(?:\(bootloader\)\s*)?([\w.:-]+):\s*(.*?)\s*$")
 
 
 @dataclass(frozen=True)
@@ -66,8 +66,4 @@ def is_jc11s_candidate(info: FastbootInfo) -> bool:
     The actual JC11S Fastboot product string has not yet been confirmed.
     Partition size and ext4 type are not unique model identifiers.
     """
-    return (
-        info.partition_type_data == "ext4"
-        and info.partition_size_data == 0x8FD7BE00
-        and info.is_userspace is False
-    )
+    return info.partition_type_data == "ext4" and info.partition_size_data == 0x8FD7BE00 and info.is_userspace is False

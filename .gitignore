@@ -5,6 +5,7 @@ venv/
 dist/
 build/
 *.spec
+!packaging/*.spec
 .DS_Store
 Thumbs.db
 *.img
@@ -12,3 +13,8 @@ Thumbs.db
 *.key
 id_ed25519*
 .env
+.pytest_cache/
+.coverage
+*.egg-info/
+work/
+output/
