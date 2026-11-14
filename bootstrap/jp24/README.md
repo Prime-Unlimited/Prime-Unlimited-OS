@@ -77,3 +77,10 @@ The Vault has two conflicting storage observations: one root-shell record report
 - `/data` replacement is destructive. A tested backup and recovery path is still required before production writing is enabled.
 - The official firmware updater is documented for firmware recovery, but its ability to restore the original `/data` state is unverified.
 - No flash has been run by this module during development.
+
+
+### 1cc5:2027 entry and evidence status
+
+EngineX's [AZ04/SCLIVE4 investigation](https://github.com/Cd1s/EngineX-OS/blob/main/docs/GEN2-USB-UPDATE-MODE.md) labels this work as static analysis only (dated 2026-11-07); it explicitly says no hardware behavior has been verified. It also says the official power-on key combination for Firmware Update Mode is not documented, and recommends the on-screen Settings → About / Update → Firmware Update Mode (Reboot) path until a manual is checked against a real deck. The documented `reboot update` path maps to PMU mode `0x5242c355` (`update-mode`); `mode-loader` is separately mapped to Fastboot on AZ04. This does not show that either path enters the `1cc5:2027` host transport, nor that `1cc5:2027` has been observed on a JP24.
+
+Therefore `1cc5:2027` remains a source-supported candidate transport, not a hardware-validated alternative procedure. Do not infer its entry controls from ADC or bootcount analysis, and do not attempt undocumented key combinations or bootcount manipulation. A future read-only check should use only the normal on-screen Firmware Update Mode path and record the resulting USB VID:PID/interface before any transfer. Keep the existing `15e4:d014` path distinct.
