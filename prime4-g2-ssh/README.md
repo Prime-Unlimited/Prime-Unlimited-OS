@@ -16,9 +16,16 @@ The output defaults to `alsa-trigger/prime4-data.img` at 256 MiB. Set `DATA_SIZE
 
 ## Flashing
 
-The repository includes `flash-tool/imbupd_write_mac.c`, which communicates with the device's firmware update mode and can erase/write a partition. A flash replaces the device's `/data` partition and may remove existing mods or user data stored there. Keep a verified backup and the original firmware available. Confirm the target device and power source before any write. Flashing is a separate, manual step; the image builder never invokes it.
+The repository includes `flash-tool/imbupd_write_mac.c`, which communicates with the device's firmware update mode. A flash replaces the device's `/data` partition and may remove existing mods or user data stored there. Keep a verified backup and the original firmware available. The native tool only accepts the `data` partition and refuses to open USB for a write unless the exact confirmation phrase is supplied. Flashing is a separate, manual step; the image builder never invokes it.
 
-Compile the tool with libusb as documented in its source. After the device is in firmware update mode, query it before any write. The write operation is destructive to the selected partition.
+Compile the tool with libusb as documented in its source. After the device is in firmware update mode, query it before any write. A write requires the explicit confirmation phrase:
+
+```sh
+./flash-tool/imbupd_write_mac query
+./flash-tool/imbupd_write_mac write data /path/to/prime4-data.img --confirm "FLASH JP24 /data"
+```
+
+The write operation is destructive to `/data`.
 
 ## Connect after boot
 
