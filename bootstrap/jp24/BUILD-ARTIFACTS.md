@@ -34,19 +34,19 @@ Neither local artifact has been written to hardware during this build session.
 
 A recovered Claude session records the initial general-header breakthrough: request magic bytes `41 5A 30 4F` (`AZ0O`), opcode at offset `0x04`, packet size (`uint16`) at `0x16`, and payload at `0x18`. The report says an `imbupd_write` binary was uploaded to a Linux VM and its `query` command was then tested. This establishes the general request framing for the probe/query path; it does not document or prove a successful partition write.
 
-The current host code already constructs this common header for property and erase commands. Its specialized write-start packet is different: it places the partition name at offset `0x28` and omits the vendor's preceding standard `write-part` request with the name at `0x18`. So the write rejection is not explained by the general packet-size field being absent; the remaining issue is the multi-stage write protocol and its state/response handling.
+The current host code already constructs this common header for property and erase commands. It also calls `erase_part("data")` before sending its specialized write-start descriptor, so it has the same high-level erase-then-write ordering. The recovered Claude `query` test verifies only general request framing; it does not verify the descriptor, sequence continuity, streaming, or final response.
 
 ## Static analysis of the vendor write handshake (2026-11-14)
 
 The arm64 slice of the extracted PRIME 4 G2 5.3.0 Updater binary was disassembled read-only with Apple's `otool`. Relevant symbols were present at the addresses already listed in the Vault: `_imbupd_write_partition` (0x10018231c), `_imbupd_stream_partition` (0x100182500), `_imbupd_transfer` (0x10018315c), and `_imbupd_start_write` (0x1001833d8).
 
-The vendor `_imbupd_start_write` routine appears to perform two distinct `write-part` request/response exchanges before streaming:
+Correction from the literal constants and call flow: `_imbupd_start_write` sends two different commands before streaming, not two `write-part` commands:
 
-1. It builds a standard 0x18-byte protocol header, appends the NUL-terminated partition name at offset 0x18, sets packet size to header plus that name, and calls the common send/response routine. That routine is given a 0x1c-byte response length.
-2. It then builds a separate start/stream descriptor with the total image size at offset 0x08, the partition name at offset 0x28, and packet size `0x29 + strlen(partition)`; it sends that as another `write-part` request and reads a response.
-3. Only after `_imbupd_start_write` succeeds does `_imbupd_write_partition` call the chunk-transfer routine.
+1. It builds a standard 0x18-byte header with `erase-part` opcode `0x5AA5FC03`, appends the NUL-terminated partition name at offset 0x18, and sends it through the common response parser. This is the vendor's erase step.
+2. It then builds the start/stream descriptor with `write-part` opcode `0x5AA5FB04`, total image size at offset 0x08, partition name at offset 0x28, and packet size `0x29 + strlen(partition)`, then sends it through the common response parser.
+3. Only after both commands succeed does `_imbupd_write_partition` call the chunk-transfer routine.
 
-The current host writer sends only a packet shaped like step 2 and immediately expects an exact opcode/sequence/status echo. The vendor implementation therefore exposes a likely protocol mismatch that can explain the rejected start response. This is a static disassembly finding, not a hardware-confirmed repair. The precise response semantics and how the stream's finalization maps to the host implementation still need to be reconciled before changing the writer or attempting another transfer.
+The opcode identification is grounded in the constants loaded by `_imbupd_start_write`: the first 8-byte template at `__TEXT,__const` address 0x1002556d8 contains request magic plus `erase-part`; the second at 0x100255700 contains request magic plus `write-part`. The common response parser checks response length, matching opcode and sequence, and success status. This is static disassembly evidence, not a hardware trace.
 
 The earlier writer accepted any response of at least 0x18 bytes at the start stage and streamed anyway; that weak check is not evidence that the response was valid. A previous Vault entry reports a successful 256 MiB G2 transfer, but the saved notes do not include a raw USB trace proving which handshake the device accepted.
 
@@ -56,7 +56,7 @@ The earlier writer accepted any response of at least 0x18 bytes at the start sta
 - The common response parser requires a response at least as long as requested, matching opcode and sequence, and a success status bit; a response of length 0x18 alone is not sufficient evidence of success.
 - The transfer routine sends chunks capped at 0x100000 bytes (1 MiB), matching the host chunk size.
 - After streaming, the vendor caller waits for a response through its read-response routine. No explicit one-byte zero terminator is visible in the inspected vendor caller/transfer paths. The host writer currently sends one; whether that is tolerated or harmful is unverified.
-- The vendor's request sequence is incremented from a per-connection counter for each command. The host's separate fixed counters (0, 100, 200, 300) do not reproduce that sequence model.
+- The vendor's request sequence is incremented from a per-connection counter for each command. The host's separate fixed counters (0, 100, 200, 300) do not reproduce that sequence model; continuity is a plausible cause of the response mismatch, but has not been confirmed on hardware.
 
 These observations strengthen the case that the host protocol needs a complete stateful implementation. They do not establish what happened to `/data` in the interrupted session, and do not justify retrying with a relaxed response check.
 
