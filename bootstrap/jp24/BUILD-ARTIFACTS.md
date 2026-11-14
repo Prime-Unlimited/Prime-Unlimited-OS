@@ -55,11 +55,29 @@ The earlier writer accepted any response of at least 0x18 bytes at the start sta
 - `_imbupd_write_partition` passes the image size to `_imbupd_start_write`, then calls `_imbupd_transfer` only if start succeeds.
 - The common response parser requires a response at least as long as requested, matching opcode and sequence, and a success status bit; a response of length 0x18 alone is not sufficient evidence of success.
 - The transfer routine sends chunks capped at 0x100000 bytes (1 MiB), matching the host chunk size.
-- After streaming, the vendor caller waits for a response through its read-response routine. No explicit one-byte zero terminator is visible in the inspected vendor caller/transfer paths. The host writer currently sends one; whether that is tolerated or harmful is unverified.
+- After streaming, the vendor caller waits for a response through its read-response routine. A user-provided Claude session log records a separate completion step followed by final status `1`, but the pasted log does not include the completion bytes. The exact correspondence to the vendor routine remains unconfirmed.
 - The vendor's request sequence is incremented from a per-connection counter for each command. The host's separate fixed counters (0, 100, 200, 300) do not reproduce that sequence model; continuity is a plausible cause of the response mismatch, but has not been confirmed on hardware.
 
 These observations strengthen the case that the host protocol needs a complete stateful implementation. They do not establish what happened to `/data` in the interrupted session, and do not justify retrying with a relaxed response check.
 
+## User-provided transfer log and LED behavior (2026-11-15)
+
+A pasted Claude-session transcript reports a 64 MiB `/data` write from a Linux VM. It is user-provided terminal output, not independently captured by this session:
+
+- The tool first queried protocol version and power source, then sent `erase-part data` at sequence 3; response status was 1.
+- It sent a 45-byte `write-part` descriptor at sequence 4: image size 0x04000000 at offset 0x08, packet size 0x002d at offset 0x16, and `data\\0` at offset 0x28.
+- The write-start response echoed sequence 4 and returned status 5. The tool proceeded to stream 67,108,864 bytes in 1 MiB chunks, sent a completion step, then received a final response with sequence 4 and status 1.
+- The transcript reports the unit rebooted normally, with LEDs continuing a running-light pattern. SSH success was not reported.
+
+This trace is strong evidence that status 5 is an accepted write-start/in-progress response for that tool and that the final success response is status 1. The current native writer's `status == 1` check at write start is therefore too strict for this observed flow. The observed request sequence 3 then 4 is consistent with a shared, incrementing connection sequence after two property queries; the current native writer instead used isolated fixed sequence ranges. This explains the rejected start response as a plausible protocol mismatch, but does not establish the exact on-device state or prove this session's transcript is from the current physical device.
+
+### Older local image associated with the pasted path
+
+Read-only inspection of the local file `mod/alsa-trigger/prime4-data.img` (SHA-256 `50e42d90de48c5ccdf259e5769cef5632c7e1316a4099ab7648946f397ce3349`) found an older ALSA configuration using `func load` with an empty `files` list. The embedded AArch64 hook's dynamic symbol table exposed `prime4_mod_alsa_hook` only; the expected `snd_config_hook_` function and `_dlsym_config_hook_001` version symbols were absent. This is materially different from the corrected payload in `bootstrap/jp24/payload/`, which exports both hook symbols and both `ALSA_0.9` version strings.
+
+The old image is a plausible explanation for the reported LED running-light behavior because the Vault documents that incorrect ALSA hook symbols can cause ALSA/LED initialization errors. This remains an inference: we inspected the current local file at that path and cannot prove it is byte-for-byte identical to the image that was uploaded and flashed. The transcript does not report whether SSH on port 2222 became reachable.
+
+Do not treat the transfer log as permission to resend an image. First confirm the current hardware state and use the corrected hook image only after the write implementation is reviewed.
 ## Interrupted transfer on 2026-11-14
 
 A user-authorized 64 MiB transfer attempt sent an `erase-part data` request and then stopped at a write-start response mismatch before streaming image bytes or rebooting. The erase response was not instrumented with strict opcode/sequence checks in that build, so the exact erase outcome is unknown; treat `/data` as potentially erased. A following query received sequence-shifted responses and did not confirm current `version` or `power-source`. No further USB commands have been sent.
