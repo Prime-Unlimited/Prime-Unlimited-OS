@@ -30,6 +30,12 @@ This recorded artifact is 256 MiB. The builder and writer also accept an exact 6
 
 Neither local artifact has been written to hardware during this build session.
 
+### Historical probe finding: common packet header
+
+A recovered Claude session records the initial general-header breakthrough: request magic bytes `41 5A 30 4F` (`AZ0O`), opcode at offset `0x04`, packet size (`uint16`) at `0x16`, and payload at `0x18`. The report says an `imbupd_write` binary was uploaded to a Linux VM and its `query` command was then tested. This establishes the general request framing for the probe/query path; it does not document or prove a successful partition write.
+
+The current host code already constructs this common header for property and erase commands. Its specialized write-start packet is different: it places the partition name at offset `0x28` and omits the vendor's preceding standard `write-part` request with the name at `0x18`. So the write rejection is not explained by the general packet-size field being absent; the remaining issue is the multi-stage write protocol and its state/response handling.
+
 ## Static analysis of the vendor write handshake (2026-11-14)
 
 The arm64 slice of the extracted PRIME 4 G2 5.3.0 Updater binary was disassembled read-only with Apple's `otool`. Relevant symbols were present at the addresses already listed in the Vault: `_imbupd_write_partition` (0x10018231c), `_imbupd_stream_partition` (0x100182500), `_imbupd_transfer` (0x10018315c), and `_imbupd_start_write` (0x1001833d8).
