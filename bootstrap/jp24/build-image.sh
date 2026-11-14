@@ -19,6 +19,7 @@ if [[ ! "$SIZE_MB" =~ ^(64|256)$ ]]; then
     echo "Supported JP24 image profiles are exactly 64 MiB and 256 MiB." >&2
     exit 2
 fi
+BLOCK_COUNT=$((SIZE_MB * 256)) # 4 KiB ext4 blocks, matching the documented JP24 image recipe
 
 # Homebrew e2fsprogs is commonly keg-only on macOS.
 for dir in /opt/homebrew/opt/e2fsprogs/sbin /opt/homebrew/opt/e2fsprogs/bin /usr/local/opt/e2fsprogs/sbin /usr/local/opt/e2fsprogs/bin; do
@@ -59,8 +60,8 @@ IMAGE_TMP="${IMAGE}.tmp.$$"
 cleanup_image() { rm -f "$IMAGE_TMP"; }
 trap cleanup_image EXIT
 
-dd if=/dev/zero of="$IMAGE_TMP" bs=1m count="$SIZE_MB"
-mke2fs -t ext4 -O encrypt -L data -F "$IMAGE_TMP" >/dev/null
+dd if=/dev/zero of="$IMAGE_TMP" bs=4096 count="$BLOCK_COUNT"
+mke2fs -t ext4 -O encrypt -L data -b 4096 -F "$IMAGE_TMP" "$BLOCK_COUNT" >/dev/null
 debugfs -w "$IMAGE_TMP" <<'EOF' >/dev/null 2>&1
 mkdir system
 mkdir system/var-lib
