@@ -17,10 +17,9 @@
 
 ## Limits
 
-These checks establish the local image contents and ELF metadata only. They do not prove that the G2's modified ALSA loader accepts the symbol version contract, that the constructor runs under the firmware's runtime conditions, or that LEDs/SSH work on hardware. The image has not been transferred to a device. The recorded hash applies only to this local build; generated filesystem metadata may make later builds differ.
+These checks establish the local image contents and ELF metadata only. They do not prove that the G2's modified ALSA loader accepts the symbol version contract, that the constructor runs under the firmware's runtime conditions, or that LEDs/SSH work on hardware. The recorded hash applies only to this local build; generated filesystem metadata may make later builds differ.
 
-This recorded artifact is 256 MiB. The builder and writer now also accept an exact 64 MiB profile, matching a separate user-reported successful JP24 transfer. Neither reported image size establishes maximum `/data` capacity. The Vault summarizes `/data` as `56 MB` at 24% used, but raw `df` output and exact units are missing. A later note reports a successful 256 MiB transfer. The exact partition size must be independently confirmed. No raw `/data` backup or demonstrated restore path is documented. The Vault's signed-firmware recovery idea and UART/U-Boot UMS route remain unverified. Resolve capacity and recovery before enabling any write.
-
+This recorded artifact is 256 MiB. The builder and writer also accept an exact 64 MiB profile. The Vault reports successful G2 use of a 256 MiB image and separately summarizes `/data` as “56 MB” at 24% used, without raw `df` output or clear units. These facts do not establish the partition's maximum capacity. No raw `/data` backup or demonstrated restore path is documented. The Vault's signed-firmware recovery idea and UART/U-Boot UMS route remain unverified.
 
 ## Additional local build: 64 MiB profile
 
@@ -29,4 +28,24 @@ This recorded artifact is 256 MiB. The builder and writer now also accept an exa
 - The builder completed the ext4 filesystem check and confirmed the `encrypt` feature. Both profiles use 4096-byte ext4 blocks, matching the Vault recipe.
 - The same source payload and public SSH key were used as the 256 MiB profile.
 
-The installer and native preflight now allow exactly 64 MiB and 256 MiB images. These are observed working image sizes, not a measurement of maximum `/data` capacity. Neither local artifact has been written to hardware.
+Neither local artifact has been written to hardware during this build session.
+
+## Static analysis of the vendor write handshake (2026-11-14)
+
+The arm64 slice of the extracted PRIME 4 G2 5.3.0 Updater binary was disassembled read-only with Apple's `otool`. Relevant symbols were present at the addresses already listed in the Vault: `_imbupd_write_partition` (0x10018231c), `_imbupd_stream_partition` (0x100182500), `_imbupd_transfer` (0x10018315c), and `_imbupd_start_write` (0x1001833d8).
+
+The vendor `_imbupd_start_write` routine appears to perform two distinct `write-part` request/response exchanges before streaming:
+
+1. It builds a standard 0x18-byte protocol header, appends the NUL-terminated partition name at offset 0x18, sets packet size to header plus that name, and calls the common send/response routine. That routine is given a 0x1c-byte response length.
+2. It then builds a separate start/stream descriptor with the total image size at offset 0x08, the partition name at offset 0x28, and packet size `0x29 + strlen(partition)`; it sends that as another `write-part` request and reads a response.
+3. Only after `_imbupd_start_write` succeeds does `_imbupd_write_partition` call the chunk-transfer routine.
+
+The current host writer sends only a packet shaped like step 2 and immediately expects an exact opcode/sequence/status echo. The vendor implementation therefore exposes a likely protocol mismatch that can explain the rejected start response. This is a static disassembly finding, not a hardware-confirmed repair. The precise response semantics and how the stream's finalization maps to the host implementation still need to be reconciled before changing the writer or attempting another transfer.
+
+The earlier writer accepted any response of at least 0x18 bytes at the start stage and streamed anyway; that weak check is not evidence that the response was valid. A previous Vault entry reports a successful 256 MiB G2 transfer, but the saved notes do not include a raw USB trace proving which handshake the device accepted.
+
+## Interrupted transfer on 2026-11-14
+
+A user-authorized 64 MiB transfer attempt sent an `erase-part data` request and then stopped at a write-start response mismatch before streaming image bytes or rebooting. The erase response was not instrumented with strict opcode/sequence checks in that build, so the exact erase outcome is unknown; treat `/data` as potentially erased. A following query received sequence-shifted responses and did not confirm current `version` or `power-source`. No further USB commands have been sent.
+
+The pasted `az01-signed-fs` analysis concerns signed test-app containers and does not explain the `imbupd` write-start response. The corrected local images use 4 KiB ext4 blocks as documented in the Vault, but have not been streamed to hardware. The original updater handshake must be fully decoded and reviewed before another write attempt.
