@@ -19,7 +19,7 @@
 
 These checks establish the local image contents and ELF metadata only. They do not prove that the G2's modified ALSA loader accepts the symbol version contract, that the constructor runs under the firmware's runtime conditions, or that LEDs/SSH work on hardware. The image has not been transferred to a device. The recorded hash applies only to this local build; generated filesystem metadata may make later builds differ.
 
-This recorded artifact is 256 MiB. The builder and writer now also accept an exact 64 MiB profile, matching a separate user-reported successful JP24 transfer. Neither reported image size establishes maximum `/data` capacity. The Vault records a 56 MB `/data` filesystem and also claims a 256 MiB image was transferred; this conflict is unresolved. No raw `/data` backup or demonstrated restore path is documented. The Vault's signed-firmware recovery idea and UART/U-Boot UMS route remain unverified. Resolve capacity and recovery before enabling any write.
+This recorded artifact is 256 MiB. The builder and writer now also accept an exact 64 MiB profile, matching a separate user-reported successful JP24 transfer. Neither reported image size establishes maximum `/data` capacity. The Vault summarizes `/data` as `56 MB` at 24% used, but raw `df` output and exact units are missing. A later note reports a successful 256 MiB transfer. The exact partition size must be independently confirmed. No raw `/data` backup or demonstrated restore path is documented. The Vault's signed-firmware recovery idea and UART/U-Boot UMS route remain unverified. Resolve capacity and recovery before enabling any write.
 
 
 ## Additional local build: 64 MiB profile
