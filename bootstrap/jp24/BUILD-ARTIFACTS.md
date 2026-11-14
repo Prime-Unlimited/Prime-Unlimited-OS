@@ -20,3 +20,13 @@
 These checks establish the local image contents and ELF metadata only. They do not prove that the G2's modified ALSA loader accepts the symbol version contract, that the constructor runs under the firmware's runtime conditions, or that LEDs/SSH work on hardware. The image has not been transferred to a device. The recorded hash applies only to this local build; generated filesystem metadata may make later builds differ.
 
 This recorded artifact is 256 MiB. The builder and writer now also accept an exact 64 MiB profile, matching a separate user-reported successful JP24 transfer. Neither successful image size establishes maximum `/data` capacity. Resolve the capacity and recovery discrepancy before enabling any write.
+
+
+## Additional local build: 64 MiB profile
+
+- Path: `bootstrap/jp24/build/prime4-g2-ssh-64.img` (generated output; not committed or uploaded).
+- SHA-256: `f48ec3d4e0c450853b1302249021784867341a19378bd87282695a268f8ad693`.
+- The builder completed the ext4 filesystem check and confirmed the `encrypt` feature.
+- The same source payload and public SSH key were used as the 256 MiB profile.
+
+The installer and native preflight now allow exactly 64 MiB and 256 MiB images. These are observed working image sizes, not a measurement of maximum `/data` capacity. Neither local artifact has been written to hardware.
