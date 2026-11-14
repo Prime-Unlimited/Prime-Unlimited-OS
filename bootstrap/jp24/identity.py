@@ -28,6 +28,7 @@ class Jp24Inspection:
     power_source: str | None
     product_code: str | None
     detail: str
+    identity_source: str | None = None
 
     @property
     def may_write(self) -> bool:
@@ -68,6 +69,12 @@ class Jp24IdentityProbe:
             )
 
         device = devices[0]
+        try:
+            usb_manufacturer = device.manufacturer
+            usb_product = device.product
+        except (usb.core.USBError, NotImplementedError):
+            usb_manufacturer = None
+            usb_product = None
         interface_verified = self._has_imbupd_interface(device)
         if not interface_verified:
             return self._result(
@@ -101,9 +108,17 @@ class Jp24IdentityProbe:
                 f"Unsupported imbupd protocol version {version!r}.",
             )
         if product is None:
+            if usb_manufacturer == "DENON DJ" and usb_product == "PRIME 4 G2":
+                detail = "Exact DENON DJ / PRIME 4 G2 USB product descriptors and the imbupd interface were verified."
+                if power != "mains":
+                    detail += " Connect the device to mains power before any write."
+                return self._result(
+                    IdentityState.VERIFIED_JP24, 1, True, version, power, None,
+                    detail, "USB manufacturer and product descriptors",
+                )
             return self._result(
                 IdentityState.TRANSPORT_ONLY, 1, True, version, power, product,
-                "The protocol responds, but it does not expose a positive JP24 product identity. No write is allowed.",
+                "The protocol has no JP24 product code and exact JP24 USB manufacturer/product descriptors were not available. No write is allowed.",
             )
         if product != "JP24":
             return self._result(
@@ -111,10 +126,15 @@ class Jp24IdentityProbe:
                 f"The device reports product code {product!r}, not JP24.",
             )
         state = IdentityState.VERIFIED_JP24
+        if usb_product is not None and (usb_manufacturer != "DENON DJ" or usb_product != "PRIME 4 G2"):
+            return self._result(
+                IdentityState.UNSUPPORTED, 1, True, version, power, product,
+                f"imbupd reports JP24, but USB descriptors identify {usb_manufacturer!r} / {usb_product!r}.",
+            )
         detail = "JP24 product identity verified through the imbupd product property."
         if power != "mains":
             detail += " Connect the device to mains power before any write."
-        return self._result(state, 1, True, version, power, product, detail)
+        return self._result(state, 1, True, version, power, product, detail, "imbupd product property")
 
     @classmethod
     def _has_imbupd_interface(cls, device: usb.core.Device) -> bool:
@@ -132,5 +152,14 @@ class Jp24IdentityProbe:
         return False
 
     @staticmethod
-    def _result(state, count, interface, version, power, product, detail):
-        return Jp24Inspection(state, count, interface, version, power, product, detail)
+    def _result(
+        state: IdentityState,
+        count: int,
+        interface: bool,
+        version: str | None,
+        power: str | None,
+        product: str | None,
+        detail: str,
+        identity_source: str | None = None,
+    ) -> Jp24Inspection:
+        return Jp24Inspection(state, count, interface, version, power, product, detail, identity_source)
