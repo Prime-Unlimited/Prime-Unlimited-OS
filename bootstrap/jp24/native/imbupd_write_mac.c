@@ -263,7 +263,7 @@ static int write_part(const char *part_name, int fd, off_t file_size) {
     memcpy(&response_seq, resp + 0x10, sizeof(response_seq));
     memcpy(&response_status, resp + 0x14, sizeof(response_status));
     if (memcmp(resp, IMBUPD_MAGIC_RESP, 4) != 0 || response_opcode != OP_WRITE_PART ||
-        response_seq != s || response_status == STATUS_ERROR) {
+        response_seq != s || response_status != STATUS_OK) {
         fprintf(stderr, "Device rejected or mismatched write-start response.\n");
         return -1;
     }
