@@ -86,3 +86,9 @@ Do not treat the transfer log as permission to resend an image. First confirm th
 A user-authorized 64 MiB transfer attempt sent an `erase-part data` request and then stopped at a write-start response mismatch before streaming image bytes or rebooting. The erase response was not instrumented with strict opcode/sequence checks in that build, so the exact erase outcome is unknown; treat `/data` as potentially erased. A following query received sequence-shifted responses and did not confirm current `version` or `power-source`. No further USB commands have been sent.
 
 The pasted `az01-signed-fs` analysis concerns signed test-app containers and does not explain the `imbupd` write-start response. The corrected local images use 4 KiB ext4 blocks as documented in the Vault, but have not been streamed to hardware. The original updater handshake must be fully decoded and reviewed before another write attempt.
+
+## macOS USB capture availability (2026-11-15)
+
+The Prime 4 G2 was visible in macOS IORegistry by its product name while connected. The host nevertheless exposed no Wireshark USB capture interface: `tshark -D` and `dumpcap -D` listed no `XHC20`, `ifconfig XHC20` reported that the interface does not exist, and the installed Wireshark extcap directory contained no USB capture backend. The Linux VM at `192.168.64.3` was not reachable over SSH during this check. No capture was started and the Denon updater was not launched.
+
+Wireshark documents macOS USB capture through `XHC20`; that path is unavailable in the current host configuration. The installed Wireshark build has no alternate local USB extcap. Do not disable SIP or change host security settings as an implicit workaround. A Windows host/guest with USBPcap or a suitable external USB analyzer would be an alternate capture path; neither was available in this session.
