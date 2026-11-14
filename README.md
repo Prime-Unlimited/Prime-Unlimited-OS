@@ -63,7 +63,7 @@ Sign and notarize release artifacts using project-controlled credentials. Creden
 ## Hardware blockers
 
 - **JC11S:** the exact positive Fastboot model identifier, independently reproduced bootstrap, redistributable payload, and proven backup/recovery procedure remain unavailable.
-- **JP24:** VID:PID `15e4:d014` is only transport evidence. The imbupd protocol implementation, positive model identity, redistributable ARM64 payload, and proven backup/recovery procedure remain unavailable.
+- **JP24:** a read-only macOS IORegistry inspection confirmed exact USB descriptors `DENON DJ` / `PRIME 4 G2` with VID:PID `15e4:d014` and the expected imbupd interface. The module now accepts that exact descriptor pair (or an imbupd `JP24` product code) alongside a successful protocol query. The imbupd product property has not returned a model code; a verified `/data` backup and recovery procedure is still missing, so production writing remains blocked.
 - A USB command reporting success is insufficient. Completion will require normal device operation and an authenticated, host-key-verified SSH session on port 22 (JC11S) or 2222 (JP24).
 
 See the [bootstrap specification](docs/BOOTSTRAP_SPEC.md), [device selection flow](docs/DEVICE_SELECTION.md), and [JC11S technical record](docs/JC11S_PROCESS.md).
