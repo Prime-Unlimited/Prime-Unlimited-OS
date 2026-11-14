@@ -59,9 +59,10 @@ A real Prime 4+ on Windows was accessed directly through Microsoft's existing Wi
 
 - [x] Document two transport paths and mandatory SSH requirement.
 - [x] Build safe read-only Fastboot output parser.
+- [x] Implement native Windows JC11S WinUSB diagnostics and explicitly confirmed reboot.
 - [ ] Implement read-only imbupd probe with confirmed JP24 identity.
 - [ ] Define validated firmware/device compatibility manifests.
-- [ ] Add Windows/macOS desktop shell and key setup.
+- [x] Add Windows/macOS desktop shell and key setup.
 - [ ] Independently reproduce fresh bootstrap on each device.
 - [ ] Test recovery and backups before enabling write operations.
 - [ ] Add SSH-based mod management.

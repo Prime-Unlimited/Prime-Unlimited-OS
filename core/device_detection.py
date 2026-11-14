@@ -14,6 +14,7 @@ class DetectionState(StrEnum):
     WRONG_PROFILE = "wrong_profile"
     AMBIGUOUS = "ambiguous"
     UNVERIFIED = "unverified"
+    TRANSPORT_ERROR = "transport_error"
 
 
 @dataclass(frozen=True)

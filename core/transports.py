@@ -23,6 +23,8 @@ class UsbDevice:
     transport: str
     identifier: str
     verified_model: str | None = None
+    protocol_version: str | None = None
+    statuses: tuple[str, ...] = ()
 
 
 class Transport(Protocol):

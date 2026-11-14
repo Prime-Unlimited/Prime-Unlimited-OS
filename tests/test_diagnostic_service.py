@@ -17,7 +17,16 @@ class FakeProbe:
 
 def test_selected_transport_is_reported_unverified_without_positive_identity():
     service = UsbDiagnosticService(
-        fastboot=FakeProbe([UsbDevice("fastboot", "serial-123")]),
+        fastboot=FakeProbe(
+            [
+                UsbDevice(
+                    "fastboot",
+                    "serial-123",
+                    protocol_version="0.4",
+                    statuses=("WinUSB interface accessible", "Fastboot protocol verified"),
+                )
+            ]
+        ),
         imbupd=FakeProbe(),
     )
 
@@ -25,6 +34,9 @@ def test_selected_transport_is_reported_unverified_without_positive_identity():
 
     assert report.result.state == DetectionState.UNVERIFIED
     assert "se…23" in "\n".join(report.log_lines)
+    assert report.fastboot_version == "0.4"
+    assert report.reboot_available is False  # The generic fixture deliberately has no reboot method.
+    assert "Fastboot protocol verified" in "\n".join(report.log_lines)
 
 
 def test_opposite_transport_reports_wrong_profile_even_if_selected_probe_is_missing():
@@ -37,3 +49,15 @@ def test_opposite_transport_reports_wrong_profile_even_if_selected_probe_is_miss
 
     assert report.result.state == DetectionState.WRONG_PROFILE
     assert "unavailable" in "\n".join(report.log_lines)
+
+
+def test_selected_transport_access_error_is_not_misreported_as_no_device():
+    service = UsbDiagnosticService(
+        fastboot=FakeProbe(error=TransportError("access denied by Windows")),
+        imbupd=FakeProbe(),
+    )
+
+    report = service.probe(ProfileId.JC11S)
+
+    assert report.result.state == DetectionState.TRANSPORT_ERROR
+    assert "access denied" in report.result.message

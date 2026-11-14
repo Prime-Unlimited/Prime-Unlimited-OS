@@ -110,6 +110,20 @@ class DiagnosticWorker(QRunnable):
             self.signals.failed.emit(redact(str(exc)))
 
 
+class RebootWorker(QRunnable):
+    def __init__(self, service: UsbDiagnosticService) -> None:
+        super().__init__()
+        self.service = service
+        self.signals = WorkerSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.signals.finished.emit(self.service.reboot_jc11s())
+        except Exception as exc:
+            self.signals.failed.emit(redact(str(exc)))
+
+
 class WorkflowPage(QWidget):
     exit_requested = Signal()
 
@@ -175,6 +189,10 @@ class WorkflowPage(QWidget):
         self.run_diagnostics_button.setObjectName("primary")
         self.run_diagnostics_button.clicked.connect(self.run_diagnostics)
         layout.addWidget(self.run_diagnostics_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.reboot_button = QPushButton("Reboot device")
+        self.reboot_button.clicked.connect(self.request_reboot)
+        self.reboot_button.setVisible(False)
+        layout.addWidget(self.reboot_button, 0, Qt.AlignmentFlag.AlignLeft)
         self.diagnostic_status = label("Diagnostics have not run.")
         layout.addWidget(self.diagnostic_status)
         self.diagnostic_log = QPlainTextEdit()
@@ -288,6 +306,7 @@ class WorkflowPage(QWidget):
         self.diagnostic_status.setText("Diagnostics have not run.")
         self.diagnostic_status.setStyleSheet("")
         self.diagnostic_log.clear()
+        self.reboot_button.setVisible(False)
         self.private_key_path.clear()
         self.public_key_path.clear()
         self.passphrase.clear()
@@ -319,6 +338,11 @@ class WorkflowPage(QWidget):
         self.run_diagnostics_button.setEnabled(True)
         self.diagnostic_log.setPlainText("\n".join(redact(line) for line in report.log_lines))
         self.diagnostic_status.setText(report.result.message)
+        can_reboot = (
+            self.profile_id == ProfileId.JC11S and report.reboot_available and report.fastboot_version is not None
+        )
+        self.reboot_button.setVisible(can_reboot)
+        self.reboot_button.setEnabled(can_reboot)
         if report.result.state in {DetectionState.MATCH, DetectionState.UNVERIFIED}:
             self.diagnostic_status.setStyleSheet("color:#ffd18a;")
         else:
@@ -332,7 +356,46 @@ class WorkflowPage(QWidget):
         self.diagnostic_status.setText("Diagnostics failed. Review the log and try again.")
         self.diagnostic_status.setStyleSheet("color:#ff7b7b;")
         self.diagnostic_log.setPlainText(redact(message))
+        self.reboot_button.setVisible(False)
         self._update_navigation()
+
+    def request_reboot(self) -> None:
+        if not self.reboot_button.isVisible() or self.diagnostic_report is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Reboot device",
+            "Send the non-flashing Fastboot reboot command now? The USB device is expected to disconnect.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.reboot_button.setEnabled(False)
+        self.run_diagnostics_button.setEnabled(False)
+        self.diagnostic_status.setText("Sending the explicitly confirmed reboot command…")
+        worker = RebootWorker(self.diagnostic_service)
+        worker.signals.finished.connect(self.handle_reboot_complete)
+        worker.signals.failed.connect(self.handle_reboot_failure)
+        self._worker = worker
+        self.thread_pool.start(worker)
+
+    @Slot(object)
+    def handle_reboot_complete(self, message: str) -> None:
+        self.run_diagnostics_button.setEnabled(True)
+        self.reboot_button.setVisible(False)
+        self.diagnostic_report = None
+        self.diagnostic_status.setText("Reboot command sent. Reconnect and run diagnostics again.")
+        self.diagnostic_log.appendPlainText(redact(str(message)))
+        self._update_navigation()
+
+    @Slot(str)
+    def handle_reboot_failure(self, message: str) -> None:
+        self.run_diagnostics_button.setEnabled(True)
+        self.reboot_button.setEnabled(True)
+        self.diagnostic_status.setText("The reboot command failed. The device was not modified.")
+        self.diagnostic_status.setStyleSheet("color:#ff7b7b;")
+        self.diagnostic_log.appendPlainText(redact(message))
 
     def choose_private_key(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Choose an Ed25519 private key")

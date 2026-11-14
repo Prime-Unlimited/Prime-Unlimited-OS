@@ -14,13 +14,15 @@ The user chooses the device **before** the installer begins USB detection. Do no
 ## Guided flow: Prime 4+ (JC11S)
 
 1. Show JC11S-specific instructions to enter Fastboot mode.
-2. Detect Fastboot and collect read-only device information.
+2. Detect Fastboot and collect read-only device information. On Windows, use the verified native WinUSB backend, retain Microsoft's inbox driver, and show the returned Fastboot protocol version. Do not require WSL2 or replace the driver.
 3. Verify identity, supported firmware and target partition against a tested profile. A Fastboot connection or matching partition size **alone is not sufficient**.
 4. Set up mandatory SSH keys (generate or securely import a matching keypair).
 5. Prepare and validate the JC11S SSH bootstrap image.
 6. Confirm backup/recovery readiness and explicit consent to overwrite `/data`.
 7. Write via Fastboot, reboot, and verify key-authenticated SSH on port 22.
 8. Unlock SSH-based mod management only after successful verification.
+
+After native Windows protocol verification, the diagnostic screen may offer **Reboot device**. It must require confirmation, send only the standard Fastboot `reboot` command, and tolerate the expected USB disconnect. Detection must never reboot automatically.
 
 ## Guided flow: Prime 4 G2 (JP24)
 

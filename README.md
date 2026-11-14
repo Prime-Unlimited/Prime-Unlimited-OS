@@ -20,7 +20,8 @@ Prime-Unlimited OS is a cross-platform desktop foundation for safely bootstrappi
 ## Implemented
 
 - Polished PySide6 desktop wizard with manual Prime 4+ (JC11S) and Prime 4 G2 (JP24) selection.
-- Separate read-only Fastboot and imbupd diagnostic paths with fail-closed writers.
+- Native Windows WinUSB diagnostics for JC11S, including verified Fastboot protocol version display and an explicitly confirmed reboot action.
+- Separate JC11S Fastboot and JP24 imbupd paths with fail-closed writers.
 - Explicit handling for absent, wrong, multiple, ambiguous, and unverified devices.
 - Mandatory passphrase-protected Ed25519 generation or existing key-pair validation.
 - Host-key-pinned SSH verification service.
@@ -62,11 +63,11 @@ Sign and notarize release artifacts using project-controlled credentials. Creden
 
 ## Hardware blockers
 
-- **JC11S:** the exact positive Fastboot model identifier, independently reproduced bootstrap, redistributable payload, and proven backup/recovery procedure remain unavailable.
+- **JC11S:** native Windows communication through Microsoft's inbox WinUSB driver is proven for `getvar:version` (`OKAY0.4`) and explicitly requested reboot. Positive model/firmware compatibility, independently reproduced bootstrap, redistributable payload, flashing, and proven backup/recovery remain unavailable.
 - **JP24:** VID:PID `15e4:d014` is only transport evidence. The imbupd protocol implementation, positive model identity, redistributable ARM64 payload, and proven backup/recovery procedure remain unavailable.
 - A USB command reporting success is insufficient. Completion will require normal device operation and an authenticated, host-key-verified SSH session on port 22 (JC11S) or 2222 (JP24).
 
-See the [bootstrap specification](docs/BOOTSTRAP_SPEC.md), [device selection flow](docs/DEVICE_SELECTION.md), and [JC11S technical record](docs/JC11S_PROCESS.md).
+On Windows, keep the existing Microsoft `WINUSB` / `winusb.inf` driver. The verified JC11S diagnostic path does not require Zadig, WSL2, or `usbipd-win`. Google's `fastboot.exe` did not enumerate the tested controller, so the app uses Windows APIs directly. See the [native Windows bench notes](docs/JC11S_WINDOWS_WINUSB_FASTBOOT.md), [bootstrap specification](docs/BOOTSTRAP_SPEC.md), [device selection flow](docs/DEVICE_SELECTION.md), and [JC11S technical record](docs/JC11S_PROCESS.md).
 
 ## Disclaimer
 

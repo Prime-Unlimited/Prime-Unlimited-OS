@@ -19,3 +19,9 @@
 ## Safety boundaries
 
 Device support is not implied by the existence of a profile. A profile must be verified against real hardware and firmware before enabling installation. Any destructive operation requires an explicit confirmation and a documented recovery strategy. No proprietary firmware images, private keys or credentials should be committed.
+
+## Windows JC11S transport
+
+On Windows, JC11S uses a native SetupAPI/WinUSB backend rather than Google's `fastboot.exe`. Interface-class GUIDs are enumerated at runtime, then candidates are filtered by WinUSB service and the observed `15E4:D007` hardware ID. The transport opens each candidate with `CreateFileW`, validates the actual `FF/42/03` interface descriptor, discovers bulk endpoints, applies bounded pipe timeouts, and verifies Fastboot with `getvar:version`.
+
+The protocol layer exposes diagnostic `getvar` queries and an explicitly confirmed reboot only. The Windows native module is loaded lazily and is never imported on macOS. Detection, identity authorization, firmware compatibility, and permission to flash remain separate gates; this backend contains no flash, erase, or download operation.
