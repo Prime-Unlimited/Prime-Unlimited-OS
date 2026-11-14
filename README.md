@@ -10,6 +10,7 @@ Open-source modding platform for Denon Prime 4+ and Prime 4 G2.
 - Modular mod management
 - DOOM
 - USB Copy to SSD
+- Custom Splashscreen
 
 ## Status
 
