@@ -16,7 +16,7 @@ The [Denon DJ PRIME 4 G2 FAQ](https://support.denondj.com/en/support/solutions/a
 
 The current [EngineX installer](https://github.com/Cd1s/EngineX-OS/blob/main/cmd/enginex-installer/main.go) handles JP24/AZ04 through a separate USB mode, `1cc5:2027` (`modeAZ`), and builds a fixed 64 MiB `/data` image. The code does not query partition capacity in that path; its comment attributes the 64 MiB size to a SYSTEM ONE hardware test. EngineX's Fastboot path does query `partition-size:data` for JC11S, but that is not the G2 path. Its [USB writer](https://github.com/Cd1s/EngineX-OS/blob/main/tools/az01-packer/host-install-usbupdate.py) speaks the `1cc5:2027` protocol, not this project's `15e4:d014` imbupd transport.
 
-This is useful evidence that EngineX has a second AZ04 update transport, but its 64 MiB value alone does **not** establish the JP24 `/data` capacity. A separate user-provided report describes a 64 MiB image transferred to `data` on PRIME 4 G2 hardware; earlier project notes also report success with a 256 MiB image. These are observed working image sizes, not measurements of the partition's maximum capacity, and do not establish a backup or recovery path.
+This is useful evidence that EngineX has a second AZ04 update transport, but its 64 MiB value alone does **not** establish the JP24 `/data` capacity. A separate user-provided report describes a 64 MiB image transferred to `data` on PRIME 4 G2 hardware; earlier project notes also report success with a 256 MiB image. These are reported image sizes, not measurements of the partition's maximum capacity. The Vault itself records `/data` as 56 MB on the G2, yet later says a 256 MiB image was transferred and EngineX ran. That size conflict is unresolved; the code's size whitelist is not a capacity guarantee.
 
 This is a known blocker, not an installer option that can be overridden by manual selection.
 
@@ -100,3 +100,8 @@ References: [EngineX hook implementation](https://github.com/Cd1s/EngineX-OS/blo
 
 
 See [BUILD-ARTIFACTS.md](./BUILD-ARTIFACTS.md) for the local 256 MiB image SHA-256 and the offline ELF/filesystem checks performed on the generated artifact. The image itself is intentionally not committed.
+
+
+### Backup and recovery status from the Vault
+
+The Vault documents no raw `/data` backup or restore procedure. `PC Update Mode - eMMC Zugang.md` says normal `reboot update` enters the proprietary updater, not U-Boot UMS; UMS is only a theoretical route through UART/U-Boot or a boot-failure fallback. `Notfall - Zurück zur Originalfirmware.md` describes the signed-firmware recovery path as expected, but explicitly says restoring `/data` has not been demonstrated. This is not a verified recovery plan for replacing `/data`. Keep the backup/recovery gate false until a raw backup and a restore path are proven on this JP24.
