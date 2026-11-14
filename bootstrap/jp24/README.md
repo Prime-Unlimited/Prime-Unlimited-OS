@@ -12,6 +12,12 @@ Hardware query result (2026-11-14; serial omitted): imbupd returned `version: 1.
 
 The [Denon DJ PRIME 4 G2 FAQ](https://support.denondj.com/en/support/solutions/articles/69000882239-prime-4-g2-frequently-asked-questions) says its computer-based Firmware Update Mode can be used for advanced troubleshooting or recovery from a failed firmware update. It does not document restoring a raw `/data` partition. Therefore official firmware reinstall is a possible system-recovery route, not a verified `/data` backup/recovery plan.
 
+## EngineX comparison
+
+The current [EngineX installer](https://github.com/Cd1s/EngineX-OS/blob/main/cmd/enginex-installer/main.go) handles JP24/AZ04 through a separate USB mode, `1cc5:2027` (`modeAZ`), and builds a fixed 64 MiB `/data` image. The code does not query partition capacity in that path; its comment attributes the 64 MiB size to a SYSTEM ONE hardware test. EngineX's Fastboot path does query `partition-size:data` for JC11S, but that is not the G2 path. Its [USB writer](https://github.com/Cd1s/EngineX-OS/blob/main/tools/az01-packer/host-install-usbupdate.py) speaks the `1cc5:2027` protocol, not this project's `15e4:d014` imbupd transport.
+
+This is useful evidence that EngineX has a second AZ04 update transport, but it does **not** establish the JP24 `/data` capacity or resolve the Vault's 56 MB versus 256 MiB observations. The 64 MiB value is an image-size choice in code, not a capacity measurement for this G2.
+
 This is a known blocker, not an installer option that can be overridden by manual selection.
 
 ## Module interface
