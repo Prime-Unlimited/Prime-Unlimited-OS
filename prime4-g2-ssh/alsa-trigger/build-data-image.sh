@@ -20,8 +20,14 @@ fi
 
 for cmd in mke2fs debugfs; do
     command -v "$cmd" >/dev/null 2>&1 || {
-        echo "Missing $cmd. On macOS install e2fsprogs: brew install e2fsprogs" >&2
-        exit 1
+        for dir in /opt/homebrew/opt/e2fsprogs/sbin /opt/homebrew/opt/e2fsprogs/bin /usr/local/opt/e2fsprogs/sbin /usr/local/opt/e2fsprogs/bin; do
+            [[ -d "$dir" ]] && PATH="$dir:$PATH"
+        done
+        export PATH
+        command -v "$cmd" >/dev/null 2>&1 || {
+            echo "Missing $cmd. On macOS install e2fsprogs: brew install e2fsprogs" >&2
+            exit 1
+        }
     }
 done
 
@@ -51,7 +57,7 @@ chmod 0755 "$TMP_DIR/boot-activate.sh"
 chmod 0600 "$TMP_DIR/authorized_keys"
 
 mkdir -p "$(dirname -- "$IMAGE")"
-dd if=/dev/zero of="$IMAGE" bs=1m count="$SIZE_MB" status=none
+dd if=/dev/zero of="$IMAGE" bs=1m count="$SIZE_MB"
 mke2fs -t ext4 -O encrypt -L data -F "$IMAGE" >/dev/null
 
 debugfs -w "$IMAGE" <<'EOF' >/dev/null 2>&1
