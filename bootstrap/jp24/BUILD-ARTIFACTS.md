@@ -19,4 +19,4 @@
 
 These checks establish the local image contents and ELF metadata only. They do not prove that the G2's modified ALSA loader accepts the symbol version contract, that the constructor runs under the firmware's runtime conditions, or that LEDs/SSH work on hardware. The image has not been transferred to a device. The recorded hash applies only to this local build; generated filesystem metadata may make later builds differ.
 
-The image remains 256 MiB because that is the current native writer profile. A separate user-reported 64 MiB image also worked on JP24 hardware, but neither report establishes maximum `/data` capacity. Resolve the capacity and recovery discrepancy before enabling any write.
+This recorded artifact is 256 MiB. The builder and writer now also accept an exact 64 MiB profile, matching a separate user-reported successful JP24 transfer. Neither successful image size establishes maximum `/data` capacity. Resolve the capacity and recovery discrepancy before enabling any write.
