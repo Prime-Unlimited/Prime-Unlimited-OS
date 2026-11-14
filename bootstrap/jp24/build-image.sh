@@ -15,8 +15,8 @@ if ! awk '$1 == "ssh-ed25519" && NF >= 2 { found=1 } END { exit !found }' "$PUBL
     echo "Only a valid-looking OpenSSH Ed25519 public key is accepted." >&2
     exit 2
 fi
-if [[ ! "$SIZE_MB" =~ ^[0-9]+$ ]] || (( SIZE_MB != 256 )); then
-    echo "The JP24 profile currently requires a 256 MiB image." >&2
+if [[ ! "$SIZE_MB" =~ ^(64|256)$ ]]; then
+    echo "Supported JP24 image profiles are exactly 64 MiB and 256 MiB." >&2
     exit 2
 fi
 
@@ -59,7 +59,7 @@ IMAGE_TMP="${IMAGE}.tmp.$$"
 cleanup_image() { rm -f "$IMAGE_TMP"; }
 trap cleanup_image EXIT
 
-dd if=/dev/zero of="$IMAGE_TMP" bs=1m count=256
+dd if=/dev/zero of="$IMAGE_TMP" bs=1m count="$SIZE_MB"
 mke2fs -t ext4 -O encrypt -L data -F "$IMAGE_TMP" >/dev/null
 debugfs -w "$IMAGE_TMP" <<'EOF' >/dev/null 2>&1
 mkdir system
@@ -102,4 +102,4 @@ else
     shasum -a 256 "$IMAGE_TMP"
 fi
 mv -f "$IMAGE_TMP" "$IMAGE"
-echo "Built and checked JP24 image: $IMAGE (256 MiB). No device was written."
+echo "Built and checked JP24 image: $IMAGE ($SIZE_MB MiB). No device was written."
