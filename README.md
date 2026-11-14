@@ -1,6 +1,6 @@
-# Prime Unlimited OS
-
-Open-source modding platform for Denon Prime 4+ and Prime 4 G2.
+<p align="center">
+  <img src="assets/prime-unlimited-os-brand.png" alt="Prime Unlimited OS — open-source modding platform for Denon Prime 4+ and Prime 4 G2" width="100%" />
+</p>
 
 ## Features (planned)
 
