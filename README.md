@@ -63,7 +63,7 @@ Sign and notarize release artifacts using project-controlled credentials. Creden
 ## Hardware blockers
 
 - **JC11S:** the exact positive Fastboot model identifier, independently reproduced bootstrap, redistributable payload, and proven backup/recovery procedure remain unavailable.
-- **JP24:** read-only hardware inspection confirmed USB descriptors `DENON DJ` / `PRIME 4 G2`, VID:PID `15e4:d014`, and the expected imbupd interface. The protocol query returned version `1.4.2` and mains power; `product` and `serial` were not found. The module accepts the exact descriptor pair with a successful protocol query. A verified `/data` backup and recovery procedure remains missing, so production writing is blocked.
+- **JP24:** read-only hardware inspection confirmed USB descriptors `DENON DJ` / `PRIME 4 G2`, VID:PID `15e4:d014`, and the expected imbupd interface. The protocol query returned version `1.4.2` and mains power; `product` and `serial` were not found. Vault records conflict on `/data` capacity (56 MB in one root-shell note versus a later successful 256 MiB image write); imbupd reports no partition size. The writer now preflights the known 256 MiB ext4 profile before USB access, but the target capacity discrepancy and verified backup/recovery procedure must be resolved before any flash.
 - A USB command reporting success is insufficient. Completion will require normal device operation and an authenticated, host-key-verified SSH session on port 22 (JC11S) or 2222 (JP24).
 
 See the [bootstrap specification](docs/BOOTSTRAP_SPEC.md), [device selection flow](docs/DEVICE_SELECTION.md), and [JC11S technical record](docs/JC11S_PROCESS.md).
