@@ -57,8 +57,9 @@ class Jp24Bootstrap:
             raise WriteBlockedError("The device evidence changed after inspection. Run the setup flow again.")
         if not plan.backup_recovery_verified:
             raise WriteBlockedError("A verified /data backup and recovery procedure is required before writing.")
-        if not plan.image.is_file() or plan.image.stat().st_size != 256 * 1024 * 1024:
-            raise WriteBlockedError("The validated JP24 image is missing.")
+        allowed_image_sizes = {64 * 1024 * 1024, 256 * 1024 * 1024}
+        if not plan.image.is_file() or plan.image.stat().st_size not in allowed_image_sizes:
+            raise WriteBlockedError("The validated JP24 image is missing or has an unsupported size.")
         if not plan.expected_sha256 or self._sha256(plan.image) != plan.expected_sha256.lower():
             raise WriteBlockedError("The image checksum does not match the validated build artifact.")
         message = (
