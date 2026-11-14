@@ -56,6 +56,7 @@
 /* Response status at offset 0x14 */
 #define STATUS_OK        0x01
 #define STATUS_ERROR     0x03
+#define STATUS_WRITE_STARTED 0x05
 
 /* Reboot payload magic */
 #define REBOOT_MAGIC     0xA55A0101
@@ -64,6 +65,13 @@
 #define DATA_IMAGE_SIZE_256_MIB ((off_t)256 * 1024 * 1024)
 
 static libusb_device_handle *g_dev;
+
+/* The vendor increments a single sequence counter before every request. */
+static uint16_t g_sequence;
+
+static uint16_t next_sequence(void) {
+    return ++g_sequence;
+}
 
 /*
  * imbupd packet header (0x18 bytes):
@@ -132,9 +140,7 @@ static int get_property(const char *name, char *out, int out_size) {
     unsigned char resp[MAX_PKT];
     int name_len = strlen(name) + 1;
     uint16_t pkt_size = 0x18 + name_len;
-    static uint16_t seq = 0;
-
-    uint16_t request_seq = seq++;
+    uint16_t request_seq = next_sequence();
     build_header(pkt, OP_GET_PROPERTY, request_seq, pkt_size);
     memcpy(pkt + 0x18, name, name_len);
 
@@ -174,11 +180,9 @@ static int erase_part(const char *part_name) {
     unsigned char resp[MAX_PKT];
     int name_len = strlen(part_name) + 1;
     uint16_t pkt_size = 0x18 + name_len;
-    static uint16_t seq = 100;
-
     printf("Erasing partition '%s'...\n", part_name);
 
-    uint16_t request_seq = seq++;
+    uint16_t request_seq = next_sequence();
     build_header(pkt, OP_ERASE_PART, request_seq, pkt_size);
     memcpy(pkt + 0x18, part_name, name_len);
 
@@ -258,7 +262,6 @@ static int write_part(const char *part_name, int fd, off_t file_size) {
     memset(start_pkt, 0, sizeof(start_pkt));
     int name_len = strlen(part_name) + 1;
     uint16_t start_size = 0x28 + name_len;
-    static uint16_t seq = 200;
 
     uint32_t magic = IMBUPD_MAGIC_REQ;
     uint32_t opcode = OP_WRITE_PART;
@@ -267,7 +270,7 @@ static int write_part(const char *part_name, int fd, off_t file_size) {
     /* Total image size at offset 0x08 (uint64 LE) */
     uint64_t total = (uint64_t)file_size;
     memcpy(start_pkt + 0x08, &total, 8);
-    uint16_t s = seq++;
+    uint16_t s = next_sequence();
     memcpy(start_pkt + 0x10, &s, 2);
     memcpy(start_pkt + 0x16, &start_size, 2);
     /* Partition name at offset 0x28 */
@@ -289,7 +292,7 @@ static int write_part(const char *part_name, int fd, off_t file_size) {
     memcpy(&response_seq, resp + 0x10, sizeof(response_seq));
     memcpy(&response_status, resp + 0x14, sizeof(response_status));
     if (memcmp(resp, IMBUPD_MAGIC_RESP, 4) != 0 || response_opcode != OP_WRITE_PART ||
-        response_seq != s || response_status != STATUS_OK) {
+        response_seq != s || response_status != STATUS_WRITE_STARTED) {
         fprintf(stderr, "Write-start rejected/mismatched: opcode=0x%08x seq=%u status=0x%04x expected_seq=%u.\n",
                 response_opcode, response_seq, response_status, s);
         return -1;
@@ -355,11 +358,10 @@ static int do_reboot(void) {
     unsigned char pkt[MAX_PKT];
     unsigned char resp[MAX_PKT];
     uint16_t pkt_size = 0x18 + 4;
-    static uint16_t seq = 300;
 
     printf("Rebooting device...\n");
 
-    build_header(pkt, OP_REBOOT, seq++, pkt_size);
+    build_header(pkt, OP_REBOOT, next_sequence(), pkt_size);
     uint32_t reboot_magic = REBOOT_MAGIC;
     memcpy(pkt + 0x18, &reboot_magic, 4);
 
@@ -456,8 +458,13 @@ int main(int argc, char **argv) {
 
     } else if (strcmp(argv[1], "write") == 0) {
         /* Safety check: device must be on mains power */
+        char version[64] = {0};
         char power[64] = {0};
-        if (get_property("power-source", power, sizeof(power)) != 0 ||
+        if (get_property("version", version, sizeof(version)) != 0 ||
+            strcmp(version, "1.4.2") != 0) {
+            fprintf(stderr, "ERROR: Unexpected imbupd protocol version ('%s').\n", version);
+            ret = 1;
+        } else if (get_property("power-source", power, sizeof(power)) != 0 ||
             strcmp(power, "mains") != 0) {
             fprintf(stderr, "ERROR: Device is not on mains power ('%s').\n", power);
             fprintf(stderr, "Connect the power cable before flashing!\n");
