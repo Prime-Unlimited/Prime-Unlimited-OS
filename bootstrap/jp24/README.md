@@ -4,7 +4,9 @@ Standalone integration module for the Denon DJ Prime 4 G2 (JP24). It is designed
 
 ## Status and identity gate
 
-The module can recognize the reported imbupd USB transport (`15e4:d014`, interface class `ff/61/7a`) and query the protocol. These facts identify a transport, not the controller model. The current engineering record says imbupd returns protocol version `1.4.2` and power source, while `product`, `model`, `board`, and related identity properties return an error. Therefore this module reports `transport_only` and blocks flashing until imbupd provides a positive `JP24` product identity. It does not infer model identity from VID:PID or protocol version.
+The module recognizes the imbupd USB transport (`15e4:d014`, interface class `ff/61/7a`) and queries the protocol. A matching VID:PID or protocol version alone identifies only the transport. JP24 identity is accepted only from the exact imbupd product code `JP24`, or from the exact USB manufacturer/product strings `DENON DJ` / `PRIME 4 G2`, together with a successful `1.4.2` protocol response and the expected imbupd interface.
+
+A read-only macOS IORegistry inspection of the connected controller confirmed vendor ID `5604` (`0x15e4`), product ID `53268` (`0xd014`), manufacturer `DENON DJ`, product `PRIME 4 G2`, and the `ff/61/7a` interface signature. No serial number is recorded here. The standalone C query still needs USB access permission to collect protocol properties. Identity evidence by itself does not establish a safe write: the verified `/data` backup and recovery gate remains mandatory.
 
 This is a known blocker, not an installer option that can be overridden by manual selection.
 
@@ -43,6 +45,8 @@ SSH verification uses the repository's `core.ssh_service.SshService`: it pins on
 
 On macOS with Homebrew: `brew install libusb pkg-config e2fsprogs`; install Zig separately. Linux package names vary by distribution. Windows needs a libusb-compatible backend/driver and a supported AArch64 cross-compiler; this target still needs integration validation.
 
+The current build helpers are Bash scripts intended for macOS and Linux. A native Windows build adapter is not included yet.
+
 Build the read-only/native protocol tool from the repository root with `./bootstrap/jp24/build-native.sh`. Build the image with `./bootstrap/jp24/build-image.sh /path/to/installer-key.pub [output-image]`.
 
 ## Build inputs and image
@@ -55,6 +59,6 @@ The image builder validates the public-key format, expected paths, ext4 health, 
 
 - The Vault records a successful JP24 SSH setup on port 2222 using the ALSA hook and `imbupd` data-image transfer.
 - That does not yet establish a redistributable, independently reproducible Prime-Unlimited bootstrap package.
-- Positive JP24 identification through the update-mode protocol is currently unavailable.
+- The imbupd `product` property has not returned a JP24 code; the exact host-visible USB manufacturer/product descriptors were independently confirmed on the connected unit.
 - `/data` replacement is destructive. A tested backup and recovery path is still required before production writing is enabled.
 - No flash has been run by this module during development.
