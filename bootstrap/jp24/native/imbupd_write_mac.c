@@ -60,7 +60,8 @@
 /* Reboot payload magic */
 #define REBOOT_MAGIC     0xA55A0101
 #define WRITE_CONFIRMATION "FLASH JP24 /data"
-#define EXPECTED_DATA_IMAGE_SIZE ((off_t)256 * 1024 * 1024)
+#define DATA_IMAGE_SIZE_64_MIB ((off_t)64 * 1024 * 1024)
+#define DATA_IMAGE_SIZE_256_MIB ((off_t)256 * 1024 * 1024)
 
 static libusb_device_handle *g_dev;
 
