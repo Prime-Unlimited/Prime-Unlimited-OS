@@ -26,7 +26,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <libusb-1.0/libusb.h>
+#include <libusb.h>
 
 /* USB device identifiers */
 #define VID          0x15E4
@@ -36,7 +36,7 @@
 
 /* imbupd protocol constants */
 #define IMBUPD_MAGIC_REQ   0x4F305A41  /* "AZ0O" — Out/Request */
-#define IMBUPD_MAGIC_RESP  0x4F305A49  /* "AZ0I" — In/Response */
+#define IMBUPD_MAGIC_RESP  "AZ0I"     /* Raw response bytes, independent of host endianness */
 
 /* Opcodes (from ARM64 assembly of Denon Firmware Updater) */
 #define OP_GET_PUBKEY    0x5AA5F906
@@ -51,7 +51,6 @@
 #define TIMEOUT_SHORT    5000     /* 5s for queries */
 #define TIMEOUT_LONG     300000   /* 5min for flash operations */
 #define MAX_PKT          4096
-#define JP24_DATA_IMAGE_SIZE (256ULL * 1024 * 1024)
 
 /* Response status at offset 0x14 */
 #define STATUS_OK        0x01
@@ -59,6 +58,7 @@
 
 /* Reboot payload magic */
 #define REBOOT_MAGIC     0xA55A0101
+#define WRITE_CONFIRMATION "FLASH JP24 /data"
 
 static libusb_device_handle *g_dev;
 
@@ -115,10 +115,9 @@ static int send_recv(unsigned char *pkt, uint16_t pkt_size,
         fprintf(stderr, "Short response (%d bytes)\n", n);
         return -1;
     }
-    uint32_t resp_magic;
-    memcpy(&resp_magic, resp, 4);
-    if (resp_magic != IMBUPD_MAGIC_RESP) {
-        fprintf(stderr, "Bad response magic: 0x%08x\n", resp_magic);
+    if (memcmp(resp, IMBUPD_MAGIC_RESP, 4) != 0) {
+        fprintf(stderr, "Bad response magic: %02x %02x %02x %02x (expected AZ0I)\n",
+                resp[0], resp[1], resp[2], resp[3]);
         return -1;
     }
     return n;
@@ -200,20 +199,9 @@ static int write_part(const char *part_name, const char *image_path) {
         close(fd);
         return -1;
     }
-    if (file_size != (off_t)JP24_DATA_IMAGE_SIZE) {
-        fprintf(stderr, "ERROR: JP24 /data image must be exactly 256 MiB; refusing to erase.\n");
-        close(fd);
-        return -1;
-    }
 
     printf("Writing '%s' to partition '%s' (%lld bytes)...\n",
            image_path, part_name, (long long)file_size);
-
-    /* Erase only after opening the image and validating its exact size. */
-    if (erase_part(part_name) != 0) {
-        close(fd);
-        return -1;
-    }
 
     /* Send write-start header: opcode WRITE_PART, total size at 0x08,
        partition name at 0x28 (header is 0x28 bytes for write-start) */
@@ -328,7 +316,7 @@ static int do_reboot(void) {
 static void usage(const char *prog) {
     fprintf(stderr, "Usage:\n");
     fprintf(stderr, "  %s query                     — Show device info\n", prog);
-    fprintf(stderr, "  %s write data <image> --confirm \"FLASH JP24 /data\"\n", prog);
+    fprintf(stderr, "  %s write data <image> --confirm \"%s\"\n", prog, WRITE_CONFIRMATION);
     fprintf(stderr, "  %s reboot                    — Reboot device\n", prog);
     fprintf(stderr, "\nThe device must be in Firmware Update Mode (USB PID 0xD014).\n");
     fprintf(stderr, "Requires sudo for USB access on macOS.\n");
@@ -336,6 +324,25 @@ static void usage(const char *prog) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
+        usage(argv[0]);
+        return 1;
+    }
+
+    if (strcmp(argv[1], "query") == 0 || strcmp(argv[1], "reboot") == 0) {
+        if (argc != 2) {
+            usage(argv[0]);
+            return 1;
+        }
+    } else if (strcmp(argv[1], "write") == 0) {
+        if (argc != 6 || strcmp(argv[2], "data") != 0 ||
+            strcmp(argv[4], "--confirm") != 0 ||
+            strcmp(argv[5], WRITE_CONFIRMATION) != 0) {
+            fprintf(stderr,
+                    "Refusing to write: only /data is supported and the exact confirmation phrase is required.\n");
+            usage(argv[0]);
+            return 1;
+        }
+    } else {
         usage(argv[0]);
         return 1;
     }
@@ -375,32 +382,21 @@ int main(int argc, char **argv) {
             printf("  power-source: %s\n", val);
         if (get_property("product", val, sizeof(val)) == 0)
             printf("  product:      %s\n", val);
+        if (get_property("serial", val, sizeof(val)) == 0)
+            printf("  serial:       %s\n", val);
 
     } else if (strcmp(argv[1], "write") == 0) {
-        if (argc != 6 || strcmp(argv[2], "data") != 0 ||
-            strcmp(argv[4], "--confirm") != 0 ||
-            strcmp(argv[5], "FLASH JP24 /data") != 0) {
-            fprintf(stderr, "ERROR: writing is limited to /data and requires the exact confirmation phrase.\n");
-            usage(argv[0]);
+        /* Safety check: device must be on mains power */
+        char power[64] = {0};
+        if (get_property("power-source", power, sizeof(power)) != 0 ||
+            strcmp(power, "mains") != 0) {
+            fprintf(stderr, "ERROR: Device is not on mains power ('%s').\n", power);
+            fprintf(stderr, "Connect the power cable before flashing!\n");
             ret = 1;
         } else {
-            /* Require a positive model response at the last possible point. */
-            char product[64] = {0};
-            if (get_property("product", product, sizeof(product)) != 0 ||
-                strcmp(product, "JP24") != 0) {
-                fprintf(stderr, "ERROR: imbupd did not positively identify product JP24; no write performed.\n");
-                ret = 1;
-            } else {
-                /* Safety check: device must be on mains power. */
-                char power[64] = {0};
-                if (get_property("power-source", power, sizeof(power)) != 0 ||
-                    strcmp(power, "mains") != 0) {
-                    fprintf(stderr, "ERROR: device is not on mains power; no write performed.\n");
-                    ret = 1;
-                } else {
-                    ret = write_part("data", argv[3]);
-                }
-            }
+            ret = erase_part("data");
+            if (ret == 0)
+                ret = write_part("data", argv[3]);
         }
 
     } else if (strcmp(argv[1], "reboot") == 0) {
