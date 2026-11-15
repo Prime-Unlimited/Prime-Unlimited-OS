@@ -322,7 +322,7 @@ class WorkflowPage(QWidget):
         layout.addWidget(label("Build this device's SSH image", "title"))
         layout.addWidget(
             label(
-                "The installer re-reads the connected device geometry, checks the WSL build tools, "
+                "The installer re-reads the connected device geometry, checks its bundled native build tools, "
                 "creates an exact-size ext4 image, converts it to Android sparse format and verifies every sector.",
                 "subtitle",
             )
@@ -566,10 +566,16 @@ class WorkflowPage(QWidget):
                 f"{interface.interface_class:02X}/{interface.interface_subclass:02X}/{interface.interface_protocol:02X}"
             )
             interface_text = f"\nInterface: {descriptor}  ·  Endpoints: {', '.join(interface.endpoints)}"
+        product = self.diagnostic_report.fastboot_product
+        model_verified = product == "rk3288-az01-jc11s"
+        model_text = (
+            f"Verified ({product})" if model_verified else (f"Rejected ({product})" if product else "Unverified")
+        )
+        installation = "Ready for guarded preparation" if model_verified else "Blocked"
         self.candidate_details.setText(
             f"USB detected: Yes  ·  VID/PID: {candidate.vid_pid}  ·  Source: {candidate.source}\n"
-            f"Transport: {transport_status}  ·  Model identity: Unverified{interface_text}\n"
-            "Hardware revision: Unknown  ·  Installation: Blocked"
+            f"Transport: {transport_status}  ·  Model identity: {model_text}{interface_text}\n"
+            f"Hardware revision: Unknown  ·  Installation: {installation}"
         )
 
     @Slot(str)
@@ -677,7 +683,7 @@ class WorkflowPage(QWidget):
             return
         self.prepare_button.setEnabled(False)
         self.build_progress.setRange(0, 0)
-        self.build_status.setText("Re-reading device geometry and building through WSL…")
+        self.build_status.setText("Re-reading device geometry and building the image natively…")
         identifier = self.candidate_selector.currentData() if self.candidate_selector.isVisible() else None
         worker = TaskWorker(lambda: self.installer_service.prepare(self.key_pair.public_key, identifier))
         worker.signals.finished.connect(self._image_ready)
@@ -821,10 +827,7 @@ class WorkflowPage(QWidget):
     def _diagnostics_allow_key_setup(self) -> bool:
         if self.diagnostic_report is None:
             return False
-        return self.diagnostic_report.result.state in {
-            DetectionState.MATCH,
-            DetectionState.UNVERIFIED,
-        }
+        return self.diagnostic_report.result.state == DetectionState.MATCH
 
     def _update_navigation(self) -> None:
         page = self.page_stack.currentIndex()

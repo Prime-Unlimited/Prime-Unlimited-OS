@@ -21,8 +21,22 @@ FEATURES = "none,has_journal,ext_attr,filetype,extent,sparse_super,large_file"
 SOURCE = Path(__file__).resolve().parents[1] / "bootstrap" / "jc11s"
 
 
-def run(args: list[str], **kwargs) -> str:
+def run(
+    args: list[str],
+    *,
+    tool_directory: Path | None = None,
+    mke2fs_config: Path | None = None,
+    **kwargs,
+) -> str:
     env = dict(os.environ, E2FSPROGS_FAKE_TIME=EPOCH, SOURCE_DATE_EPOCH=EPOCH, LC_ALL="C")
+    if tool_directory is not None:
+        executable = tool_directory / (args[0] + (".exe" if os.name == "nt" else ""))
+        if not executable.is_file():
+            raise FileNotFoundError(f"Bundled filesystem tool is missing: {executable.name}")
+        args = [str(executable), *args[1:]]
+        env["PATH"] = str(tool_directory) + os.pathsep + env.get("PATH", "")
+    if mke2fs_config is not None:
+        env["MKE2FS_CONFIG"] = str(mke2fs_config)
     result = subprocess.run(args, env=env, capture_output=True, text=True, check=True, **kwargs)
     return result.stdout
 
@@ -56,7 +70,16 @@ def validate_hook(path: Path) -> None:
         raise ValueError("Hook must be an ARM shared object.")
 
 
-def build(output: Path, key: Path, hook: Path, size: int, device_geometry: dict | None = None) -> dict:
+def build(
+    output: Path,
+    key: Path,
+    hook: Path,
+    size: int,
+    device_geometry: dict | None = None,
+    *,
+    tool_directory: Path | None = None,
+    mke2fs_config: Path | None = None,
+) -> dict:
     """Explicit size is experimental, never inferred from USB ID or mount path."""
     if size < 64 * 1024**2 or size > 0xFFFFFFFF * 512 or size % 512:
         raise ValueError("Image size must be at least 64 MiB, sparse-addressable and sector aligned.")
@@ -117,6 +140,8 @@ def build(output: Path, key: Path, hook: Path, size: int, device_geometry: dict 
                 "data.ext4",
             ],
             cwd=temp,
+            tool_directory=tool_directory,
+            mke2fs_config=mke2fs_config,
         )
         commands = []
         modes = {"/": 0o40755, "lost+found": 0o40700}
@@ -135,8 +160,8 @@ def build(output: Path, key: Path, hook: Path, size: int, device_geometry: dict 
             }.items():
                 commands.append(f"set_inode_field {path} {field} {value}")
         (temp / "metadata").write_text("\n".join(commands) + "\n")
-        run(["debugfs", "-w", "-f", "metadata", "data.ext4"], cwd=temp)
-        run(["e2fsck", "-f", "-n", "data.ext4"], cwd=temp)
+        run(["debugfs", "-w", "-f", "metadata", "data.ext4"], cwd=temp, tool_directory=tool_directory)
+        run(["e2fsck", "-f", "-n", "data.ext4"], cwd=temp, tool_directory=tool_directory)
         # Copy sparsely in blocks without allocating all zero data on disk.
         with image.open("rb") as src, output.open("xb") as dst:
             for chunk in iter(lambda: src.read(1024 * 1024), b""):
@@ -157,7 +182,7 @@ def build(output: Path, key: Path, hook: Path, size: int, device_geometry: dict 
         "files": {name: hashlib.sha256(data).hexdigest() for name, (data, _) in files.items()},
     }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
-    verify(output)
+    verify(output, tool_directory=tool_directory, mke2fs_config=mke2fs_config)
     return manifest
 
 
@@ -174,15 +199,21 @@ def verify_integrity(image: Path) -> dict:
     return manifest
 
 
-def verify(image: Path) -> dict:
+def verify(
+    image: Path, *, tool_directory: Path | None = None, mke2fs_config: Path | None = None
+) -> dict:
     manifest = verify_integrity(image)
-    run(["e2fsck", "-f", "-n", str(image.resolve())])
+    run(["e2fsck", "-f", "-n", str(image.resolve())], tool_directory=tool_directory)
     with tempfile.TemporaryDirectory() as temporary:
         for index, (name, expected) in enumerate(manifest["files"].items()):
             if not re.fullmatch(r"[a-zA-Z0-9_./-]+", name) or ".." in name:
                 raise ValueError("Unsafe manifest path.")
             # cwd isolates output filename from debugfs command parsing.
-            run(["debugfs", "-R", f"dump /{name} file{index}", str(image.resolve())], cwd=temporary)
+            run(
+                ["debugfs", "-R", f"dump /{name} file{index}", str(image.resolve())],
+                cwd=temporary,
+                tool_directory=tool_directory,
+            )
             if digest(Path(temporary) / f"file{index}") != expected:
                 raise ValueError(f"Filesystem payload mismatch: {name}")
     return manifest

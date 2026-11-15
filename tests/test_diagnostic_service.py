@@ -11,9 +11,10 @@ from core.usb_discovery import (
 
 
 class FakeProbe:
-    def __init__(self, devices=None, error=None):
+    def __init__(self, devices=None, error=None, product=None):
         self.devices = devices or []
         self.error = error
+        self.product = product
         self.last_identifier = None
 
     def probe(self, identifier=None):
@@ -21,6 +22,12 @@ class FakeProbe:
         if self.error:
             raise self.error
         return [device for device in self.devices if identifier is None or device.identifier == identifier]
+
+    def getvar(self, name, identifier=None):
+        assert name == "product"
+        if self.product is None:
+            raise TransportError("product is unavailable")
+        return self.product
 
 
 class Discovery:
@@ -67,6 +74,29 @@ def test_selected_transport_is_reported_unverified_without_positive_identity():
     assert report.fastboot_version == "0.4"
     assert report.reboot_available is False  # The generic fixture deliberately has no reboot method.
     assert "Fastboot protocol verified" in "\n".join(report.log_lines)
+
+
+def test_exact_fastboot_product_positively_verifies_jc11s():
+    fastboot = FakeProbe(
+        [UsbDevice("fastboot", "serial-123", protocol_version="0.4", transport_verified=True)],
+        product="rk3288-az01-jc11s",
+    )
+    report = UsbDiagnosticService(fastboot=fastboot, imbupd=FakeProbe()).probe(ProfileId.JC11S)
+    assert report.result.state == DetectionState.MATCH
+    assert report.result.may_continue
+    assert report.fastboot_product == "rk3288-az01-jc11s"
+    assert "fastboot: product rk3288-az01-jc11s" in report.log_lines
+
+
+def test_different_fastboot_product_is_wrong_model_and_blocked():
+    fastboot = FakeProbe(
+        [UsbDevice("fastboot", "serial-123", protocol_version="0.4", transport_verified=True)],
+        product="rk3288-something-else",
+    )
+    report = UsbDiagnosticService(fastboot=fastboot, imbupd=FakeProbe()).probe(ProfileId.JC11S)
+    assert report.result.state == DetectionState.WRONG_PROFILE
+    assert not report.result.may_continue
+    assert report.fastboot_product == "rk3288-something-else"
 
 
 def test_opposite_transport_reports_wrong_profile_even_if_selected_probe_is_missing():

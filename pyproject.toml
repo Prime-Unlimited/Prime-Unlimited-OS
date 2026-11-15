@@ -25,6 +25,7 @@ prime-unlimited-os = "app.main:main"
 include = ["app*", "core*"]
 
 [tool.pytest.ini_options]
+markers = ["native_windows: requires the bundled Windows e2fsprogs runtime"]
 testpaths = ["tests"]
 addopts = "-q"
 

@@ -7,13 +7,12 @@ from PyInstaller.utils.hooks import collect_data_files
 project_root = os.path.abspath(os.path.join(SPECPATH, ".."))
 datas = collect_data_files("app")
 datas.append((os.path.join(project_root, "assets", "prime-unlimited-os-brand.png"), "assets"))
-# WSL executes these source files directly; PyInstaller's Python archive is not
-# addressable from the Linux environment.
-for source_dir in ("core", "bootstrap", "tools"):
-    for root, _, files in os.walk(os.path.join(project_root, source_dir)):
-        destination = os.path.relpath(root, project_root)
-        for filename in files:
-            if filename.endswith((".py", ".sh", ".c", ".conf")):
+for source_dir in ("bootstrap", os.path.join("vendor", "windows", "e2fsprogs")):
+    absolute = os.path.join(project_root, source_dir)
+    if os.path.isdir(absolute):
+        for root, _, files in os.walk(absolute):
+            destination = os.path.relpath(root, project_root)
+            for filename in files:
                 datas.append((os.path.join(root, filename), destination))
 hiddenimports = ["paramiko", "cryptography"]
 if sys.platform == "win32":

@@ -145,23 +145,23 @@ and hash seed. Tests rebuild with the same inputs and toolchain and compare the
 entire raw image SHA256. Cross-version e2fsprogs/compiler reproducibility has not
 been established. Keep the recorded tool versions for reproduction.
 
-## Windows offline entry point
+## Native Windows offline build
 
-```powershell
-.\tools\build-jc11s-image.ps1 -PublicKey C:\keys\prime.pub `
-  -ProbeJson C:\images\this-device-probe.json `
-  -Output C:\images\data.ext4 -Distribution Debian
-```
+The packaged desktop application builds directly on Windows. Its PyInstaller
+payload contains MinGW e2fsprogs (`mke2fs`, `debugfs`, `e2fsck` and their runtime
+DLLs/configuration) plus an ARMv7 hook built from `bootstrap/jc11s/hook.c` by the
+Linux CI job. The hook is accepted only when both its ELF32/ARM ABI and the bundled
+SHA-256 provenance record match. The Windows job obtains the tools while assembling
+the release artifact, then performs a complete 64 MiB ext4 build, payload extraction,
+`e2fsck`, sparse conversion, transfer-limit check and SHA-256 verification before
+PyInstaller runs.
 
-This PoC uses **preprovisioned WSL** for ext4 tooling and ARM compilation. It does
-not download or install anything during the offline build. WSL is only a build
-backend; USB probing continues to use native Windows WinUSB and needs no USB
-passthrough. Python path arguments are passed as arrays, not interpolated shell
-commands. The desktop application now invokes this WSL backend itself, checks
-every required tool, manages a private temporary workspace and displays build
-errors. PyInstaller includes the required source files for WSL. A Windows CI job
-builds a test executable; an actual Windows-host build/run and WSL integration
-test are still required before distribution.
+The installed EXE performs no download and invokes no WSL, Debian, Linux VM or
+external compiler. It reuses those bundled native executables in a private temporary
+workspace. Missing tools, configuration, hook, or a hook hash mismatch block the
+build. The raw image still takes its exact size solely from the connected device's
+validated `partition-size:data`; sparse part sizing solely uses its reported
+`max-download-size`.
 
 ## Desktop installer and guarded hardware transport
 

@@ -38,7 +38,7 @@ def test_wizard_navigation_requires_diagnostics_and_ssh_key(tmp_path: Path):
     assert "SHIFT" in wizard.connection_instructions.text()
     assert not wizard.continue_button.isEnabled()
 
-    wizard.handle_diagnostic_report(report(DetectionState.UNVERIFIED))
+    wizard.handle_diagnostic_report(report(DetectionState.MATCH))
     assert wizard.continue_button.isEnabled()
     wizard.go_forward()
     assert wizard.page_stack.currentIndex() == WorkflowPage.SSH_KEY
@@ -194,6 +194,46 @@ def test_wizard_displays_candidates_and_passes_explicit_selection(tmp_path: Path
     window.workflow.candidate_selector.setCurrentIndex(1)
     window.workflow.run_diagnostics()
     assert service.selected == "port-2"
+    assert not window.workflow.continue_button.isEnabled()
+    window.close()
+    app.processEvents()
+
+
+def test_wizard_displays_verified_product_and_blocks_unknown_identity(tmp_path: Path):
+    app = application()
+    window = MainWindow(QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat))
+    window.show()
+    window.open_workflow(ProfileId.JC11S)
+    candidate = DiscoveredUsbDevice(
+        discovery_key="port-1",
+        display_name="Prime 4+",
+        vendor_id=0x15E4,
+        product_id=0xD007,
+        candidate_families=(DeviceFamily.JC11S,),
+        candidate_transports=(CandidateTransport.FASTBOOT,),
+        verification=VerificationState(candidate=True, transport_detected=True, protocol_verified=True),
+        source="Windows SetupAPI",
+        bootloader="0.4",
+    )
+    verified = DiagnosticReport(
+        DetectionResult(DetectionState.MATCH, "Device identity verified.", True),
+        ("fastboot: product rk3288-az01-jc11s",),
+        fastboot_version="0.4",
+        fastboot_product="rk3288-az01-jc11s",
+        candidates=(candidate,),
+    )
+    window.workflow.handle_diagnostic_report(verified)
+    assert "Model identity: Verified (rk3288-az01-jc11s)" in window.workflow.candidate_details.text()
+    assert window.workflow.continue_button.isEnabled()
+
+    unknown = DiagnosticReport(
+        DetectionResult(DetectionState.UNVERIFIED, "Identity unavailable.", False),
+        ("product unavailable",),
+        fastboot_version="0.4",
+        candidates=(candidate,),
+    )
+    window.workflow.handle_diagnostic_report(unknown)
+    assert "Model identity: Unverified" in window.workflow.candidate_details.text()
     assert not window.workflow.continue_button.isEnabled()
     window.close()
     app.processEvents()

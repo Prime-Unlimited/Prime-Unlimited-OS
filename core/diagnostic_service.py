@@ -22,6 +22,7 @@ class DiagnosticReport:
     result: DetectionResult
     log_lines: tuple[str, ...]
     fastboot_version: str | None = None
+    fastboot_product: str | None = None
     reboot_available: bool = False
     candidates: tuple[DiscoveredUsbDevice, ...] = ()
     discovered_devices: tuple[DiscoveredUsbDevice, ...] = ()
@@ -46,6 +47,7 @@ class UsbDiagnosticService:
         evidence: list[ProbeEvidence] = []
         log: list[str] = ["Starting read-only USB diagnostics."]
         fastboot_version: str | None = None
+        fastboot_product: str | None = None
         reboot_available = False
         errors: dict[str, str] = {}
         probed_devices = []
@@ -93,6 +95,21 @@ class UsbDiagnosticService:
                         fastboot_version = device.protocol_version
                         reboot_available = hasattr(self.fastboot, "reboot")
                         log.append(f"fastboot: protocol version {fastboot_version}")
+                if name == "fastboot" and selected == ProfileId.JC11S and len(devices) == 1:
+                    getvar = getattr(self.fastboot, "getvar", None)
+                    if getvar is None:
+                        log.append("fastboot: product identity unavailable (getvar is not supported)")
+                    else:
+                        try:
+                            fastboot_product = getvar("product", devices[0].identifier).strip()
+                            log.append(f"fastboot: product {fastboot_product or '<empty>'}")
+                        except Exception as exc:
+                            log.append(f"fastboot: product identity unavailable ({exc})")
+                    if fastboot_product == "rk3288-az01-jc11s":
+                        evidence[-1] = replace(evidence[-1], verified_profile=ProfileId.JC11S)
+                    elif fastboot_product:
+                        # A positive, different product is a wrong model, not merely unknown.
+                        evidence[-1] = replace(evidence[-1], verified_profile=ProfileId.JP24)
             else:
                 log.append(f"{name}: no interface found")
         candidates = tuple(self._enrich_candidate(candidate, probed_devices) for candidate in candidates)
@@ -122,6 +139,7 @@ class UsbDiagnosticService:
             result,
             tuple(log),
             fastboot_version,
+            fastboot_product,
             reboot_available,
             candidates,
             tuple(discovered),

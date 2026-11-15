@@ -20,15 +20,15 @@ Prime-Unlimited OS is a cross-platform desktop foundation for safely bootstrappi
 ## Implemented
 
 - Polished PySide6 desktop wizard with manual Prime 4+ (JC11S) and Prime 4 G2 (JP24) selection.
-- Native Windows WinUSB diagnostics for JC11S, including verified Fastboot protocol version display and an explicitly confirmed reboot action.
+- Native Windows WinUSB diagnostics for JC11S, including exact `getvar:product` identity matching, Fastboot protocol display and an explicitly confirmed reboot action.
 - Revision-aware Windows and macOS USB discovery with IORegistry fallback, normalized evidence, and explicit compatibility states.
 - Separate JC11S Fastboot and JP24 imbupd paths with fail-closed writers.
 - Explicit handling for absent, wrong, multiple, ambiguous, and unverified devices.
 - Mandatory passphrase-protected Ed25519 generation or existing key-pair validation.
 - Host-key-pinned SSH verification service.
-- Integrated Windows/WSL image builder with prerequisite checks, temporary workspace cleanup, exact per-device geometry and progress/error reporting.
+- Self-contained native Windows image builder with bundled e2fsprogs runtime and verified ARMv7 hook, temporary workspace cleanup, exact per-device geometry and progress/error reporting; no WSL or runtime download is required.
 - Native WinUSB Fastboot download and `flash:data` implementation behind explicit compatibility, recovery, data-loss and multipart safety gates.
-- Windows CI job producing a test executable artifact.
+- Windows CI job that builds and fully validates ext4/sparse output without WSL before producing a test executable artifact.
 - SHA-256 package validation and a strict mod manifest model with device/firmware compatibility and rollback declarations.
 - Secret-redacting diagnostics and persistent non-sensitive window settings.
 - Hardware-independent unit tests and PyInstaller configuration.

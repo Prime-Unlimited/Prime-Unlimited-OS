@@ -143,15 +143,34 @@ class FlashPlan:
     )
 
 
-def build_for_device(evidence: ProbeEvidence, output: Path, key: Path, hook: Path, sparse_directory: Path) -> FlashPlan:
+def build_for_device(
+    evidence: ProbeEvidence,
+    output: Path,
+    key: Path,
+    hook: Path,
+    sparse_directory: Path,
+    *,
+    tool_directory: Path | None = None,
+    mke2fs_config: Path | None = None,
+) -> FlashPlan:
     """Measured Fastboot geometry is the sole source of image and transfer sizes."""
     geometry = validate_geometry(evidence)
-    build(output, key, hook, geometry.partition_size, asdict(geometry))
-    return prepare(output, geometry, sparse_directory)
+    build(
+        output,
+        key,
+        hook,
+        geometry.partition_size,
+        asdict(geometry),
+        tool_directory=tool_directory,
+        mke2fs_config=mke2fs_config,
+    )
+    return prepare(output, geometry, sparse_directory, tool_directory=tool_directory)
 
 
-def prepare(image: Path, geometry: DeviceGeometry, sparse_directory: Path) -> FlashPlan:
-    manifest = verify(image)
+def prepare(
+    image: Path, geometry: DeviceGeometry, sparse_directory: Path, *, tool_directory: Path | None = None
+) -> FlashPlan:
+    manifest = verify(image, tool_directory=tool_directory)
     size = manifest["size"]
     if size != geometry.partition_size:
         raise ValueError("PoC requires an exact partition-sized raw image.")
