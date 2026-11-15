@@ -39,15 +39,15 @@ jobs:
           python-version: '3.12'
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: UCRT64
-          install: mingw-w64-ucrt-x86_64-e2fsprogs mingw-w64-ucrt-x86_64-binutils
+          msystem: MSYS
+          install: e2fsprogs binutils
       - uses: actions/download-artifact@v4
         with:
           name: jc11s-armv7-hook
           path: bootstrap/jc11s
       - name: Collect native Windows filesystem runtime
         shell: pwsh
-        run: tools/collect-windows-e2fsprogs.ps1 -Source C:\msys64\ucrt64 -Destination vendor\windows\e2fsprogs
+        run: tools/collect-windows-e2fsprogs.ps1 -Source C:\msys64\usr -Destination vendor\windows\e2fsprogs
       - run: python -m pip install -e ".[dev]"
       - name: Test native image build without WSL
         run: python -m pytest tests/test_windows_installer.py -m native_windows
