@@ -39,8 +39,33 @@ def test_wizard_navigation_requires_diagnostics_and_ssh_key(tmp_path: Path):
     wizard._accept_key_pair(generate_keypair(tmp_path / "keys", "test passphrase"))
     assert wizard.continue_button.isEnabled()
     wizard.go_forward()
-    assert wizard.page_stack.currentIndex() == WorkflowPage.INSTALLATION
+    # JC11S has no validated bootstrap - it stays behind the safety gate.
+    assert wizard.page_stack.currentIndex() == WorkflowPage.BLOCKED
     assert not wizard.continue_button.isEnabled()
+
+    wizard.go_back()
+    assert wizard.page_stack.currentIndex() == WorkflowPage.SSH_KEY
+    window.close()
+    app.processEvents()
+
+
+def test_jp24_navigation_reaches_the_validated_flash_page(tmp_path: Path):
+    """JP24 has a validated bootstrap (see devices/jp24/README.md), so it
+    reaches the real flash page instead of the safety-gate page."""
+    app = application()
+    window = MainWindow(QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat))
+    window.open_workflow(ProfileId.JP24)
+    wizard = window.workflow
+
+    wizard.handle_diagnostic_report(report(DetectionState.UNVERIFIED))
+    wizard.go_forward()
+    assert wizard.page_stack.currentIndex() == WorkflowPage.SSH_KEY
+
+    wizard._accept_key_pair(generate_keypair(tmp_path / "keys", "test passphrase"))
+    wizard.go_forward()
+    assert wizard.page_stack.currentIndex() == WorkflowPage.FLASH
+    assert wizard.continue_button.isEnabled()
+    assert wizard.flash_button.isEnabled()
 
     wizard.go_back()
     assert wizard.page_stack.currentIndex() == WorkflowPage.SSH_KEY

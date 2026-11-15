@@ -46,9 +46,12 @@ PROFILES = {
         architecture="AArch64 / ARM64",
         ssh_port=2222,
         setup_mode="Open Firmware Update Mode and connect the rear USB-C port.",
+        flash_enabled=True,
         blocker=(
-            "Writing is disabled: the imbupd implementation, positive model identity, validated "
-            "bootstrap package, and tested recovery procedure are not available."
+            "The imbupd implementation is validated against real hardware (ALSA boot hook + "
+            "sshd on port 2222 - see devices/jp24/README.md). Writing /data is still "
+            "irreversible if the device is disconnected mid-flash: back up anything you care "
+            "about and keep the device powered and connected throughout."
         ),
     ),
 }

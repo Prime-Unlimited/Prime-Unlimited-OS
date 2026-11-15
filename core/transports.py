@@ -28,7 +28,7 @@ class UsbDevice:
 class Transport(Protocol):
     def probe(self) -> list[UsbDevice]: ...
 
-    def install(self, package: Path) -> None: ...
+    def install(self, package: Path, on_progress: object | None = None) -> None: ...
 
 
 class FastbootTransport:
@@ -52,7 +52,7 @@ class FastbootTransport:
             if line.strip() and len(line.split()) >= 2 and line.split()[1] == "fastboot"
         ]
 
-    def install(self, package: Path) -> None:
+    def install(self, package: Path, on_progress: object | None = None) -> None:
         raise WriteBlockedError("JC11S writing is disabled by the repository safety gates.")
 
 
@@ -95,8 +95,18 @@ class ImbupdTransport:
         # Windows uses USB\VID_15E4&PID_D014 rather than the lsusb form.
         return re.sub(r"(?i)VID_15E4&PID_D014", "15e4:d014", result.stdout)
 
-    def install(self, package: Path) -> None:
-        raise WriteBlockedError("JP24 writing is disabled: no validated imbupd implementation is present.")
+    def install(self, package: Path, on_progress: object | None = None) -> None:
+        """Write a prebuilt /data image and reboot the device.
+
+        Delegates to core.jp24_bootstrap, the validated implementation
+        confirmed against real JP24 hardware (see devices/jp24/README.md).
+        The caller is responsible for showing an explicit confirmation
+        before calling this - it overwrites the device's /data partition.
+        """
+        from core.jp24_bootstrap import ensure_flash_tool, flash_bootstrap
+
+        tool = ensure_flash_tool(Path.home() / ".cache" / "prime-unlimited-os" / "jp24")
+        flash_bootstrap(tool, package, on_progress=on_progress)
 
 
 def redacted_identifier(identifier: str) -> str:

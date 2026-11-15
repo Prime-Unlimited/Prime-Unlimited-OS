@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QSettings, Qt, QThreadPool, Signal, Slot
@@ -25,8 +26,10 @@ from PySide6.QtWidgets import (
 from core.device_detection import DetectionState
 from core.diagnostic_service import DiagnosticReport, UsbDiagnosticService
 from core.diagnostics import redact
+from core.jp24_bootstrap import FlashError, FlashProgress, build_data_image
 from core.keys import KeyPair, KeyValidationError, generate_keypair, validate_keypair
 from core.profiles import PROFILES, DeviceProfile, ProfileId
+from core.transports import ImbupdTransport
 
 
 def label(text: str, object_name: str = "") -> QLabel:
@@ -110,12 +113,43 @@ class DiagnosticWorker(QRunnable):
             self.signals.failed.emit(redact(str(exc)))
 
 
+class FlashWorkerSignals(QObject):
+    progress = Signal(object)
+    finished = Signal()
+    failed = Signal(str)
+
+
+class FlashWorker(QRunnable):
+    """Builds the /data image and flashes it. Runs off the GUI thread since
+    the write itself can take well over a minute."""
+
+    def __init__(self, public_key: Path) -> None:
+        super().__init__()
+        self.public_key = public_key
+        self.signals = FlashWorkerSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            with tempfile.TemporaryDirectory(prefix="prime-unlimited-jp24-") as tmp:
+                image = Path(tmp) / "prime4-data.img"
+                self.signals.progress.emit(FlashProgress("build", "Building the /data image…"))
+                build_data_image(self.public_key, image)
+                ImbupdTransport().install(image, on_progress=self.signals.progress.emit)
+            self.signals.finished.emit()
+        except FlashError as exc:
+            self.signals.failed.emit(redact(str(exc)))
+        except Exception as exc:  # GUI boundary: never crash the app on an unexpected flash failure.
+            self.signals.failed.emit(redact(str(exc)))
+
+
 class WorkflowPage(QWidget):
     exit_requested = Signal()
 
     CONNECTION = 0
     SSH_KEY = 1
-    INSTALLATION = 2
+    BLOCKED = 2
+    FLASH = 3
 
     def __init__(
         self,
@@ -130,6 +164,8 @@ class WorkflowPage(QWidget):
         self.diagnostic_report: DiagnosticReport | None = None
         self.key_pair: KeyPair | None = None
         self._worker: DiagnosticWorker | None = None
+        self._flash_worker: FlashWorker | None = None
+        self.installation_page = self.BLOCKED
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(30, 30, 30, 30)
@@ -148,6 +184,7 @@ class WorkflowPage(QWidget):
         self.page_stack.addWidget(self._build_connection_page())
         self.page_stack.addWidget(self._build_key_page())
         self.page_stack.addWidget(self._build_blocked_page())
+        self.page_stack.addWidget(self._build_flash_page())
         body.addWidget(self.page_stack, 1)
 
         navigation = QHBoxLayout()
@@ -265,16 +302,99 @@ class WorkflowPage(QWidget):
         layout.addStretch()
         return page
 
+    def _build_flash_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(label("Write /data and enable SSH", "title"))
+        self.flash_warning = label("")
+        self.flash_warning.setStyleSheet("background:#2b2114; color:#ffd18a; border-radius:9px; padding:14px;")
+        layout.addWidget(self.flash_warning)
+        layout.addWidget(
+            label(
+                "This overwrites the device's /data partition with an image containing the "
+                "public key from the previous step, then reboots the device. It is irreversible "
+                "if the device loses power or connection mid-write.",
+                "subtitle",
+            )
+        )
+        self.flash_button = QPushButton("Flash and enable SSH")
+        self.flash_button.setObjectName("primary")
+        self.flash_button.clicked.connect(self.confirm_and_flash)
+        layout.addWidget(self.flash_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.flash_status = label("Ready to flash. Keep the device in Firmware Update Mode and connected.")
+        layout.addWidget(self.flash_status)
+        self.flash_log = QPlainTextEdit()
+        self.flash_log.setReadOnly(True)
+        self.flash_log.setAccessibleName("Flash progress log")
+        layout.addWidget(self.flash_log, 1)
+        layout.addWidget(
+            label(
+                "After the device reboots and reconnects to Wi-Fi, connect with:\n"
+                "ssh -i <your private key> -p 2222 -o StrictHostKeyChecking=accept-new root@<device-ip>",
+                "muted",
+            )
+        )
+        return page
+
+    def confirm_and_flash(self) -> None:
+        if self.key_pair is None or self.profile is None:
+            return
+        choice = QMessageBox.warning(
+            self,
+            "Confirm destructive write",
+            f"This will overwrite the /data partition on your {self.profile.display_name} and "
+            "reboot it. Do not disconnect the device during this process.\n\n"
+            "Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if choice != QMessageBox.StandardButton.Yes:
+            return
+        self.flash_button.setEnabled(False)
+        self.continue_button.setEnabled(False)
+        self.flash_log.clear()
+        self.flash_status.setText("Flashing…")
+        self.flash_status.setStyleSheet("color:#ffd18a;")
+        worker = FlashWorker(self.key_pair.public_key)
+        worker.signals.progress.connect(self.handle_flash_progress)
+        worker.signals.finished.connect(self.handle_flash_finished)
+        worker.signals.failed.connect(self.handle_flash_failed)
+        self._flash_worker = worker
+        self.thread_pool.start(worker)
+
+    @Slot(object)
+    def handle_flash_progress(self, progress: FlashProgress) -> None:
+        self.flash_log.appendPlainText(f"[{progress.step}] {progress.message}")
+        self.flash_status.setText(progress.message)
+
+    @Slot()
+    def handle_flash_finished(self) -> None:
+        self.flash_button.setEnabled(True)
+        self.flash_status.setText("Done. Waiting for the device to reboot and reconnect to Wi-Fi.")
+        self.flash_status.setStyleSheet("color:#63e6a6;")
+        self._update_navigation()
+
+    @Slot(str)
+    def handle_flash_failed(self, message: str) -> None:
+        self.flash_button.setEnabled(True)
+        self.flash_status.setText("Flashing failed. Review the log and try again.")
+        self.flash_status.setStyleSheet("color:#ff7b7b;")
+        self.flash_log.appendPlainText(f"[error] {message}")
+        self._update_navigation()
+
     def set_profile(self, profile_id: ProfileId) -> None:
         self.profile_id = profile_id
         self.profile = PROFILES[profile_id]
         self.diagnostic_report = None
         self.key_pair = None
+        self.installation_page = self.FLASH if self.profile.flash_enabled else self.BLOCKED
         self.steps.clear()
+        step_three = "3  Write /data & enable SSH" if self.profile.flash_enabled else "3  Installation safety gate"
         for step in (
             "1  USB connection & diagnostics",
             "2  Mandatory SSH key",
-            "3  Installation safety gate",
+            step_three,
             "4  Authenticated SSH test (locked)",
             "5  Mod manager (locked)",
         ):
@@ -285,6 +405,11 @@ class WorkflowPage(QWidget):
             f"Expected USB transport: {self.profile.transport}\n\n{self.profile.setup_mode}"
         )
         self.blocker_text.setText(self.profile.blocker)
+        self.flash_warning.setText(self.profile.blocker)
+        self.flash_button.setEnabled(True)
+        self.flash_status.setText("Ready to flash. Keep the device in Firmware Update Mode and connected.")
+        self.flash_status.setStyleSheet("")
+        self.flash_log.clear()
         self.diagnostic_status.setText("Diagnostics have not run.")
         self.diagnostic_status.setStyleSheet("")
         self.diagnostic_log.clear()
@@ -297,7 +422,9 @@ class WorkflowPage(QWidget):
 
     def show_page(self, page: int) -> None:
         self.page_stack.setCurrentIndex(page)
-        self.steps.setCurrentRow(page)
+        # BLOCKED and FLASH are alternate pages for the same "step 3" row;
+        # both map to steps row 2 regardless of which page_stack index is showing.
+        self.steps.setCurrentRow(2 if page in (self.BLOCKED, self.FLASH) else page)
         self._update_navigation()
 
     def run_diagnostics(self) -> None:
@@ -389,6 +516,8 @@ class WorkflowPage(QWidget):
         page = self.page_stack.currentIndex()
         if page == self.CONNECTION:
             self.exit_requested.emit()
+        elif page in (self.BLOCKED, self.FLASH):
+            self.show_page(self.SSH_KEY)
         else:
             self.show_page(page - 1)
 
@@ -397,13 +526,18 @@ class WorkflowPage(QWidget):
         if page == self.CONNECTION and self._diagnostics_allow_key_setup():
             self.show_page(self.SSH_KEY)
         elif page == self.SSH_KEY and self.key_pair is not None:
-            self.show_page(self.INSTALLATION)
-        elif page == self.INSTALLATION:
+            self.show_page(self.installation_page)
+        elif page == self.BLOCKED:
             QMessageBox.information(
                 self,
                 "Installation blocked",
                 "Production installation remains disabled until the hardware and recovery requirements are validated.",
             )
+        elif page == self.FLASH:
+            # Advancing past the flash page is just navigation; the
+            # destructive action itself only runs via the dedicated
+            # "Flash and enable SSH" button with its own confirmation.
+            pass
 
     def _diagnostics_allow_key_setup(self) -> bool:
         if self.diagnostic_report is None:
@@ -422,6 +556,9 @@ class WorkflowPage(QWidget):
         elif page == self.SSH_KEY:
             self.continue_button.setText("Continue")
             self.continue_button.setEnabled(self.key_pair is not None)
+        elif page == self.FLASH:
+            self.continue_button.setText("Continue")
+            self.continue_button.setEnabled(True)
         else:
             self.continue_button.setText("Installation blocked")
             self.continue_button.setEnabled(False)
