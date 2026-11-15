@@ -41,7 +41,7 @@ trap cleanup EXIT
 
 HOOK_SO="$TMP_DIR/libalsa-boot-hook.so"
 if command -v zig >/dev/null 2>&1; then
-    zig cc -target aarch64-linux-musl -shared -fPIC -Os -o "$HOOK_SO" "$SCRIPT_DIR/alsa-boot-hook.c"
+    zig cc -target aarch64-linux-gnu.2.17 -shared -fPIC -Os -o "$HOOK_SO" "$SCRIPT_DIR/alsa-boot-hook.c"
 elif command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
     aarch64-linux-gnu-gcc -shared -fPIC -Os -o "$HOOK_SO" "$SCRIPT_DIR/alsa-boot-hook.c"
 else
@@ -56,27 +56,45 @@ chmod 0644 "$TMP_DIR/99-prime4-mod.conf" "$TMP_DIR/libalsa-boot-hook.so"
 chmod 0755 "$TMP_DIR/boot-activate.sh"
 chmod 0600 "$TMP_DIR/authorized_keys"
 
+# Pre-generate the SSH host key on the dev machine and embed it directly in
+# the image. This removes ssh-keygen from the device-side critical path -
+# the C hook execs sshd directly with this key, no shell script needed.
+HOST_KEY="$TMP_DIR/ssh_host_ed25519_key"
+ssh-keygen -t ed25519 -f "$HOST_KEY" -N "" -q -C "prime4-g2-hostkey"
+chmod 0600 "$HOST_KEY"
+
 mkdir -p "$(dirname -- "$IMAGE")"
 dd if=/dev/zero of="$IMAGE" bs=1m count="$SIZE_MB"
 mke2fs -t ext4 -O encrypt -L data -F "$IMAGE" >/dev/null
 
 debugfs -w "$IMAGE" <<'EOF' >/dev/null 2>&1
 mkdir system
+mkdir system/etc
+mkdir system/etc/overlay
 mkdir system/var-lib
 mkdir system/var-lib/alsa
 mkdir system/var-lib/alsa/conf.d
+mkdir system/var
+mkdir system/var/overlay
+mkdir system/var/overlay/lib
+mkdir system/var/overlay/lib/alsa
+mkdir system/var/overlay/lib/alsa/conf.d
 mkdir prime4-mod
 mkdir prime4-mod/lib
 EOF
 
 debugfs -w "$IMAGE" <<EOF >/dev/null 2>&1
 write $TMP_DIR/99-prime4-mod.conf system/var-lib/alsa/conf.d/99-prime4-mod.conf
+write $TMP_DIR/99-prime4-mod.conf system/var/overlay/lib/alsa/conf.d/99-prime4-mod.conf
 write $HOOK_SO prime4-mod/lib/libalsa-boot-hook.so
 write $TMP_DIR/boot-activate.sh prime4-mod/boot-activate.sh
 write $TMP_DIR/authorized_keys prime4-mod/authorized_keys
+write $HOST_KEY prime4-mod/ssh_host_ed25519_key
+set_inode_field system/var/overlay/lib/alsa/conf.d/99-prime4-mod.conf mode 0100644
 set_inode_field prime4-mod/boot-activate.sh mode 0100755
 set_inode_field prime4-mod/lib/libalsa-boot-hook.so mode 0100755
 set_inode_field prime4-mod/authorized_keys mode 0100600
+set_inode_field prime4-mod/ssh_host_ed25519_key mode 0100600
 EOF
 
 echo "Built image: $IMAGE (${SIZE_MB} MiB)"
