@@ -4,6 +4,9 @@ import pytest
 
 from core.transports import WriteBlockedError
 from core.windows_fastboot import (
+    COMMAND_TIMEOUT_MS,
+    DOWNLOAD_TIMEOUT_MS,
+    FLASH_COMMIT_TIMEOUT_MS,
     ExperimentalFirstFlashAuthorization,
     HardwareFlashAuthorization,
     InterfaceDescriptor,
@@ -84,6 +87,13 @@ def test_successful_discovery_verifies_protocol_and_cleans_up():
     assert connection.writes == [(0x02, b"getvar:version")]
     assert connection.timeouts == [(0x81, 2000), (0x02, 2000)]
     assert connection.closed
+
+
+def test_transport_separates_command_download_and_flash_timeouts():
+    transport = WindowsWinUsbFastbootTransport(FakeApi())
+    assert transport.timeout_ms == COMMAND_TIMEOUT_MS == 2_000
+    assert transport.download_timeout_ms == DOWNLOAD_TIMEOUT_MS == 30_000
+    assert transport.flash_timeout_ms == FLASH_COMMIT_TIMEOUT_MS == 120_000
 
 
 def test_missing_device_returns_empty_list():
@@ -222,7 +232,7 @@ def test_experimental_first_flash_authorization_is_separate_and_exact():
 
     bench = ExperimentalFirstFlashAuthorization(
         True,
-        ExperimentalFirstFlashAuthorization.MAPPING_PHRASE,
+        True,
         ExperimentalFirstFlashAuthorization.RECOVERY_PHRASE,
         ExperimentalFirstFlashAuthorization.EXPERIMENT_PHRASE,
         True,
@@ -239,7 +249,7 @@ def test_experimental_first_flash_authorization_is_separate_and_exact():
         (
             ExperimentalFirstFlashAuthorization(
                 True,
-                ExperimentalFirstFlashAuthorization.MAPPING_PHRASE,
+                True,
                 "unverified recovery",
                 ExperimentalFirstFlashAuthorization.EXPERIMENT_PHRASE,
                 True,

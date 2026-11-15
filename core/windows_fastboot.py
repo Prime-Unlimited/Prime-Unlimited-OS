@@ -21,6 +21,9 @@ FASTBOOT_SUBCLASS = 0x42
 FASTBOOT_PROTOCOL = 0x03
 USB_ENDPOINT_IN = 0x80
 USB_PIPE_TYPE_BULK = 2
+COMMAND_TIMEOUT_MS = 2_000
+DOWNLOAD_TIMEOUT_MS = 30_000
+FLASH_COMMIT_TIMEOUT_MS = 120_000
 
 
 class WinUsbError(TransportError):
@@ -144,12 +147,11 @@ class ExperimentalFirstFlashAuthorization:
     """Separate one-device bench consent; never changes normal release gates."""
 
     enabled: bool = False
-    mapping_confirmation: str = ""
+    mapping_evidence_verified: bool = False
     recovery_confirmation: str = ""
     experiment_confirmation: str = ""
     user_confirmed_data_loss: bool = False
 
-    MAPPING_PHRASE = "data = /dev/mmcblk0p11 = /data"
     RECOVERY_PHRASE = "JC11S OFW FAILSAFE RECOVERY TESTED"
     EXPERIMENT_PHRASE = "EXPERIMENTAL FIRST FLASH ERASE DATA"
 
@@ -157,8 +159,8 @@ class ExperimentalFirstFlashAuthorization:
         missing = []
         if not self.enabled:
             missing.append("experimental bench mode")
-        if self.mapping_confirmation.strip() != self.MAPPING_PHRASE:
-            missing.append("device-specific data/mmcblk0p11 mapping confirmation")
+        if not self.mapping_evidence_verified:
+            missing.append("device-specific data/mmcblk0p11 mapping evidence")
         if self.recovery_confirmation.strip() != self.RECOVERY_PHRASE:
             missing.append("JC11S OFW failsafe recovery confirmation")
         if self.experiment_confirmation.strip() != self.EXPERIMENT_PHRASE:
@@ -174,9 +176,17 @@ class ExperimentalFirstFlashAuthorization:
 class WindowsWinUsbFastbootTransport:
     """Read-only native transport plus explicitly invoked reboot."""
 
-    def __init__(self, api: WinUsbApi, timeout_ms: int = 2000) -> None:
+    def __init__(
+        self,
+        api: WinUsbApi,
+        timeout_ms: int = COMMAND_TIMEOUT_MS,
+        download_timeout_ms: int = DOWNLOAD_TIMEOUT_MS,
+        flash_timeout_ms: int = FLASH_COMMIT_TIMEOUT_MS,
+    ) -> None:
         self.api = api
         self.timeout_ms = timeout_ms
+        self.download_timeout_ms = download_timeout_ms
+        self.flash_timeout_ms = flash_timeout_ms
 
     def probe(self, identifier: str | None = None) -> list[UsbDevice]:
         verified = self.discover(identifier)
@@ -279,7 +289,7 @@ class WindowsWinUsbFastbootTransport:
         if sparse["expanded_size"] != plan.size or sparse["expanded_sha256"] != plan.sha256:
             raise WinUsbError("Sparse image does not reconstruct the planned raw image.")
         interface = self._single_interface(identifier)
-        connection, session, _, _ = self._open_session(interface)
+        connection, session, pipe_in, pipe_out = self._open_session(interface)
         try:
             geometry = validate_geometry(probe(session))
             if (
@@ -289,6 +299,8 @@ class WindowsWinUsbFastbootTransport:
             ):
                 raise WriteBlockedError("Connected-device geometry changed after image preparation.")
             for index, part in enumerate(plan.transfers, 1):
+                connection.set_timeout(pipe_in, self.download_timeout_ms)
+                connection.set_timeout(pipe_out, self.download_timeout_ms)
                 if progress is not None:
                     progress("download", index, len(plan.transfers), 0, part.stat().st_size)
                 session.download_file(
@@ -300,10 +312,14 @@ class WindowsWinUsbFastbootTransport:
                         else None
                     ),
                 )
+                connection.set_timeout(pipe_in, self.flash_timeout_ms)
+                connection.set_timeout(pipe_out, self.download_timeout_ms)
                 session.flash("data")
                 if progress is not None:
                     progress("flash", index, len(plan.transfers), part.stat().st_size, part.stat().st_size)
             try:
+                connection.set_timeout(pipe_in, self.timeout_ms)
+                connection.set_timeout(pipe_out, self.timeout_ms)
                 return session.reboot().payload
             except (WinUsbDisconnected, WinUsbTimeout):
                 return "Device disconnected after successful flash and reboot command."

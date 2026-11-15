@@ -82,7 +82,9 @@ class FastbootSession:
             raise FastbootProtocolError(f"Device accepted {accepted} bytes, expected {size}.")
         sent = 0
         with path.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(256 * 1024), b""):
+            # Smaller writes avoid long single WinUSB requests while the
+            # bootloader drains its receive buffer on USB 2 hardware.
+            for chunk in iter(lambda: stream.read(64 * 1024), b""):
                 written = self.io.write(chunk)
                 if written != len(chunk):
                     raise FastbootProtocolError(f"Partial Fastboot payload transfer at byte {sent}.")

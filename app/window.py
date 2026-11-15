@@ -99,6 +99,7 @@ class SelectionPage(QWidget):
 class WorkerSignals(QObject):
     finished = Signal(object)
     failed = Signal(str)
+    progress = Signal(object)
 
 
 class DiagnosticWorker(QRunnable):
@@ -137,15 +138,17 @@ class RebootWorker(QRunnable):
 
 
 class TaskWorker(QRunnable):
-    def __init__(self, function) -> None:
+    def __init__(self, function, with_progress: bool = False) -> None:
         super().__init__()
         self.function = function
+        self.with_progress = with_progress
         self.signals = WorkerSignals()
 
     @Slot()
     def run(self) -> None:
         try:
-            self.signals.finished.emit(self.function())
+            result = self.function(self.signals.progress.emit) if self.with_progress else self.function()
+            self.signals.finished.emit(result)
         except Exception as exc:
             self.signals.failed.emit(redact(str(exc)))
 
@@ -360,8 +363,6 @@ class WorkflowPage(QWidget):
         self.erase_phrase = QLineEdit()
         self.erase_phrase.setPlaceholderText("Type ERASE DATA")
         self.bench_mode = QCheckBox("Enable EXPERIMENTAL JC11S first-flash bench mode for this device")
-        self.mapping_phrase = QLineEdit()
-        self.mapping_phrase.setPlaceholderText("Type: data = /dev/mmcblk0p11 = /data")
         self.recovery_phrase = QLineEdit()
         self.recovery_phrase.setPlaceholderText("Type: JC11S OFW FAILSAFE RECOVERY TESTED")
         self.experiment_phrase = QLineEdit()
@@ -374,12 +375,12 @@ class WorkflowPage(QWidget):
         self.bench_mode.stateChanged.connect(self._update_navigation)
         layout.addWidget(self.bench_mode)
         bench_warning = label(
-            "Bench only: confirm that stock JC11S device evidence associated Fastboot 'data' with "
-            "/dev/mmcblk0p11 mounted at /data, and that this tester has recovered this device through OFW failsafe."
+            "Bench only: the policy records the observed JC11S data → /dev/mmcblk0p11 → /data mapping. "
+            "Confirm below that this tester has recovered this device through OFW failsafe."
         )
         bench_warning.setStyleSheet("background:#3a1717; color:#ffb4b4; border-radius:9px; padding:14px;")
         layout.addWidget(bench_warning)
-        for field in (self.mapping_phrase, self.recovery_phrase, self.experiment_phrase):
+        for field in (self.recovery_phrase, self.experiment_phrase):
             field.textChanged.connect(self._update_navigation)
             layout.addWidget(field)
         layout.addStretch()
@@ -478,7 +479,6 @@ class WorkflowPage(QWidget):
         self.data_loss_confirmation.setChecked(False)
         self.erase_phrase.clear()
         self.bench_mode.setChecked(False)
-        self.mapping_phrase.clear()
         self.recovery_phrase.clear()
         self.experiment_phrase.clear()
         self.flash_progress.setValue(0)
@@ -765,7 +765,6 @@ class WorkflowPage(QWidget):
     def _bench_confirmed(self) -> bool:
         return (
             self.bench_mode.isChecked()
-            and self.mapping_phrase.text().strip() == "data = /dev/mmcblk0p11 = /data"
             and self.recovery_phrase.text().strip() == "JC11S OFW FAILSAFE RECOVERY TESTED"
             and self.experiment_phrase.text().strip() == "EXPERIMENTAL FIRST FLASH ERASE DATA"
             and self.data_loss_confirmation.isChecked()
@@ -797,34 +796,51 @@ class WorkflowPage(QWidget):
             self.flash_status.setText("Flash cancelled by the user. No write command was sent.")
             return
         self.flash_button.setEnabled(False)
-        self.flash_progress.setRange(0, 0)
+        self.flash_progress.setRange(0, 100)
+        self.flash_progress.setValue(0)
         self.flash_status.setText("Revalidating the connected device before guarded flash…")
         identifier = self.candidate_selector.currentData() if self.candidate_selector.isVisible() else None
         if self.bench_mode.isChecked():
-            mapping = self.mapping_phrase.text()
             recovery = self.recovery_phrase.text()
             experiment = self.experiment_phrase.text()
             self._bench_flash_active = True
 
-            def task():
+            def task(progress):
+                def report(*event):
+                    progress(event)
+
                 return self.installer_service.flash_bench(
                     self.artifacts,
-                    mapping,
                     recovery,
                     experiment,
                     True,
                     identifier,
+                    report,
                 )
         else:
             self._bench_flash_active = False
 
-            def task():
-                return self.installer_service.flash(self.artifacts, True, identifier)
-        worker = TaskWorker(task)
+            def task(progress):
+                def report(*event):
+                    progress(event)
+
+                return self.installer_service.flash(self.artifacts, True, identifier, report)
+        worker = TaskWorker(task, with_progress=True)
+        worker.signals.progress.connect(self._flash_progress_update)
         worker.signals.finished.connect(self._flash_complete)
         worker.signals.failed.connect(self._flash_failed)
         self._worker = worker
         self.thread_pool.start(worker)
+
+    @Slot(object)
+    def _flash_progress_update(self, event) -> None:
+        stage, index, count, sent, total = event
+        fraction = 0.0 if total <= 0 else min(sent / total, 1.0)
+        percent = round(((index - 1 + fraction) / count) * 100) if count else 0
+        self.flash_progress.setValue(percent)
+        self.flash_status.setText(
+            f"{stage.capitalize()} transfer {index}/{count}: {sent:,} of {total:,} bytes ({percent}%)."
+        )
 
     @Slot(object)
     def _flash_complete(self, message) -> None:

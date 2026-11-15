@@ -289,12 +289,15 @@ class FakeInstaller:
     def prepare(self, public_key, identifier=None):
         return self.artifacts
 
-    def flash(self, artifacts, confirmed, identifier=None):
+    def flash(self, artifacts, confirmed, identifier=None, progress=None):
         self.flash_calls += 1
         return "rebooted"
 
-    def flash_bench(self, artifacts, mapping, recovery, experiment, confirmed, identifier=None):
+    def flash_bench(self, artifacts, recovery, experiment, confirmed, identifier=None, progress=None):
         self.bench_flash_calls += 1
+        if progress:
+            progress("download", 1, 1, 64, 128)
+            progress("download", 1, 1, 128, 128)
         return "bench rebooted"
 
     def record_bench_result(self, artifacts, path, outcome, details):
@@ -401,7 +404,6 @@ def test_experimental_bench_requires_all_exact_confirmations_and_uses_separate_f
     wizard.data_loss_confirmation.setChecked(True)
     wizard.erase_phrase.setText("ERASE DATA")
     wizard.bench_mode.setChecked(True)
-    wizard.mapping_phrase.setText("data = /dev/mmcblk0p11 = /data")
     wizard.recovery_phrase.setText("JC11S OFW FAILSAFE RECOVERY TESTED")
     assert not wizard.continue_button.isEnabled()
     wizard.experiment_phrase.setText("EXPERIMENTAL FIRST FLASH ERASE DATA")
@@ -414,5 +416,6 @@ def test_experimental_bench_requires_all_exact_confirmations_and_uses_separate_f
     assert installer.bench_flash_calls == 1
     assert installer.flash_calls == 0
     assert installer.bench_results[0][0] == "flash_succeeded"
+    assert wizard.flash_progress.value() == 100
     window.close()
     app.processEvents()

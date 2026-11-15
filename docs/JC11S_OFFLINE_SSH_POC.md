@@ -173,12 +173,10 @@ host-key-pinned SSH verification. Normal users do not need to enter Linux comman
 
 The normal `HardwareReleasePolicy` remains closed. A separate JC11S-only bench
 authorization exists for the tester's first controlled write. It does not set or
-reuse any normal release-policy field. The UI requires all of the following exact,
-immediate confirmations before enabling the bench button:
+reuse any normal release-policy field. The mapping is retained as a documented
+bench-policy evidence record and is not redundantly typed into the UI. The UI
+requires all of the following exact, immediate confirmations before enabling the bench button:
 
-- `data = /dev/mmcblk0p11 = /data`, recording the tester's same-device observation
-  that the stock Linux `/data` mount uses `/dev/mmcblk0p11` and that the JC11S
-  bootloader exposes the intended ext4 partition under the label `data`;
 - `JC11S OFW FAILSAFE RECOVERY TESTED`, recording the tester's reported repeated
   OFW restoration and observed failsafe boot when `/data` is invalid;
 - `EXPERIMENTAL FIRST FLASH ERASE DATA`, plus the existing `ERASE DATA` phrase and

@@ -77,6 +77,16 @@ def test_download_stream_and_flash_data_only(tmp_path):
     assert progress == [(14, 14)]
 
 
+def test_download_uses_bounded_64k_chunks_and_reports_each_completion(tmp_path):
+    payload = tmp_path / "part.sparse"
+    payload.write_bytes(b"x" * (128 * 1024 + 7))
+    io = FakeIo([b"DATA00020007", b"OKAY"])
+    progress = []
+    FastbootSession(io).download_file(payload, 256 * 1024, lambda sent, total: progress.append((sent, total)))
+    assert [len(chunk) for chunk in io.commands[1:]] == [64 * 1024, 64 * 1024, 7]
+    assert progress[-1] == (128 * 1024 + 7, 128 * 1024 + 7)
+
+
 def test_download_fail_and_wrong_data_size_stop_before_payload(tmp_path):
     payload = tmp_path / "part.sparse"
     payload.write_bytes(b"payload")

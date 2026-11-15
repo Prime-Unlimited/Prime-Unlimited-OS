@@ -227,6 +227,10 @@ def test_hardware_transport_failure_never_reboots(artifacts, monkeypatch):
 
     class Connection:
         closed = False
+        timeouts = []
+
+        def set_timeout(self, pipe, timeout):
+            self.timeouts.append((pipe, timeout))
 
         def close(self):
             self.closed = True
@@ -257,7 +261,7 @@ def test_hardware_transport_failure_never_reboots(artifacts, monkeypatch):
     monkeypatch.setattr(transport, "_open_session", lambda interface: (connection, session, 0x81, 0x02))
     authorization = ExperimentalFirstFlashAuthorization(
         True,
-        ExperimentalFirstFlashAuthorization.MAPPING_PHRASE,
+        True,
         ExperimentalFirstFlashAuthorization.RECOVERY_PHRASE,
         ExperimentalFirstFlashAuthorization.EXPERIMENT_PHRASE,
         True,
@@ -278,6 +282,10 @@ def test_experimental_transport_rejects_wrong_device_before_transfer(artifacts, 
 
     class Connection:
         closed = False
+        timeouts = []
+
+        def set_timeout(self, pipe, timeout):
+            self.timeouts.append((pipe, timeout))
 
         def close(self):
             self.closed = True
@@ -300,7 +308,7 @@ def test_experimental_transport_rejects_wrong_device_before_transfer(artifacts, 
     monkeypatch.setattr("core.jc11s_flash.probe", lambda current: wrong)
     authorization = ExperimentalFirstFlashAuthorization(
         True,
-        ExperimentalFirstFlashAuthorization.MAPPING_PHRASE,
+        True,
         ExperimentalFirstFlashAuthorization.RECOVERY_PHRASE,
         ExperimentalFirstFlashAuthorization.EXPERIMENT_PHRASE,
         True,

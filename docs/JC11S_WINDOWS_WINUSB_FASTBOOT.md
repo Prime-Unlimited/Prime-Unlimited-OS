@@ -66,6 +66,14 @@ Follow-up testing of the Python desktop backend confirmed that `CreateFileW` mus
 
 The application therefore uses asynchronous WinUSB reads and writes with a separate event and `OVERLAPPED` structure for each transfer. It waits for the configured pipe timeout, calls `CancelIoEx` on timeout, and uses a bounded cancellation grace period. The buffer, event, and `OVERLAPPED` state remain alive until completion or confirmed cancellation. This prevents indefinitely blocked diagnostic workers and prevents releasing a buffer while Windows may still reference it.
 
+The first real bench download showed that the original two-second diagnostic
+timeout was too short for payload writes while the controller drained its Fastboot
+receive buffer. Command probes remain bounded at 2 seconds, but payload writes use
+64 KiB requests with a 30-second per-request bound, and the post-download
+`flash:data` response has a 120-second bound. Every completed payload request feeds
+the GUI byte counter. A timeout still cancels the pending WinUSB request, stops the
+transfer immediately, and never sends reboot.
+
 ## Scope, implementation and safety
 
 - Implement this as a Windows-only native WinUSB transport for **JC11S**; retain existing safe detection and a separate JP24 imbupd transport. macOS requires a separate implementation, not WinUSB.

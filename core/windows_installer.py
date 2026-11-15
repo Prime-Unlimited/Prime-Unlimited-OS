@@ -59,6 +59,7 @@ class ExperimentalFirstFlashPolicy:
     linux_device: str = "/dev/mmcblk0p11"
     mount_point: str = "/data"
     evidence_scope: str = "tester-observed JC11S stock system and matching Fastboot data label"
+    mapping_evidence_verified: bool = True
 
     @property
     def mapping_statement(self) -> str:
@@ -66,14 +67,13 @@ class ExperimentalFirstFlashPolicy:
 
     def authorize(
         self,
-        mapping_confirmation: str,
         recovery_confirmation: str,
         experiment_confirmation: str,
         confirmed_data_loss: bool,
     ) -> ExperimentalFirstFlashAuthorization:
         return ExperimentalFirstFlashAuthorization(
             enabled=self.available,
-            mapping_confirmation=mapping_confirmation,
+            mapping_evidence_verified=self.mapping_evidence_verified,
             recovery_confirmation=recovery_confirmation,
             experiment_confirmation=experiment_confirmation,
             user_confirmed_data_loss=confirmed_data_loss,
@@ -188,7 +188,6 @@ class Jc11sInstallerService:
     def flash_bench(
         self,
         artifacts: InstallerArtifacts,
-        mapping_confirmation: str,
         recovery_confirmation: str,
         experiment_confirmation: str,
         confirmed_data_loss: bool,
@@ -196,7 +195,6 @@ class Jc11sInstallerService:
         progress=None,
     ):
         authorization = self.bench_policy.authorize(
-            mapping_confirmation,
             recovery_confirmation,
             experiment_confirmation,
             confirmed_data_loss,
