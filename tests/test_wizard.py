@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from app.window import MainWindow, WorkflowPage
 from core.device_detection import DetectionResult, DetectionState
 from core.diagnostic_service import DiagnosticReport
+from core.jc11s_flash import FlashPlan
 from core.keys import generate_keypair
 from core.profiles import ProfileId
 from core.usb_discovery import (
@@ -14,6 +15,7 @@ from core.usb_discovery import (
     DiscoveredUsbDevice,
     VerificationState,
 )
+from core.windows_installer import HardwareReleasePolicy, InstallerArtifacts
 
 
 def application():
@@ -220,5 +222,118 @@ def test_wizard_offers_safe_view_for_unknown_usb_hardware(tmp_path: Path):
     assert "1234:5678" in window.workflow.candidate_details.text()
     assert "Installation: Blocked" in window.workflow.candidate_details.text()
     assert not window.workflow.continue_button.isEnabled()
+    window.close()
+    app.processEvents()
+
+
+class ImmediatePool:
+    def start(self, worker):
+        worker.run()
+
+
+class FakeInstaller:
+    def __init__(self, artifacts, policy=None, ssh_error=None):
+        self.artifacts = artifacts
+        self.release_policy = policy or HardwareReleasePolicy()
+        self.flash_calls = 0
+        self.ssh_error = ssh_error
+        self.ssh = self
+
+    def prepare(self, public_key, identifier=None):
+        return self.artifacts
+
+    def flash(self, artifacts, confirmed, identifier=None):
+        self.flash_calls += 1
+        return "rebooted"
+
+    def enroll_host_key(self, *args):
+        if self.ssh_error:
+            raise RuntimeError(self.ssh_error)
+
+    def verify_ssh(self, *args):
+        if self.ssh_error:
+            raise RuntimeError(self.ssh_error)
+        return "PRIME_UNLIMITED_SSH_OK"
+
+
+def installer_artifacts(tmp_path):
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    image = root / "data.ext4"
+    image.write_bytes(b"raw")
+    sparse = root / "sparse"
+    sparse.mkdir()
+    part = sparse / "data-001-of-001.sparse"
+    part.write_bytes(b"sparse")
+    plan = FlashPlan("data", image, 123456, "a" * 64, 512 * 1024**2, sparse, (part,))
+    return InstallerArtifacts(root, image, sparse, plan)
+
+
+def configured_installer_window(tmp_path, policy=None, ssh_error=None):
+    app = application()
+    installer = FakeInstaller(installer_artifacts(tmp_path), policy, ssh_error)
+    window = MainWindow(
+        QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat),
+        thread_pool=ImmediatePool(),
+        installer_service=installer,
+    )
+    window.open_workflow(ProfileId.JC11S)
+    wizard = window.workflow
+    wizard.handle_diagnostic_report(report(DetectionState.MATCH))
+    wizard.go_forward()
+    wizard._accept_key_pair(generate_keypair(tmp_path / "keys", "test passphrase"))
+    wizard.go_forward()
+    return app, window, wizard, installer
+
+
+def test_full_gui_build_review_and_recovery_gate(tmp_path):
+    app, window, wizard, installer = configured_installer_window(tmp_path)
+    assert wizard.page_stack.currentIndex() == WorkflowPage.PREPARE
+    wizard.prepare_image()
+    assert wizard.artifacts is installer.artifacts
+    assert "123,456" in wizard.plan_summary.text()
+    wizard.go_forward()
+    assert wizard.page_stack.currentIndex() == WorkflowPage.REVIEW
+    assert not wizard.continue_button.isEnabled()
+    wizard.recovery_confirmation.setChecked(True)
+    wizard.data_loss_confirmation.setChecked(True)
+    wizard.erase_phrase.setText("ERASE DATA")
+    assert wizard.continue_button.isEnabled()
+    wizard.go_forward()
+    assert wizard.page_stack.currentIndex() == WorkflowPage.FLASH
+    assert not wizard.flash_button.isEnabled()
+    assert "recovery path" in wizard.blocker_text.text()
+    assert installer.flash_calls == 0
+    window.close()
+    app.processEvents()
+
+
+def test_final_user_cancel_sends_no_flash(tmp_path, monkeypatch):
+    policy = HardwareReleasePolicy(True, True, True, True)
+    app, window, wizard, installer = configured_installer_window(tmp_path, policy)
+    wizard.prepare_image()
+    wizard.go_forward()
+    wizard.recovery_confirmation.setChecked(True)
+    wizard.data_loss_confirmation.setChecked(True)
+    wizard.erase_phrase.setText("ERASE DATA")
+    wizard.go_forward()
+    assert wizard.flash_button.isEnabled()
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.StandardButton.No)
+    wizard.start_flash()
+    assert installer.flash_calls == 0
+    assert "cancelled" in wizard.flash_status.text().lower()
+    window.close()
+    app.processEvents()
+
+
+def test_ssh_connection_failure_is_shown(tmp_path):
+    policy = HardwareReleasePolicy(True, True, True, True)
+    app, window, wizard, _ = configured_installer_window(tmp_path, policy, "connection refused")
+    wizard._flash_succeeded = True
+    wizard.show_page(WorkflowPage.SSH_TEST)
+    wizard.ssh_host.setText("192.0.2.1")
+    wizard.ssh_fingerprint.setText("SHA256:trusted")
+    wizard.test_ssh()
+    assert "connection refused" in wizard.ssh_status.text()
     window.close()
     app.processEvents()

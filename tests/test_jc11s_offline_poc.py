@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from core.android_sparse import convert, verify_set
-from core.fastboot_protocol import FastbootSession
+from core.fastboot_protocol import FastbootCommandError, FastbootResponse, FastbootSession, ResponseKind
 from core.jc11s_flash import (
     MockFlashTransport,
     ProbeEvidence,
@@ -20,8 +20,9 @@ from core.jc11s_flash import (
     simulate,
     validate_geometry,
 )
-from core.jc11s_image import SOURCE, build, digest, public_key, run, validate_hook, verify
+from core.jc11s_image import SOURCE, build, digest, public_key, run, validate_hook, verify, verify_integrity
 from core.transports import WriteBlockedError
+from core.windows_fastboot import HardwareFlashAuthorization, WindowsWinUsbFastbootTransport
 
 
 def evidence(size: int, limit: int, **overrides) -> ProbeEvidence:
@@ -107,6 +108,11 @@ def test_image_corruption_detected(artifacts, tmp_path):
         stream.write(b"corrupt")
     with pytest.raises(ValueError, match="SHA256"):
         verify(image)
+
+
+def test_pure_python_windows_integrity_check(artifacts):
+    image = artifacts[3]
+    assert verify_integrity(image)["sha256"] == digest(image)
 
 
 def test_simulated_download_flash_reboot(artifacts):
@@ -208,6 +214,49 @@ def test_complete_dynamic_build_uses_each_device_size(artifacts, tmp_path):
         assert all(path.stat().st_size < limit for path in plan.transfers)
         assert verify(image)["device_geometry"]["partition_size"] == size
     assert results[0].size != results[1].size
+
+
+def test_hardware_transport_failure_never_reboots(artifacts, monkeypatch):
+    image = artifacts[3]
+    size = image.stat().st_size
+    geometry = validate_geometry(evidence(size, 1024 * 1024))
+    plan = prepare(image, geometry, artifacts[0] / "hardware-failure-sparse")
+
+    class Connection:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    class Session:
+        rebooted = False
+
+        def getvar(self, name):
+            value = evidence(size, 1024 * 1024).values.get(name)
+            if value is None:
+                raise FastbootCommandError("unsupported")
+            return FastbootResponse(ResponseKind.OKAY, value)
+
+        def download_file(self, path, maximum_size, progress=None):
+            return FastbootResponse(ResponseKind.OKAY, "")
+
+        def flash(self, partition):
+            raise FastbootCommandError("simulated bootloader rejection")
+
+        def reboot(self):
+            self.rebooted = True
+            return FastbootResponse(ResponseKind.OKAY, "")
+
+    connection = Connection()
+    session = Session()
+    transport = WindowsWinUsbFastbootTransport(object())
+    monkeypatch.setattr(transport, "_single_interface", lambda identifier=None: object())
+    monkeypatch.setattr(transport, "_open_session", lambda interface: (connection, session, 0x81, 0x02))
+    authorization = HardwareFlashAuthorization(True, True, True, True, True)
+    with pytest.raises(FastbootCommandError, match="rejection"):
+        transport.flash_sparse_plan(plan, authorization)
+    assert not session.rebooted
+    assert connection.closed
 
 
 def test_readonly_probe_keeps_names_separate():

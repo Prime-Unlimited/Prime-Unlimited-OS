@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Protocol
 
 
@@ -55,7 +56,7 @@ def parse_response(packet: bytes) -> FastbootResponse:
 
 
 class FastbootSession:
-    """Allows diagnostic variables and reboot; download/flash/erase are unreachable."""
+    """Fastboot 0.4 framing. Callers own all destructive-operation policy gates."""
 
     def __init__(self, io: FastbootIo) -> None:
         self.io = io
@@ -67,6 +68,33 @@ class FastbootSession:
 
     def reboot(self) -> FastbootResponse:
         return self._exchange("reboot")
+
+    def download_file(self, path: Path, maximum_size: int, progress=None) -> FastbootResponse:
+        size = path.stat().st_size
+        if size <= 0 or size >= maximum_size or size > 0xFFFFFFFF:
+            raise ValueError("Fastboot download must be non-empty and below the measured device limit.")
+        response = self._exchange_until_data(f"download:{size:08x}")
+        try:
+            accepted = int(response.payload, 16)
+        except ValueError as exc:
+            raise FastbootMalformedResponse("Device returned a non-hexadecimal DATA size.") from exc
+        if accepted != size:
+            raise FastbootProtocolError(f"Device accepted {accepted} bytes, expected {size}.")
+        sent = 0
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(256 * 1024), b""):
+                written = self.io.write(chunk)
+                if written != len(chunk):
+                    raise FastbootProtocolError(f"Partial Fastboot payload transfer at byte {sent}.")
+                sent += written
+                if progress is not None:
+                    progress(sent, size)
+        return self._read_terminal()
+
+    def flash(self, partition: str) -> FastbootResponse:
+        if partition != "data":
+            raise ValueError("This JC11S installer only permits the verified bootloader partition name 'data'.")
+        return self._exchange(f"flash:{partition}")
 
     def _exchange(self, command: str) -> FastbootResponse:
         encoded = command.encode("ascii")
@@ -84,3 +112,34 @@ class FastbootSession:
                 raise FastbootCommandError(response.payload or "Device rejected the Fastboot command.")
             return response
         raise FastbootMalformedResponse("Fastboot sent too many INFO responses without completion.")
+
+    def _exchange_until_data(self, command: str) -> FastbootResponse:
+        encoded = command.encode("ascii")
+        if self.io.write(encoded) != len(encoded):
+            raise FastbootProtocolError("Partial Fastboot download command transfer.")
+        info = []
+        for _ in range(128):
+            response = parse_response(self.io.read(64))
+            if response.kind == ResponseKind.INFO:
+                info.append(response.payload)
+                continue
+            if response.kind == ResponseKind.FAIL:
+                raise FastbootCommandError(response.payload or "Device rejected the download command.")
+            if response.kind != ResponseKind.DATA:
+                raise FastbootMalformedResponse(f"Expected DATA, received {response.kind}.")
+            return FastbootResponse(response.kind, response.payload, tuple(info))
+        raise FastbootMalformedResponse("Fastboot sent too many INFO responses before DATA.")
+
+    def _read_terminal(self) -> FastbootResponse:
+        info = []
+        for _ in range(128):
+            response = parse_response(self.io.read(64))
+            if response.kind == ResponseKind.INFO:
+                info.append(response.payload)
+                continue
+            if response.kind == ResponseKind.FAIL:
+                raise FastbootCommandError(response.payload or "Device rejected the transferred payload.")
+            if response.kind != ResponseKind.OKAY:
+                raise FastbootMalformedResponse(f"Expected OKAY after payload, received {response.kind}.")
+            return FastbootResponse(response.kind, response.payload, tuple(info))
+        raise FastbootMalformedResponse("Fastboot sent too many INFO responses after the payload.")

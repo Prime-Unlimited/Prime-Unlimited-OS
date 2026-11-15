@@ -157,10 +157,31 @@ This PoC uses **preprovisioned WSL** for ext4 tooling and ARM compilation. It do
 not download or install anything during the offline build. WSL is only a build
 backend; USB probing continues to use native Windows WinUSB and needs no USB
 passthrough. Python path arguments are passed as arrays, not interpolated shell
-commands. The checkout must include `bootstrap/jc11s` sources. This is a source
-checkout PoC, not an integrated PyInstaller installer or a native Windows ext4
-writer. The PowerShell/WSL entry point still needs a Windows-host execution test;
-only its Linux backend was executed in this cloud machine.
+commands. The desktop application now invokes this WSL backend itself, checks
+every required tool, manages a private temporary workspace and displays build
+errors. PyInstaller includes the required source files for WSL. A Windows CI job
+builds a test executable; an actual Windows-host build/run and WSL integration
+test are still required before distribution.
+
+## Desktop installer and guarded hardware transport
+
+The PySide6 assistant now covers detection, key management, device-specific build,
+sparse verification, data-loss/recovery review, flash status, reboot and
+host-key-pinned SSH verification. Normal users do not need to enter Linux commands.
+
+The native WinUSB transport implements Fastboot 0.4 `download`, bounded payload
+streaming, terminal `OKAY`/`FAIL` processing and the allowlisted `flash:data`
+command. It re-probes product, firmware, partition type/size and download limit
+on the same connection immediately before writing. Any mismatch, timeout, USB
+disconnect, partial transfer or bootloader failure stops the sequence; reboot is
+sent only after every part reports successful flash.
+
+Implementation and authorization are separate. `HardwareReleasePolicy` currently
+keeps all real writes disabled. The GUI cannot turn evidence gates into true by
+checking a box. The immediate `ERASE DATA` confirmation is necessary but cannot
+substitute for engineering validation. Multipart plans additionally require a
+target-specific proof that repeated sparse `flash:data` calls do not erase earlier
+parts.
 
 Read-only native hardware evidence collector, from Windows Python with repository
 requirements installed:
@@ -218,7 +239,7 @@ turns `/data` or `mmcblk0p11` into a Fastboot command.
 
 ## Cloud validation record (2026-11-15)
 
-* The original PoC suite passed 99 tests. The current dynamic/sparse revision adds
+* The current suite passes **128 tests**. The dynamic/sparse and installer revisions add
   multiple artificial geometries, limits, dense multi-part conversion, explicit
   zero-fill reconstruction and full transfer simulation; see the PR checks for
   the current count.

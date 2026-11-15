@@ -161,7 +161,8 @@ def build(output: Path, key: Path, hook: Path, size: int, device_geometry: dict 
     return manifest
 
 
-def verify(image: Path) -> dict:
+def verify_integrity(image: Path) -> dict:
+    """Pure-Python size, hash and ext4-superblock check suitable for Windows."""
     manifest = json.loads(image.with_suffix(image.suffix + ".json").read_text())
     if image.stat().st_size != manifest["size"] or digest(image) != manifest["sha256"]:
         raise ValueError("Image size or SHA256 mismatch.")
@@ -170,6 +171,11 @@ def verify(image: Path) -> dict:
         superblock = stream.read(1024)
     if superblock[56:58] != b"\x53\xef" or not struct.unpack_from("<I", superblock, 96)[0] & 0x40:
         raise ValueError("Not an ext4 extent filesystem.")
+    return manifest
+
+
+def verify(image: Path) -> dict:
+    manifest = verify_integrity(image)
     run(["e2fsck", "-f", "-n", str(image.resolve())])
     with tempfile.TemporaryDirectory() as temporary:
         for index, (name, expected) in enumerate(manifest["files"].items()):

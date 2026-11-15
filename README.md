@@ -8,7 +8,7 @@
 
 Prime-Unlimited OS is a cross-platform desktop foundation for safely bootstrapping SSH and managing compatible mods on supported Denon DJ controllers.
 
-> **Development status:** the application supports guided setup, read-only diagnostics, and SSH key preparation. Hardware writing is deliberately disabled. The repository does not yet contain the confirmed identities, licensed payloads, or tested recovery procedures required for production flashing.
+> **Development status:** the Windows application implements the complete guarded JC11S workflow through device-specific image preparation, sparse validation, data-loss review, Fastboot transport, reboot and SSH verification. Hardware writing remains blocked by the independent release policy until partition mapping, first-boot firmware compatibility and recovery are demonstrated.
 
 ## Supported devices (in development)
 
@@ -26,6 +26,9 @@ Prime-Unlimited OS is a cross-platform desktop foundation for safely bootstrappi
 - Explicit handling for absent, wrong, multiple, ambiguous, and unverified devices.
 - Mandatory passphrase-protected Ed25519 generation or existing key-pair validation.
 - Host-key-pinned SSH verification service.
+- Integrated Windows/WSL image builder with prerequisite checks, temporary workspace cleanup, exact per-device geometry and progress/error reporting.
+- Native WinUSB Fastboot download and `flash:data` implementation behind explicit compatibility, recovery, data-loss and multipart safety gates.
+- Windows CI job producing a test executable artifact.
 - SHA-256 package validation and a strict mod manifest model with device/firmware compatibility and rollback declarations.
 - Secret-redacting diagnostics and persistent non-sensitive window settings.
 - Hardware-independent unit tests and PyInstaller configuration.
@@ -64,7 +67,7 @@ Sign and notarize release artifacts using project-controlled credentials. Creden
 
 ## Hardware blockers
 
-- **JC11S:** native Windows communication through Microsoft's inbox WinUSB driver is proven for `getvar:version` (`OKAY0.4`) and explicitly requested reboot. Positive model/firmware compatibility, independently reproduced bootstrap, redistributable payload, flashing, and proven backup/recovery remain unavailable.
+- **JC11S:** model identity and dynamic `data` geometry are proven through read-only WinUSB getvars. The transport and installer are implemented, but the `data`→`mmcblk0p11` mapping, fresh-filesystem boot/ALSA activation and a tested recovery procedure still block the hardware release policy.
 - **JP24:** VID:PID `15e4:d014` is only transport evidence. The imbupd protocol implementation, positive model identity, redistributable ARM64 payload, and proven backup/recovery procedure remain unavailable.
 - A USB command reporting success is insufficient. Completion will require normal device operation and an authenticated, host-key-verified SSH session on port 22 (JC11S) or 2222 (JP24).
 

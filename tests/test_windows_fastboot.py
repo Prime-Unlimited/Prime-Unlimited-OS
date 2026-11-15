@@ -2,7 +2,9 @@ from collections import deque
 
 import pytest
 
+from core.transports import WriteBlockedError
 from core.windows_fastboot import (
+    HardwareFlashAuthorization,
     InterfaceDescriptor,
     InterfaceInfo,
     PipeInfo,
@@ -202,3 +204,11 @@ def test_partition_evidence_uses_native_session_and_closes():
     assert "partition-size:userdata" in evidence.unsupported
     assert all(data.startswith(b"getvar:") for _, data in diagnostics.writes)
     assert discovery.closed and diagnostics.closed
+
+
+def test_hardware_flash_authorization_fails_closed():
+    with pytest.raises(WriteBlockedError, match="partition mapping"):
+        HardwareFlashAuthorization(user_confirmed_data_loss=True).require(1)
+    with pytest.raises(WriteBlockedError, match="multipart"):
+        HardwareFlashAuthorization(True, True, True, True, False).require(2)
+    HardwareFlashAuthorization(True, True, True, True, True).require(2)

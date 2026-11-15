@@ -45,7 +45,7 @@ def test_fail_response_raises_command_error():
         FastbootSession(FakeIo([b"FAILunsupported"])).getvar("product")
 
 
-def test_data_response_is_parsed_without_enabling_downloads():
+def test_data_response_is_parsed():
     response = parse_response(b"DATA00001000")
     assert response.kind == ResponseKind.DATA
     assert response.payload == "00001000"
@@ -60,3 +60,38 @@ def test_malformed_response_is_rejected(packet):
 def test_partial_command_write_is_rejected():
     with pytest.raises(FastbootProtocolError, match="Partial"):
         FastbootSession(FakeIo([], written=3)).getvar("version")
+
+
+def test_download_stream_and_flash_data_only(tmp_path):
+    payload = tmp_path / "part.sparse"
+    payload.write_bytes(b"sparse payload")
+    io = FakeIo([b"DATA0000000e", b"INFOwriting", b"OKAY", b"OKAYflashed"])
+    session = FastbootSession(io)
+    progress = []
+    assert (
+        session.download_file(payload, 1024, lambda sent, total: progress.append((sent, total))).kind
+        == ResponseKind.OKAY
+    )
+    assert session.flash("data").payload == "flashed"
+    assert io.commands == [b"download:0000000e", b"sparse payload", b"flash:data"]
+    assert progress == [(14, 14)]
+
+
+def test_download_fail_and_wrong_data_size_stop_before_payload(tmp_path):
+    payload = tmp_path / "part.sparse"
+    payload.write_bytes(b"payload")
+    with pytest.raises(FastbootCommandError):
+        FastbootSession(FakeIo([b"FAILbuffer full"])).download_file(payload, 1024)
+    io = FakeIo([b"DATA00000008"])
+    with pytest.raises(FastbootProtocolError, match="accepted"):
+        FastbootSession(io).download_file(payload, 1024)
+    assert io.commands == [b"download:00000007"]
+
+
+def test_download_limit_and_partition_allowlist(tmp_path):
+    payload = tmp_path / "part.sparse"
+    payload.write_bytes(b"payload")
+    with pytest.raises(ValueError, match="below"):
+        FastbootSession(FakeIo([])).download_file(payload, len(b"payload"))
+    with pytest.raises(ValueError, match="only permits"):
+        FastbootSession(FakeIo([])).flash("userdata")

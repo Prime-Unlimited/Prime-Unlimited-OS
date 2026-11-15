@@ -115,6 +115,30 @@ class VerifiedWindowsFastboot:
     pipe_out: int
 
 
+@dataclass(frozen=True)
+class HardwareFlashAuthorization:
+    partition_mapping_verified: bool = False
+    firmware_compatible: bool = False
+    recovery_tested: bool = False
+    user_confirmed_data_loss: bool = False
+    multipart_sparse_verified: bool = False
+
+    def require(self, transfer_count: int) -> None:
+        missing = []
+        if not self.partition_mapping_verified:
+            missing.append("data partition mapping")
+        if not self.firmware_compatible:
+            missing.append("firmware compatibility")
+        if not self.recovery_tested:
+            missing.append("tested recovery path")
+        if not self.user_confirmed_data_loss:
+            missing.append("immediate data-loss confirmation")
+        if transfer_count > 1 and not self.multipart_sparse_verified:
+            missing.append("multipart sparse support")
+        if missing:
+            raise WriteBlockedError("Hardware flash remains blocked: " + ", ".join(missing) + ".")
+
+
 class WindowsWinUsbFastbootTransport:
     """Read-only native transport plus explicitly invoked reboot."""
 
@@ -201,8 +225,59 @@ class WindowsWinUsbFastbootTransport:
         finally:
             connection.close()
 
+    def flash_sparse_plan(
+        self,
+        plan,
+        authorization: HardwareFlashAuthorization,
+        identifier: str | None = None,
+        progress=None,
+    ) -> str:
+        """Execute a prevalidated plan only after the separate release gate passes."""
+        from core.android_sparse import verify_set
+        from core.jc11s_flash import probe, validate_geometry
+        from core.jc11s_image import verify_integrity
+
+        authorization.require(len(plan.transfers))
+        image = verify_integrity(plan.image)
+        sparse = verify_set(plan.sparse_directory)
+        if image["size"] != plan.size or image["sha256"] != plan.sha256:
+            raise WinUsbError("Raw image integrity changed after planning.")
+        if sparse["expanded_size"] != plan.size or sparse["expanded_sha256"] != plan.sha256:
+            raise WinUsbError("Sparse image does not reconstruct the planned raw image.")
+        interface = self._single_interface(identifier)
+        connection, session, _, _ = self._open_session(interface)
+        try:
+            geometry = validate_geometry(probe(session))
+            if (
+                geometry.partition != plan.partition
+                or geometry.partition_size != plan.size
+                or geometry.max_download_size != plan.max_download
+            ):
+                raise WriteBlockedError("Connected-device geometry changed after image preparation.")
+            for index, part in enumerate(plan.transfers, 1):
+                if progress is not None:
+                    progress("download", index, len(plan.transfers), 0, part.stat().st_size)
+                session.download_file(
+                    part,
+                    geometry.max_download_size,
+                    lambda sent, total, current=index: (
+                        progress("download", current, len(plan.transfers), sent, total)
+                        if progress is not None
+                        else None
+                    ),
+                )
+                session.flash("data")
+                if progress is not None:
+                    progress("flash", index, len(plan.transfers), part.stat().st_size, part.stat().st_size)
+            try:
+                return session.reboot().payload
+            except (WinUsbDisconnected, WinUsbTimeout):
+                return "Device disconnected after successful flash and reboot command."
+        finally:
+            connection.close()
+
     def install(self, package) -> None:
-        raise WriteBlockedError("JC11S flashing is not implemented or enabled.")
+        raise WriteBlockedError("Use flash_sparse_plan with an explicit hardware release authorization.")
 
     def _single_interface(self, identifier: str | None = None) -> InterfaceInfo:
         verified = self.discover(identifier)

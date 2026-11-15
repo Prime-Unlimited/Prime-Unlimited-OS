@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QSettings, Qt, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, QSettings, QStandardPaths, Qt, QThreadPool, Signal, Slot
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -29,6 +31,7 @@ from core.diagnostic_service import DiagnosticReport, UsbDiagnosticService
 from core.diagnostics import redact
 from core.keys import KeyPair, KeyValidationError, generate_keypair, validate_keypair
 from core.profiles import PROFILES, DeviceProfile, ProfileId
+from core.windows_installer import InstallerArtifacts, Jc11sInstallerService
 
 
 def label(text: str, object_name: str = "") -> QLabel:
@@ -133,25 +136,47 @@ class RebootWorker(QRunnable):
             self.signals.failed.emit(redact(str(exc)))
 
 
+class TaskWorker(QRunnable):
+    def __init__(self, function) -> None:
+        super().__init__()
+        self.function = function
+        self.signals = WorkerSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.signals.finished.emit(self.function())
+        except Exception as exc:
+            self.signals.failed.emit(redact(str(exc)))
+
+
 class WorkflowPage(QWidget):
     exit_requested = Signal()
 
     CONNECTION = 0
     SSH_KEY = 1
-    INSTALLATION = 2
+    PREPARE = 2
+    INSTALLATION = PREPARE
+    REVIEW = 3
+    FLASH = 4
+    SSH_TEST = 5
 
     def __init__(
         self,
         diagnostic_service: UsbDiagnosticService | None = None,
         thread_pool: QThreadPool | None = None,
+        installer_service: Jc11sInstallerService | None = None,
     ) -> None:
         super().__init__()
         self.diagnostic_service = diagnostic_service or UsbDiagnosticService()
         self.thread_pool = thread_pool or QThreadPool.globalInstance()
+        self.installer_service = installer_service
         self.profile: DeviceProfile | None = None
         self.profile_id: ProfileId | None = None
         self.diagnostic_report: DiagnosticReport | None = None
         self.key_pair: KeyPair | None = None
+        self.artifacts: InstallerArtifacts | None = None
+        self._flash_succeeded = False
         self._worker: DiagnosticWorker | None = None
 
         outer = QHBoxLayout(self)
@@ -177,7 +202,10 @@ class WorkflowPage(QWidget):
         self.page_stack = QStackedWidget()
         self.page_stack.addWidget(self._build_connection_page())
         self.page_stack.addWidget(self._build_key_page())
-        self.page_stack.addWidget(self._build_blocked_page())
+        self.page_stack.addWidget(self._build_prepare_page())
+        self.page_stack.addWidget(self._build_review_page())
+        self.page_stack.addWidget(self._build_flash_page())
+        self.page_stack.addWidget(self._build_ssh_page())
         body.addWidget(self.page_stack, 1)
 
         navigation = QHBoxLayout()
@@ -287,23 +315,94 @@ class WorkflowPage(QWidget):
         layout.addStretch()
         return page
 
-    def _build_blocked_page(self) -> QWidget:
+    def _build_prepare_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(label("Installation safety gate", "title"))
-        self.blocker_text = label("")
-        self.blocker_text.setStyleSheet("background:#2b2114; color:#ffd18a; border-radius:9px; padding:14px;")
-        layout.addWidget(self.blocker_text)
+        layout.addWidget(label("Build this device's SSH image", "title"))
         layout.addWidget(
             label(
-                "Your SSH key is ready, but no image preparation or USB write is permitted. "
-                "Mod management remains locked until a future validated bootstrap finishes and "
-                "an authenticated, host-key-verified SSH session succeeds.",
+                "The installer re-reads the connected device geometry, checks the WSL build tools, "
+                "creates an exact-size ext4 image, converts it to Android sparse format and verifies every sector.",
                 "subtitle",
             )
         )
-        layout.addWidget(label("No destructive command is implemented or available from this application.", "muted"))
+        self.prepare_button = QPushButton("Check prerequisites and build image")
+        self.prepare_button.setObjectName("primary")
+        self.prepare_button.clicked.connect(self.prepare_image)
+        layout.addWidget(self.prepare_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.build_progress = QProgressBar()
+        self.build_progress.setRange(0, 100)
+        self.build_progress.setValue(0)
+        layout.addWidget(self.build_progress)
+        self.build_status = label("Image has not been built.")
+        layout.addWidget(self.build_status)
+        layout.addStretch()
+        return page
+
+    def _build_review_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(label("Review destructive installation", "title"))
+        self.plan_summary = label("")
+        layout.addWidget(self.plan_summary)
+        warning = label(
+            "This operation replaces the complete /data filesystem. Device settings, Wi-Fi configuration, "
+            "local library metadata and every other file on that partition will be lost."
+        )
+        warning.setStyleSheet("background:#3a1717; color:#ffb4b4; border-radius:9px; padding:14px;")
+        layout.addWidget(warning)
+        self.recovery_confirmation = QCheckBox(
+            "I understand that an OFW file alone is not a tested recovery path and recovery must be demonstrated."
+        )
+        self.data_loss_confirmation = QCheckBox("I understand that the complete /data partition will be overwritten.")
+        self.erase_phrase = QLineEdit()
+        self.erase_phrase.setPlaceholderText("Type ERASE DATA")
+        for widget in (self.recovery_confirmation, self.data_loss_confirmation):
+            widget.stateChanged.connect(self._update_navigation)
+            layout.addWidget(widget)
+        self.erase_phrase.textChanged.connect(self._update_navigation)
+        layout.addWidget(self.erase_phrase)
+        layout.addStretch()
+        return page
+
+    def _build_flash_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(label("Hardware flash", "title"))
+        self.blocker_text = label("")
+        self.blocker_text.setStyleSheet("background:#2b2114; color:#ffd18a; border-radius:9px; padding:14px;")
+        layout.addWidget(self.blocker_text)
+        self.flash_button = QPushButton("Start confirmed hardware flash")
+        self.flash_button.setObjectName("primary")
+        self.flash_button.clicked.connect(self.start_flash)
+        layout.addWidget(self.flash_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.flash_progress = QProgressBar()
+        layout.addWidget(self.flash_progress)
+        self.flash_status = label("No write has started.")
+        layout.addWidget(self.flash_status)
+        layout.addStretch()
+        return page
+
+    def _build_ssh_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(label("Verify installed SSH access", "title"))
+        self.ssh_host = QLineEdit()
+        self.ssh_host.setPlaceholderText("Device IP address or hostname")
+        self.ssh_passphrase = QLineEdit()
+        self.ssh_passphrase.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ssh_passphrase.setPlaceholderText("Private-key passphrase")
+        self.ssh_fingerprint = QLineEdit()
+        self.ssh_fingerprint.setPlaceholderText("Trusted host-key fingerprint (SHA256:…)")
+        self.ssh_test_button = QPushButton("Test authenticated SSH")
+        self.ssh_test_button.clicked.connect(self.test_ssh)
+        self.ssh_status = label("SSH has not been tested.")
+        layout.addWidget(self.ssh_host)
+        layout.addWidget(self.ssh_passphrase)
+        layout.addWidget(self.ssh_fingerprint)
+        layout.addWidget(self.ssh_test_button, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.ssh_status)
         layout.addStretch()
         return page
 
@@ -312,13 +411,22 @@ class WorkflowPage(QWidget):
         self.profile = PROFILES[profile_id]
         self.diagnostic_report = None
         self.key_pair = None
+        if self.artifacts is not None:
+            self.artifacts.cleanup()
+        self.artifacts = None
+        self._flash_succeeded = False
+        if profile_id == ProfileId.JC11S and self.installer_service is None:
+            fastboot = getattr(self.diagnostic_service, "fastboot", None)
+            if fastboot is not None and hasattr(fastboot, "collect_partition_evidence"):
+                self.installer_service = Jc11sInstallerService(fastboot)
         self.steps.clear()
         for step in (
             "1  USB connection & diagnostics",
             "2  Mandatory SSH key",
-            "3  Installation safety gate",
-            "4  Authenticated SSH test (locked)",
-            "5  Mod manager (locked)",
+            "3  Device-specific image build",
+            "4  Data-loss and recovery review",
+            "5  Guarded hardware flash",
+            "6  Authenticated SSH test",
         ):
             self.steps.addItem(step)
         self.connection_title.setText(f"Connect {self.profile.display_name}")
@@ -326,7 +434,7 @@ class WorkflowPage(QWidget):
             f"Selected profile: {self.profile.hardware_profile} · {self.profile.architecture}\n"
             f"Expected USB transport: {self.profile.transport}\n\n{self.profile.setup_mode}"
         )
-        self.blocker_text.setText(self.profile.blocker)
+        self._refresh_flash_gate()
         self.diagnostic_status.setText("Diagnostics have not run.")
         self.diagnostic_status.setStyleSheet("")
         self.diagnostic_log.clear()
@@ -340,7 +448,32 @@ class WorkflowPage(QWidget):
         self.passphrase.clear()
         self.confirm_passphrase.clear()
         self.key_status.setText("SSH key setup is required. There is no skip option.")
+        self.build_progress.setValue(0)
+        self.build_status.setText("Image has not been built.")
+        self.plan_summary.clear()
+        self.recovery_confirmation.setChecked(False)
+        self.data_loss_confirmation.setChecked(False)
+        self.erase_phrase.clear()
+        self.flash_progress.setValue(0)
+        self.flash_status.setText("No write has started.")
+        self.ssh_status.setText("SSH has not been tested.")
         self.show_page(self.CONNECTION)
+
+    def _refresh_flash_gate(self) -> None:
+        if self.profile_id != ProfileId.JC11S or self.installer_service is None:
+            blockers = (self.profile.blocker if self.profile else "Installer service unavailable.",)
+        else:
+            blockers = self.installer_service.release_policy.blockers
+            if (
+                self.artifacts is not None
+                and len(self.artifacts.plan.transfers) > 1
+                and not self.installer_service.release_policy.multipart_sparse_verified
+            ):
+                blockers += ("Multipart sparse flashing is not verified on the InMusic bootloader",)
+        self.blocker_text.setText(
+            "Hardware write blocked:\n• " + "\n• ".join(blockers) if blockers else "All release gates satisfied."
+        )
+        self.flash_button.setEnabled(not blockers and self._review_confirmed())
 
     def show_page(self, page: int) -> None:
         self.page_stack.setCurrentIndex(page)
@@ -538,6 +671,133 @@ class WorkflowPage(QWidget):
         self.key_status.setStyleSheet("color:#ff7b7b;")
         self._update_navigation()
 
+    def prepare_image(self) -> None:
+        if self.installer_service is None or self.key_pair is None:
+            self.build_status.setText("JC11S installer service and a validated SSH key are required.")
+            return
+        self.prepare_button.setEnabled(False)
+        self.build_progress.setRange(0, 0)
+        self.build_status.setText("Re-reading device geometry and building through WSL…")
+        identifier = self.candidate_selector.currentData() if self.candidate_selector.isVisible() else None
+        worker = TaskWorker(lambda: self.installer_service.prepare(self.key_pair.public_key, identifier))
+        worker.signals.finished.connect(self._image_ready)
+        worker.signals.failed.connect(self._image_failed)
+        self._worker = worker
+        self.thread_pool.start(worker)
+
+    @Slot(object)
+    def _image_ready(self, artifacts: InstallerArtifacts) -> None:
+        if self.artifacts is not None:
+            self.artifacts.cleanup()
+        self.artifacts = artifacts
+        self.build_progress.setRange(0, 100)
+        self.build_progress.setValue(100)
+        self.prepare_button.setEnabled(True)
+        plan = artifacts.plan
+        self.build_status.setText("Exact-size ext4 image and sparse transfer set verified.")
+        self.plan_summary.setText(
+            f"Bootloader partition: data\nRaw image: {plan.size:,} bytes\n"
+            f"Measured download limit: {plan.max_download:,} bytes\n"
+            f"Sparse transfers: {len(plan.transfers)} · "
+            f"{sum(path.stat().st_size for path in plan.transfers):,} transmitted bytes"
+        )
+        self._refresh_flash_gate()
+        self._update_navigation()
+
+    @Slot(str)
+    def _image_failed(self, message: str) -> None:
+        self.artifacts = None
+        self.build_progress.setRange(0, 100)
+        self.build_progress.setValue(0)
+        self.prepare_button.setEnabled(True)
+        self.build_status.setText("Image preparation failed: " + redact(message))
+        self._update_navigation()
+
+    def _review_confirmed(self) -> bool:
+        return (
+            self.recovery_confirmation.isChecked()
+            and self.data_loss_confirmation.isChecked()
+            and self.erase_phrase.text().strip() == "ERASE DATA"
+        )
+
+    def start_flash(self) -> None:
+        if self.installer_service is None or self.artifacts is None or not self._review_confirmed():
+            return
+        self._refresh_flash_gate()
+        if not self.flash_button.isEnabled():
+            return
+        answer = QMessageBox.warning(
+            self,
+            "Final /data erase confirmation",
+            "This is the final confirmation. The complete data partition will be overwritten now. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.flash_status.setText("Flash cancelled by the user. No write command was sent.")
+            return
+        self.flash_button.setEnabled(False)
+        self.flash_progress.setRange(0, 0)
+        self.flash_status.setText("Revalidating the connected device before guarded flash…")
+        identifier = self.candidate_selector.currentData() if self.candidate_selector.isVisible() else None
+        worker = TaskWorker(lambda: self.installer_service.flash(self.artifacts, True, identifier))
+        worker.signals.finished.connect(self._flash_complete)
+        worker.signals.failed.connect(self._flash_failed)
+        self._worker = worker
+        self.thread_pool.start(worker)
+
+    @Slot(object)
+    def _flash_complete(self, message) -> None:
+        self._flash_succeeded = True
+        self.flash_progress.setRange(0, 100)
+        self.flash_progress.setValue(100)
+        self.flash_status.setText("Flash completed and reboot requested. " + redact(str(message)))
+        self._update_navigation()
+
+    @Slot(str)
+    def _flash_failed(self, message: str) -> None:
+        self._flash_succeeded = False
+        self.flash_progress.setRange(0, 100)
+        self.flash_progress.setValue(0)
+        self.flash_status.setText("Flash stopped; no reboot was sent: " + redact(message))
+        self._refresh_flash_gate()
+        self._update_navigation()
+
+    def test_ssh(self) -> None:
+        if not self._flash_succeeded or self.installer_service is None or self.key_pair is None:
+            return
+        host = self.ssh_host.text().strip()
+        fingerprint = self.ssh_fingerprint.text().strip()
+        if not host or not fingerprint.startswith("SHA256:"):
+            self.ssh_status.setText("Enter the device address and a trusted SHA256 host-key fingerprint.")
+            return
+        app_data = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation))
+        known_hosts = app_data / "known_hosts"
+
+        def verify_connection():
+            self.installer_service.ssh.enroll_host_key(host, 22, fingerprint, known_hosts)
+            return self.installer_service.verify_ssh(
+                host, self.key_pair.private_key, self.ssh_passphrase.text(), known_hosts
+            )
+
+        self.ssh_test_button.setEnabled(False)
+        self.ssh_status.setText("Enrolling the trusted host key and testing authenticated SSH…")
+        worker = TaskWorker(verify_connection)
+        worker.signals.finished.connect(self._ssh_complete)
+        worker.signals.failed.connect(self._ssh_failed)
+        self._worker = worker
+        self.thread_pool.start(worker)
+
+    @Slot(object)
+    def _ssh_complete(self, marker) -> None:
+        self.ssh_test_button.setEnabled(True)
+        self.ssh_status.setText("Authenticated SSH succeeded: " + redact(str(marker)))
+
+    @Slot(str)
+    def _ssh_failed(self, message: str) -> None:
+        self.ssh_test_button.setEnabled(True)
+        self.ssh_status.setText("SSH verification failed: " + redact(message))
+
     def go_back(self) -> None:
         page = self.page_stack.currentIndex()
         if page == self.CONNECTION:
@@ -550,13 +810,13 @@ class WorkflowPage(QWidget):
         if page == self.CONNECTION and self._diagnostics_allow_key_setup():
             self.show_page(self.SSH_KEY)
         elif page == self.SSH_KEY and self.key_pair is not None:
-            self.show_page(self.INSTALLATION)
-        elif page == self.INSTALLATION:
-            QMessageBox.information(
-                self,
-                "Installation blocked",
-                "Production installation remains disabled until the hardware and recovery requirements are validated.",
-            )
+            self.show_page(self.PREPARE)
+        elif page == self.PREPARE and self.artifacts is not None:
+            self.show_page(self.REVIEW)
+        elif page == self.REVIEW and self._review_confirmed():
+            self.show_page(self.FLASH)
+        elif page == self.FLASH and self._flash_succeeded:
+            self.show_page(self.SSH_TEST)
 
     def _diagnostics_allow_key_setup(self) -> bool:
         if self.diagnostic_report is None:
@@ -575,8 +835,18 @@ class WorkflowPage(QWidget):
         elif page == self.SSH_KEY:
             self.continue_button.setText("Continue")
             self.continue_button.setEnabled(self.key_pair is not None)
+        elif page == self.PREPARE:
+            self.continue_button.setText("Review installation")
+            self.continue_button.setEnabled(self.artifacts is not None)
+        elif page == self.REVIEW:
+            self.continue_button.setText("Continue to guarded flash")
+            self.continue_button.setEnabled(self._review_confirmed())
+        elif page == self.FLASH:
+            self._refresh_flash_gate()
+            self.continue_button.setText("Continue to SSH test")
+            self.continue_button.setEnabled(self._flash_succeeded)
         else:
-            self.continue_button.setText("Installation blocked")
+            self.continue_button.setText("Finish after successful SSH test")
             self.continue_button.setEnabled(False)
 
 
@@ -586,6 +856,7 @@ class MainWindow(QMainWindow):
         settings: QSettings,
         diagnostic_service: UsbDiagnosticService | None = None,
         thread_pool: QThreadPool | None = None,
+        installer_service: Jc11sInstallerService | None = None,
     ) -> None:
         super().__init__()
         self.settings = settings
@@ -594,7 +865,7 @@ class MainWindow(QMainWindow):
         self.resize(settings.value("window/size", self.size()))
         self.stack = QStackedWidget()
         self.selection = SelectionPage()
-        self.workflow = WorkflowPage(diagnostic_service, thread_pool)
+        self.workflow = WorkflowPage(diagnostic_service, thread_pool, installer_service)
         self.selection.selected.connect(self.open_workflow)
         self.workflow.exit_requested.connect(lambda: self.stack.setCurrentWidget(self.selection))
         self.stack.addWidget(self.selection)
@@ -612,4 +883,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self.settings.setValue("window/size", self.size())
+        if self.workflow.artifacts is not None:
+            self.workflow.artifacts.cleanup()
+            self.workflow.artifacts = None
         super().closeEvent(event)
