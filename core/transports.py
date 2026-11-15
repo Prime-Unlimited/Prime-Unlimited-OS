@@ -98,45 +98,52 @@ class ImbupdTransport:
         return re.sub(r"(?i)VID_15E4&PID_D014", "15e4:d014", result.stdout)
 
     def _darwin_usb_listing(self) -> str:
-        # Plain-text `system_profiler SPUSBDataType` prints Vendor ID and
-        # Product ID on separate lines, with field labels localized to the
-        # system language (e.g. "USB-Hersteller-ID" in German) - a plain
-        # "15e4:d014" substring never appears, so the lsusb-style regex can
-        # never match it. The -xml form keeps its key names in English
-        # regardless of locale and is machine-parseable, so use that and
-        # synthesize the "15e4:d014" token the shared regex expects.
+        # `system_profiler SPUSBDataType` goes through a separate reporting
+        # daemon that was repeatedly observed returning a stale, empty USB
+        # list on a real machine - confirmed independently of this code (both
+        # the plain-text and -xml forms returned nothing) while the device
+        # was visibly present and selected in Apple's own System Information
+        # app at the same moment. `ioreg`, which reads the IOKit registry
+        # directly rather than going through that daemon, reliably saw it.
+        #
+        # `ioreg -r -c IOUSBHostDevice` (root-restricted to that class) was
+        # tried first, but it stops descending once it finds a matching
+        # entry along a branch: a device sitting two hub levels down (e.g.
+        # hub -> hub -> PRIME 4 G2), where the intermediate hubs also match
+        # IOUSBHostDevice, never gets enumerated - confirmed on real
+        # hardware (only the two top-level hubs came back, never the
+        # device actually behind them). Dumping the full, unrestricted
+        # IOUSB-plane archive and walking its "IORegistryEntryChildren"
+        # tree in Python finds every device regardless of nesting depth.
         try:
             result = subprocess.run(
-                ["system_profiler", "SPUSBDataType", "-xml"],
+                ["ioreg", "-p", "IOUSB", "-a", "-l", "-w0"],
                 capture_output=True, timeout=15, check=False,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
             raise TransportError(f"USB interface probe failed: {exc}") from exc
         if result.returncode:
-            raise TransportError(result.stderr.decode(errors="replace").strip() or "system_profiler returned an error")
+            raise TransportError(result.stderr.decode(errors="replace").strip() or "ioreg returned an error")
         try:
-            plist = plistlib.loads(result.stdout)
+            root = plistlib.loads(result.stdout)
         except (plistlib.InvalidFileException, ValueError) as exc:
-            raise TransportError(f"Could not parse system_profiler output: {exc}") from exc
-        tokens = [f"{vid}:{pid}" for vid, pid in self._walk_darwin_usb_tree(plist)]
+            raise TransportError(f"Could not parse ioreg output: {exc}") from exc
+        tokens = [f"{vid:04x}:{pid:04x}" for vid, pid in self._walk_ioreg_tree(root)]
         return "\n".join(tokens)
 
     @staticmethod
-    def _walk_darwin_usb_tree(node: object) -> list[tuple[str, str]]:
-        found: list[tuple[str, str]] = []
+    def _walk_ioreg_tree(node: object) -> list[tuple[int, int]]:
+        found: list[tuple[int, int]] = []
         if isinstance(node, dict):
-            vendor_id = node.get("vendor_id")
-            product_id = node.get("product_id")
-            if isinstance(vendor_id, str) and isinstance(product_id, str):
-                vendor_match = re.search(r"0x([0-9a-fA-F]+)", vendor_id)
-                product_match = re.search(r"0x([0-9a-fA-F]+)", product_id)
-                if vendor_match and product_match:
-                    found.append((vendor_match.group(1).lower(), product_match.group(1).lower()))
-            for value in node.values():
-                found.extend(ImbupdTransport._walk_darwin_usb_tree(value))
+            vendor_id = node.get("idVendor")
+            product_id = node.get("idProduct")
+            if isinstance(vendor_id, int) and isinstance(product_id, int):
+                found.append((vendor_id, product_id))
+            for child in node.get("IORegistryEntryChildren", []):
+                found.extend(ImbupdTransport._walk_ioreg_tree(child))
         elif isinstance(node, list):
             for item in node:
-                found.extend(ImbupdTransport._walk_darwin_usb_tree(item))
+                found.extend(ImbupdTransport._walk_ioreg_tree(item))
         return found
 
     def install(self, package: Path, on_progress: object | None = None) -> None:

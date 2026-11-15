@@ -18,35 +18,53 @@ def test_multiple_jp24_interfaces_are_preserved_as_ambiguous():
     assert len(ImbupdTransport("linux", "ID 15e4:d014 first\nID 15E4:D014 second").probe()) == 2
 
 
-def test_darwin_xml_probe_finds_nested_device(monkeypatch):
-    """Regression test: `system_profiler SPUSBDataType` (plain text) prints
-    Vendor ID and Product ID on separate lines, with field labels localized
-    to the system language (e.g. German "USB-Hersteller-ID") - a combined
-    "15e4:d014" substring never appears in that output, so the probe must
-    use the -xml form and parse vendor_id/product_id pairs structurally.
-    This also covers devices nested under a USB hub, as real hardware is."""
-    plist = [
-        {
-            "_items": [
-                {
-                    "_name": "USB3 Gen2 Hub",
-                    "vendor_id": "0x05ac",
-                    "product_id": "0x800c",
-                    "_items": [
-                        {"_name": "PRIME 4 G2", "vendor_id": "0x15e4", "product_id": "0xd014"},
-                    ],
-                },
-            ],
-        },
-    ]
+def test_darwin_probe_finds_device_nested_two_hubs_deep(monkeypatch):
+    """Regression test: `system_profiler SPUSBDataType` goes through a
+    separate reporting daemon that was observed returning a stale, empty USB
+    list on real hardware (both plain-text and -xml forms) while the device
+    was visibly connected and selected in Apple's own System Information
+    app at the same moment - so the probe uses `ioreg` instead, which reads
+    the IOKit registry directly. A root-restricted `ioreg -r -c
+    IOUSBHostDevice` query was tried first, but on real hardware it only
+    ever returned the top-level hubs and never a device sitting behind two
+    of them (hub -> hub -> PRIME 4 G2) - ioreg stops descending a branch
+    once something on it matches the class filter, and the intermediate
+    hubs match too. The fix dumps the full, unrestricted IOUSB-plane
+    archive and walks its IORegistryEntryChildren tree in Python instead,
+    which this test models with exactly that two-hub nesting depth."""
+    root = {
+        "IORegistryEntryChildren": [
+            {
+                "IORegistryEntryName": "USB2 Hub",
+                "idVendor": 0x05AC,
+                "idProduct": 0x800B,
+                "IORegistryEntryChildren": [
+                    {
+                        "IORegistryEntryName": "USB3 Gen2 Hub",
+                        "idVendor": 0x05AC,
+                        "idProduct": 0x800C,
+                        "IORegistryEntryChildren": [
+                            {
+                                "IORegistryEntryName": "PRIME 4 G2",
+                                "idVendor": 0x15E4,
+                                "idProduct": 0xD014,
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
 
     class FakeResult:
         returncode = 0
-        stdout = plistlib.dumps(plist)
+        stdout = plistlib.dumps(root)
         stderr = b""
 
     def fake_run(command, **kwargs):
-        assert "-xml" in command
+        assert command[0] == "ioreg"
+        assert "system_profiler" not in command
+        assert "-c" not in command  # no class filter - it was the bug
         return FakeResult()
 
     monkeypatch.setattr("core.transports.subprocess.run", fake_run)
