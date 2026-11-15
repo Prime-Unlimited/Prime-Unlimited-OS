@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/prime-unlimited-logo.svg" alt="Prime Unlimited OS logo" width="850" />
+<img width="2560" height="1280" alt="Prime Unlimited OS Brand-selection" src="https://github.com/user-attachments/assets/28a3cae4-cba6-4c0a-acb5-51b60588c0b4" />
 
 **Open-source modding platform for Denon DJ Prime 4+ and Prime 4 G2.**
 
