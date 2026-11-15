@@ -211,7 +211,12 @@ def test_wizard_displays_verified_product_and_blocks_unknown_identity(tmp_path: 
         product_id=0xD007,
         candidate_families=(DeviceFamily.JC11S,),
         candidate_transports=(CandidateTransport.FASTBOOT,),
-        verification=VerificationState(candidate=True, transport_detected=True, protocol_verified=True),
+        verification=VerificationState(
+            candidate=True,
+            transport_detected=True,
+            protocol_verified=True,
+            model_verified=True,
+        ),
         source="Windows SetupAPI",
         bootloader="0.4",
     )

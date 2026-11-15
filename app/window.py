@@ -567,7 +567,7 @@ class WorkflowPage(QWidget):
             )
             interface_text = f"\nInterface: {descriptor}  ·  Endpoints: {', '.join(interface.endpoints)}"
         product = self.diagnostic_report.fastboot_product
-        model_verified = product == "rk3288-az01-jc11s"
+        model_verified = candidate.verification.model_verified and product == "rk3288-az01-jc11s"
         model_text = (
             f"Verified ({product})" if model_verified else (f"Rejected ({product})" if product else "Unverified")
         )

@@ -107,6 +107,9 @@ class UsbDiagnosticService:
                             log.append(f"fastboot: product identity unavailable ({exc})")
                     if fastboot_product == "rk3288-az01-jc11s":
                         evidence[-1] = replace(evidence[-1], verified_profile=ProfileId.JC11S)
+                        verified_device = replace(devices[0], verified_model=ProfileId.JC11S.value)
+                        devices[0] = verified_device
+                        probed_devices[-1] = verified_device
                     elif fastboot_product:
                         # A positive, different product is a wrong model, not merely unknown.
                         evidence[-1] = replace(evidence[-1], verified_profile=ProfileId.JP24)
@@ -167,6 +170,7 @@ class UsbDiagnosticService:
                 candidate=True,
                 transport_detected=transport_detected,
                 protocol_verified=bool(protocol_verified),
+                model_verified=any(device.verified_model == ProfileId.JC11S.value for device in matches),
                 installation_authorized=False,
             ),
         )
