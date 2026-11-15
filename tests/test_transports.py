@@ -1,3 +1,4 @@
+import plistlib
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,44 @@ def test_jp24_usb_id_is_only_unverified_transport_evidence():
 
 def test_multiple_jp24_interfaces_are_preserved_as_ambiguous():
     assert len(ImbupdTransport("linux", "ID 15e4:d014 first\nID 15E4:D014 second").probe()) == 2
+
+
+def test_darwin_xml_probe_finds_nested_device(monkeypatch):
+    """Regression test: `system_profiler SPUSBDataType` (plain text) prints
+    Vendor ID and Product ID on separate lines, with field labels localized
+    to the system language (e.g. German "USB-Hersteller-ID") - a combined
+    "15e4:d014" substring never appears in that output, so the probe must
+    use the -xml form and parse vendor_id/product_id pairs structurally.
+    This also covers devices nested under a USB hub, as real hardware is."""
+    plist = [
+        {
+            "_items": [
+                {
+                    "_name": "USB3 Gen2 Hub",
+                    "vendor_id": "0x05ac",
+                    "product_id": "0x800c",
+                    "_items": [
+                        {"_name": "PRIME 4 G2", "vendor_id": "0x15e4", "product_id": "0xd014"},
+                    ],
+                },
+            ],
+        },
+    ]
+
+    class FakeResult:
+        returncode = 0
+        stdout = plistlib.dumps(plist)
+        stderr = b""
+
+    def fake_run(command, **kwargs):
+        assert "-xml" in command
+        return FakeResult()
+
+    monkeypatch.setattr("core.transports.subprocess.run", fake_run)
+    devices = ImbupdTransport("Darwin").probe()
+    assert len(devices) == 1
+    assert devices[0].transport == "imbupd"
+    assert devices[0].identifier == "15e4:d014"
 
 
 def test_jc11s_writer_fails_closed():

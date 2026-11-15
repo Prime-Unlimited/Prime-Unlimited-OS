@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import platform
+import plistlib
 import re
 import subprocess
 from dataclasses import dataclass
@@ -73,9 +74,10 @@ class ImbupdTransport:
         return [UsbDevice("imbupd", value.lower()) for value in matches]
 
     def _system_usb_listing(self) -> str:
+        if self.system == "Darwin":
+            return self._darwin_usb_listing()
         commands = {
             "Linux": ["lsusb"],
-            "Darwin": ["system_profiler", "SPUSBDataType"],
             "Windows": [
                 "powershell",
                 "-NoProfile",
@@ -94,6 +96,48 @@ class ImbupdTransport:
             raise TransportError(result.stderr.strip() or "USB interface probe returned an error")
         # Windows uses USB\VID_15E4&PID_D014 rather than the lsusb form.
         return re.sub(r"(?i)VID_15E4&PID_D014", "15e4:d014", result.stdout)
+
+    def _darwin_usb_listing(self) -> str:
+        # Plain-text `system_profiler SPUSBDataType` prints Vendor ID and
+        # Product ID on separate lines, with field labels localized to the
+        # system language (e.g. "USB-Hersteller-ID" in German) - a plain
+        # "15e4:d014" substring never appears, so the lsusb-style regex can
+        # never match it. The -xml form keeps its key names in English
+        # regardless of locale and is machine-parseable, so use that and
+        # synthesize the "15e4:d014" token the shared regex expects.
+        try:
+            result = subprocess.run(
+                ["system_profiler", "SPUSBDataType", "-xml"],
+                capture_output=True, timeout=15, check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            raise TransportError(f"USB interface probe failed: {exc}") from exc
+        if result.returncode:
+            raise TransportError(result.stderr.decode(errors="replace").strip() or "system_profiler returned an error")
+        try:
+            plist = plistlib.loads(result.stdout)
+        except (plistlib.InvalidFileException, ValueError) as exc:
+            raise TransportError(f"Could not parse system_profiler output: {exc}") from exc
+        tokens = [f"{vid}:{pid}" for vid, pid in self._walk_darwin_usb_tree(plist)]
+        return "\n".join(tokens)
+
+    @staticmethod
+    def _walk_darwin_usb_tree(node: object) -> list[tuple[str, str]]:
+        found: list[tuple[str, str]] = []
+        if isinstance(node, dict):
+            vendor_id = node.get("vendor_id")
+            product_id = node.get("product_id")
+            if isinstance(vendor_id, str) and isinstance(product_id, str):
+                vendor_match = re.search(r"0x([0-9a-fA-F]+)", vendor_id)
+                product_match = re.search(r"0x([0-9a-fA-F]+)", product_id)
+                if vendor_match and product_match:
+                    found.append((vendor_match.group(1).lower(), product_match.group(1).lower()))
+            for value in node.values():
+                found.extend(ImbupdTransport._walk_darwin_usb_tree(value))
+        elif isinstance(node, list):
+            for item in node:
+                found.extend(ImbupdTransport._walk_darwin_usb_tree(item))
+        return found
 
     def install(self, package: Path, on_progress: object | None = None) -> None:
         """Write a prebuilt /data image and reboot the device.
