@@ -6,7 +6,8 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QSettings, Qt, QThreadPool, Signal, Slot
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QIcon, QKeySequence, QShortcut
+from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -22,6 +23,27 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+
+
+class BrandHeader(QWidget):
+    """Jogwheel mark + PRIME UNLIMITED / OPERATING SYSTEM wordmark."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
+        icon = QSvgWidget(str(ASSETS_DIR / "jogwheel-icon.svg"))
+        icon.setFixedSize(40, 40)
+        layout.addWidget(icon)
+        text_box = QVBoxLayout()
+        text_box.setSpacing(0)
+        text_box.addWidget(label("PRIME UNLIMITED", "brand-title"))
+        text_box.addWidget(label("OPERATING SYSTEM", "brand-subtitle"))
+        layout.addLayout(text_box)
+        layout.addStretch()
 
 from core.device_detection import DetectionState
 from core.diagnostic_service import DiagnosticReport, UsbDiagnosticService
@@ -70,7 +92,8 @@ class SelectionPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(54, 42, 54, 42)
         layout.setSpacing(16)
-        layout.addWidget(label("PRIME-UNLIMITED OS", "eyebrow"))
+        layout.addWidget(BrandHeader())
+        layout.addSpacing(8)
         layout.addWidget(label("Select your device", "title"))
         layout.addWidget(
             label(
@@ -574,6 +597,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.settings = settings
         self.setWindowTitle("Prime-Unlimited OS")
+        self.setWindowIcon(QIcon(str(ASSETS_DIR / "jogwheel-icon.svg")))
         self.setMinimumSize(980, 660)
         self.resize(settings.value("window/size", self.size()))
         self.stack = QStackedWidget()
