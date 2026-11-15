@@ -10,20 +10,32 @@ $licenses = Join-Path $Destination "licenses"
 New-Item -ItemType Directory -Force $bin, $etc, $licenses | Out-Null
 
 $objdump = Join-Path $Source "bin\objdump.exe"
+$searchDirectories = @(
+    (Join-Path $Source "bin"),
+    (Join-Path $Source "sbin"),
+    (Join-Path $Source "usr\bin"),
+    (Join-Path $Source "usr\sbin")
+)
+function Find-RuntimeFile([string]$Name) {
+    foreach ($directory in $searchDirectories) {
+        $candidate = Join-Path $directory $Name
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return $null
+}
 $queue = [System.Collections.Generic.Queue[string]]::new()
 @("mke2fs.exe", "debugfs.exe", "e2fsck.exe") | ForEach-Object { $queue.Enqueue($_) }
 $copied = @{}
 while ($queue.Count -gt 0) {
     $name = $queue.Dequeue()
     if ($copied.ContainsKey($name.ToLowerInvariant())) { continue }
-    $sourceFile = Join-Path $Source "bin\$name"
-    if (-not (Test-Path $sourceFile)) { throw "Required MinGW file is missing: $sourceFile" }
+    $sourceFile = Find-RuntimeFile $name
+    if (-not $sourceFile) { throw "Required Windows runtime file is missing: $name" }
     Copy-Item $sourceFile $bin
     $copied[$name.ToLowerInvariant()] = $true
     & $objdump -p $sourceFile | Select-String "DLL Name:" | ForEach-Object {
         $dependency = ($_.Line -split "DLL Name:", 2)[1].Trim()
-        if ((Test-Path (Join-Path $Source "bin\$dependency")) -and
-            -not $copied.ContainsKey($dependency.ToLowerInvariant())) {
+        if ((Find-RuntimeFile $dependency) -and -not $copied.ContainsKey($dependency.ToLowerInvariant())) {
             $queue.Enqueue($dependency)
         }
     }
