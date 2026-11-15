@@ -10,6 +10,15 @@ Date: 2026-11-14. Device: Denon DJ PRIME 4 Plus (JC11S), connected in Fastboot b
 2. Sending ASCII `reboot` through the same transport was followed by the **physical device restarting**, as confirmed by the tester.
 3. Google's Android SDK Platform Tools **fastboot 37.0.0-14910828** returned an **empty device list** for `fastboot devices -l` on this Windows machine. This does **not** imply a broken WinUSB driver. The precise discovery/filtering failure remains unproven.
 
+### Follow-up read-only geometry probe (15 Nov 2026)
+
+The same native WinUSB transport returned product `rk3288-az01-jc11s`, bootloader
+`U-Boot 2026.07-inmusic-20260721`, `secure=yes`, `is-userspace=no`, slot `a`,
+`partition-type:data=ext4`, `partition-size:data=0x000000008fd7be00`, and
+`max-download-size=0x20000000`. `userdata`, `variant`, and `unlocked` were not
+supported. The size belongs to that already modified unit and is not a JC11S
+default. Installers must query and validate all geometry values for every device.
+
 The direct reboot observation confirms command delivery and execution. The transcript does not establish whether a final `OKAY` packet was received for reboot.
 
 ## Windows device identification

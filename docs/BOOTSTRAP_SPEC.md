@@ -6,11 +6,11 @@ Status: design only, not a tested installer. Source basis: EngineXPRIME4PLUS.md 
 
 1. Connect device by USB in its supported update mode.
 2. Detect transport and collect non-destructive device information.
-3. Identify JC11S or JP24 **unambiguously**, checking firmware compatibility and partition layout; otherwise stop.
+3. Identify JC11S or JP24 **unambiguously**. For JC11S, query and validate the current device's `partition-size:data`, `partition-type:data` and `max-download-size`; otherwise stop.
 4. Generate a new Ed25519 keypair with a passphrase, or import a public key with proof that the user has the matching private key. **SSH setup cannot be skipped.**
 5. Select the pinned, licensed, integrity-checked, device-specific bootstrap package.
-6. Inject only the public key and necessary SSH startup configuration into the device-specific image.
-7. Validate ext4 filesystem, permissions, content, image size and checksums.
+6. Build a new ext4 image at the exact size reported by this connected device and inject only the public key and necessary SSH startup configuration. Never use a model-wide default or another unit's size.
+7. Validate ext4 filesystem, permissions, content, exact size and checksums; select sparse transfers strictly below this device's reported download limit.
 8. Verify a usable backup/recovery procedure, explain destructive `/data` overwrite, require explicit consent.
 9. Write over the correct transport, reboot, discover IP and verify authenticated SSH login.
 10. Only then unlock the desktop mod manager. Later mod installation occurs over SSH/SFTP, not by repeating a full USB flash.
@@ -20,7 +20,8 @@ Status: design only, not a tested installer. Source basis: EngineXPRIME4PLUS.md 
 ### JC11S — Prime 4+
 
 - Rockchip RK3288, ARM32.
-- Fastboot bootloader; observed `data` ext4 partition size 2,413,280,768 bytes **on one device**.
+- Fastboot product `rk3288-az01-jc11s`; observed bootloader `U-Boot 2026.07-inmusic-20260721`, protocol 0.4, secure bootloader mode.
+- `data` is reported as ext4. One modified test unit reported 2,413,280,768 bytes and a 512 MiB download limit. These values are **per-device observations, never JC11S defaults**; every installation must query them again.
 - Tested base firmware: Engine OS 5.3.0; EngineX bundle 5.3.0.2.
 - Observed SSH: root, key-only, TCP 22.
 - Successful trial included separate systemd services generated from a boot hook. The later cleaned installation script was **not** independently re-tested as a fresh full install.

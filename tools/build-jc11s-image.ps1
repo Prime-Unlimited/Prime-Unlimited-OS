@@ -5,7 +5,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$PublicKey,
     [Parameter(Mandatory=$true)][string]$Output,
-    [Parameter(Mandatory=$true)][long]$SizeBytes,
+    [Parameter(Mandatory=$true)][string]$ProbeJson,
     [string]$Distribution = 'Debian'
 )
 $ErrorActionPreference = 'Stop'
@@ -17,10 +17,12 @@ function LinuxPath([string]$Path) {
 }
 $RepoLinux = LinuxPath $Repo
 $KeyLinux = LinuxPath (Resolve-Path -LiteralPath $PublicKey).Path
+$ProbeLinux = LinuxPath (Resolve-Path -LiteralPath $ProbeJson).Path
 $OutputLinux = LinuxPath ([IO.Path]::GetFullPath($Output))
 $HookLinux = "$OutputLinux.hook.so"
+$SparseLinux = "$OutputLinux.sparse"
 # Argument arrays avoid interpolating user paths into a shell command.
 & wsl.exe -d $Distribution --cd $RepoLinux -- sh tools/build-jc11s-hook.sh $HookLinux
 if ($LASTEXITCODE -ne 0) { throw 'ARM hook build failed' }
-& wsl.exe -d $Distribution --cd $RepoLinux -- python3 -m core.jc11s_image build --key $KeyLinux --hook $HookLinux --size-bytes $SizeBytes --output $OutputLinux
+& wsl.exe -d $Distribution --cd $RepoLinux -- python3 -m core.jc11s_flash build-device --probe $ProbeLinux --key $KeyLinux --hook $HookLinux --output $OutputLinux --sparse-output $SparseLinux
 if ($LASTEXITCODE -ne 0) { throw 'Image build or offline verification failed' }

@@ -56,10 +56,10 @@ def validate_hook(path: Path) -> None:
         raise ValueError("Hook must be an ARM shared object.")
 
 
-def build(output: Path, key: Path, hook: Path, size: int) -> dict:
+def build(output: Path, key: Path, hook: Path, size: int, device_geometry: dict | None = None) -> dict:
     """Explicit size is experimental, never inferred from USB ID or mount path."""
-    if size < 64 * 1024**2 or size > 4 * 1024**3 or size % 512:
-        raise ValueError("Image size must be 64 MiB..4 GiB and aligned to 512-byte sectors.")
+    if size < 64 * 1024**2 or size > 0xFFFFFFFF * 512 or size % 512:
+        raise ValueError("Image size must be at least 64 MiB, sparse-addressable and sector aligned.")
     authorized = public_key(key)
     validate_hook(hook)
     output = output.resolve()
@@ -153,6 +153,7 @@ def build(output: Path, key: Path, hook: Path, size: int) -> dict:
         "size": size,
         "sha256": digest(output),
         "format": "raw-ext4",
+        "device_geometry": device_geometry,
         "files": {name: hashlib.sha256(data).hexdigest() for name, (data, _) in files.items()},
     }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")

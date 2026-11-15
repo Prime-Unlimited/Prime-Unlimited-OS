@@ -8,10 +8,36 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from core.android_sparse import convert, verify_set
 from core.fastboot_protocol import FastbootSession
-from core.jc11s_flash import MockFlashTransport, flash_hardware, prepare, probe, simulate
+from core.jc11s_flash import (
+    MockFlashTransport,
+    ProbeEvidence,
+    build_for_device,
+    flash_hardware,
+    prepare,
+    probe,
+    simulate,
+    validate_geometry,
+)
 from core.jc11s_image import SOURCE, build, digest, public_key, run, validate_hook, verify
 from core.transports import WriteBlockedError
+
+
+def evidence(size: int, limit: int, **overrides) -> ProbeEvidence:
+    values = {
+        "version": "0.4",
+        "product": "rk3288-az01-jc11s",
+        "version-bootloader": "U-Boot 2026.07-inmusic-20260721",
+        "secure": "yes",
+        "max-download-size": hex(limit),
+        "partition-size:data": hex(size),
+        "partition-type:data": "ext4",
+        "is-userspace": "no",
+        "current-slot": "a",
+    }
+    values.update(overrides)
+    return ProbeEvidence(values, ("variant", "unlocked", "partition-size:userdata", "partition-type:userdata"))
 
 
 @pytest.fixture(scope="module")
@@ -86,11 +112,15 @@ def test_image_corruption_detected(artifacts, tmp_path):
 def test_simulated_download_flash_reboot(artifacts):
     image = artifacts[3]
     size = image.stat().st_size
-    plan = prepare(image, "data", size, size)
+    geometry = validate_geometry(evidence(size, 8 * 1024))
+    plan = prepare(image, geometry, artifacts[0] / "sparse-simulation")
     mock = MockFlashTransport()
     simulate(plan, mock)
-    assert mock.transferred == size
-    assert mock.commands == [f"download:{size:08x}", "flash:data", "reboot"]
+    assert mock.transferred == sum(path.stat().st_size for path in plan.transfers)
+    assert all(path.stat().st_size < geometry.max_download_size for path in plan.transfers)
+    assert len(plan.transfers) > 1
+    assert mock.commands[-1] == "reboot"
+    assert mock.commands.count("flash:data") == len(plan.transfers)
     for failure in ("transfer", "flash", "download", "download-complete"):
         broken = MockFlashTransport(fail_at=failure)
         with pytest.raises(RuntimeError):
@@ -103,15 +133,81 @@ def test_simulated_download_flash_reboot(artifacts):
 def test_limits_and_hardware_lock(artifacts):
     image = artifacts[3]
     size = image.stat().st_size
-    for partition, partition_size, limit in (
-        ("/data", size, size),
-        ("userdata", size + 4096, size),
-        ("data", size, size - 1),
-    ):
-        with pytest.raises(ValueError):
-            prepare(image, partition, partition_size, limit)
+    geometry = validate_geometry(evidence(size + 512, 1024 * 1024))
+    with pytest.raises(ValueError, match="exact partition-sized"):
+        prepare(image, geometry, artifacts[0] / "wrong-size")
     with pytest.raises(WriteBlockedError):
         flash_hardware(verified=True, consent=True)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("product", "rk3288-other"),
+        ("version-bootloader", "U-Boot unknown"),
+        ("secure", "no"),
+        ("current-slot", "invalid"),
+        ("partition-type:data", "raw"),
+        ("partition-size:data", "missing"),
+        ("partition-size:data", "0x10001"),
+        ("max-download-size", "0"),
+        ("max-download-size", "0x100000000"),
+        ("is-userspace", "yes"),
+    ],
+)
+def test_invalid_or_missing_device_geometry_blocks(field, value):
+    item = evidence(80 * 1024**2, 32 * 1024**2)
+    if value == "missing":
+        del item.values[field]
+    else:
+        item.values[field] = value
+    with pytest.raises(ValueError):
+        validate_geometry(item)
+
+
+@pytest.mark.parametrize(
+    ("size", "limit"),
+    [(64 * 1024**2, 512 * 1024**2), (64 * 1024**2 + 512, 2 * 1024**2), (96 * 1024**2, 768 * 1024)],
+)
+def test_geometry_is_per_device_and_never_defaulted(size, limit):
+    geometry = validate_geometry(evidence(size, limit))
+    assert geometry.partition_size == size
+    assert geometry.max_download_size == limit
+    assert geometry.partition == "data"
+
+
+def test_sparse_converter_splits_dense_data_and_reconstructs(tmp_path):
+    raw = tmp_path / "dense.raw"
+    # Deterministic non-zero sectors force RAW chunks and multiple transfers.
+    raw.write_bytes(bytes((index % 251) + 1 for index in range(3 * 1024**2)))
+    directory = tmp_path / "sparse"
+    manifest = convert(raw, directory, 512 * 1024)
+    assert len(manifest["parts"]) > 1
+    assert all(part["size"] < 512 * 1024 for part in manifest["parts"])
+    assert verify_set(directory) == manifest
+
+
+def test_sparse_zero_fill_reproduces_fresh_raw_not_old_storage(tmp_path):
+    raw = tmp_path / "zeros.raw"
+    raw.write_bytes(bytes(2 * 1024**2))
+    manifest = convert(raw, tmp_path / "sparse", 64 * 1024)
+    # FILL(0) makes the transmitted file tiny but the verifier requires every
+    # logical sector to be explicitly reproduced across the set.
+    assert sum(part["size"] for part in manifest["parts"]) < 1024
+    verify_set(tmp_path / "sparse")
+
+
+def test_complete_dynamic_build_uses_each_device_size(artifacts, tmp_path):
+    _, key, hook, _ = artifacts
+    results = []
+    for index, (size, limit) in enumerate(((64 * 1024**2, 2 * 1024**2), (64 * 1024**2 + 512, 3 * 1024**2))):
+        image = tmp_path / f"device-{index}.ext4"
+        plan = build_for_device(evidence(size, limit), image, key, hook, tmp_path / f"sparse-{index}")
+        results.append(plan)
+        assert image.stat().st_size == size
+        assert all(path.stat().st_size < limit for path in plan.transfers)
+        assert verify(image)["device_geometry"]["partition_size"] == size
+    assert results[0].size != results[1].size
 
 
 def test_readonly_probe_keeps_names_separate():

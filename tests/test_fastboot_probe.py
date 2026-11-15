@@ -11,6 +11,7 @@ class FastbootProbeTests(unittest.TestCase):
     def test_parse_historical_jc11s_values(self):
         output = """
 (bootloader) current-slot: a
+(bootloader) product: rk3288-az01-jc11s
 (bootloader) is-userspace: no
 (bootloader) partition-size:data: 0x8fd7be00
 (bootloader) partition-type:data: ext4
@@ -21,6 +22,13 @@ Finished. Total time: 0.01s
         self.assertEqual(info.current_slot, "a")
         self.assertFalse(info.is_userspace)
         self.assertTrue(is_jc11s_candidate(info))
+
+    def test_partition_size_is_not_a_model_constant(self):
+        for size in ("0x08000000", "0x8fd7be00", "0xa0000000"):
+            info = interpret_fastboot(
+                f"product: rk3288-az01-jc11s\npartition-size:data: {size}\npartition-type:data: ext4\nis-userspace: no"
+            )
+            self.assertTrue(is_jc11s_candidate(info))
 
     def test_unknown_device_not_candidate(self):
         info = interpret_fastboot("(bootloader) partition-type:data: ext4")

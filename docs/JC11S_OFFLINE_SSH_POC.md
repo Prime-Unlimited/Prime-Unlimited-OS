@@ -13,8 +13,9 @@ Base: `feat/jc11s-native-windows-fastboot`, commit
 
 | Observation | What it establishes | Remaining uncertainty |
 | --- | --- | --- |
-| Windows bench report: `15E4:D007`, `FF/42/03`, `OKAY0.4`, physical reboot | Working native WinUSB transport | Not flash support or model/firmware authorization |
-| `docs/JC11S_PROCESS.md` records historical `flash data` OKAY and ext4 `data` size `0x8fd7be00` | Historical evidence for bootloader name **data**, stronger than guessing userdata | Must reconfirm on the target firmware; historical report is not a new hardware test |
+| Current Windows probe: product `rk3288-az01-jc11s`, Fastboot `0.4`, U-Boot `2026.07-inmusic-20260721`, secure bootloader mode | Strong model and transport identity for the probed unit | Firmware compatibility beyond this build is not established |
+| Current per-device probe: `data`=`ext4`, size `0x8fd7be00`, max download `0x20000000`; `userdata` unsupported | Exact geometry and transfer limit for this one unit | Values must be queried again for every connection; they are never a JC11S default |
+| Historical JC11S logs record successful `flash data` operations as `sparse 1/1` | This JC11S bootloader family has processed Android sparse input | Current vendor source/config is unavailable; no write probe was performed in this task |
 | User reports ext4 `/dev/mmcblk0p11` mounted at `/data` | Linux block device and mount point on one working unit | No proof that Fastboot `data` or `userdata` maps to p11 |
 | Uploaded ALSA config registers a shared-library config hook | A plausible independent activation mechanism | Stock ALSA includes, callback privileges and execution order on a fresh filesystem |
 | Uploaded archive lacks full stock `/data` and stock boot units | Cannot derive a complete vendor initialization contract | Required directories, bind mounts, symlinks, mkfs checks and defaults still need evidence |
@@ -30,25 +31,46 @@ Only the hook declaration and service-activation mechanism informed this design;
 no archive content is copied into the payload. Its scripts are reference data,
 not instructions for this implementation.
 
-### Size and transfer constraints
+### Dynamic geometry and transfer strategy
 
-* Historical size is **2,413,280,768 bytes**, not an exact 2.1 GiB assumption.
-  It is sector aligned but **not** 4096-byte aligned. The builder accepts an exact
-  512-byte-sector size; ext4 occupies whole 4096-byte blocks and any remaining
-  partition tail stays zero. Integration tests include a non-block-aligned size.
-* No default hardware size is selected. Supply an observed size explicitly.
-  The builder supports 64 MiB through 4 GiB for research; this is not a firmware
-  compatibility matrix. The flash rehearsal requires exact partition size.
+The installer queries `version`, `product`, `version-bootloader`, `secure`,
+`max-download-size`, `partition-size:data`, `partition-type:data`, `is-userspace`
+and `current-slot` through the selected native WinUSB session. Missing, malformed,
+zero, non-sector-aligned or incompatible values block the build. The current PoC
+requires product `rk3288-az01-jc11s`, protocol 0.4, bootloader mode and ext4. It
+uses the returned partition size as the sole image-size source. The measured
+**2,413,280,768 bytes belongs only to the probed modified unit** and is neither a
+default nor a compatibility profile. Tests cover several artificial sizes and
+download limits, including a size not divisible by 4096.
+
+* The complete flow is: read-only probe → strict geometry validation → exact-size
+  ext4 build → ext4/hash verification → Android sparse conversion → independent
+  sparse reconstruction → memory-only transfer rehearsal.
 * The filesystem uses extents and a journal, 4096-byte blocks, 256-byte inodes,
   no 64bit, metadata_csum, orphan_file, encryption or other modern incompatibility
   features. These conservative choices still require a target-kernel mount test.
-* `max-download-size` must be measured, not guessed. Fastboot 0.4 uses an eight
-  hexadecimal-digit download size. The PoC refuses raw files larger than either
-  the reported limit or `0xffffffff` bytes. USB endpoint packet size is **not** a
-  maximum image size. Python I/O chunks are also not independent flash chunks.
-* Historical Android sparse flashing does not validate sparse support in this
-  native implementation. Sparse conversion, split sparse transfers, partition
-  erasure semantics and interrupted-write recovery are intentionally unimplemented.
+* The converter emits Android sparse v1 with 512-byte logical blocks. RAW chunks
+  carry non-zero sectors; zero runs use `FILL(0)`, so every sector is explicitly
+  reproduced and old free-space contents are not retained through `DONT_CARE`.
+  `DONT_CARE` is used only to position independently flashable pieces.
+* Every sparse file is strictly smaller than that device's measured
+  `max-download-size`, including the sparse and chunk headers. Dense input is
+  split into multiple full-logical-size sparse files. Each file writes a disjoint
+  extent; all files together reconstruct the raw SHA256 exactly.
+* Upstream U-Boot v2025.10 selects `IMAGE_SPARSE` when Rockchip `FASTBOOT_FLASH`
+  is enabled. Its MMC path detects the sparse magic, writes RAW/FILL chunks and
+  treats DONT_CARE as an offset advance. This matches the historical JC11S
+  `sparse 1/1` logs, but is not proof that InMusic's unpublished 2026 fork is
+  byte-for-byte identical. Sources:
+  [Kconfig](https://github.com/u-boot/u-boot/blob/v2025.10/drivers/fastboot/Kconfig),
+  [MMC Fastboot](https://github.com/u-boot/u-boot/blob/v2025.10/drivers/fastboot/fb_mmc.c),
+  [sparse parser](https://github.com/u-boot/u-boot/blob/v2025.10/lib/image-sparse.c).
+* A sparse file's expanded size may exceed the download buffer; its transmitted
+  byte size may not. USB packets and Python I/O chunks are not separate Fastboot
+  downloads. Upstream MMC sparse flashing does not erase the whole partition for
+  each part, which permits disjoint repeated `flash:data` calls. The InMusic fork
+  must still be verified before relying on multipart transfer. Interrupted
+  multipart recovery and real vendor-fork behavior remain hardware gates.
 
 ## Payload
 
@@ -102,12 +124,12 @@ From the repository root:
 ```sh
 mkdir -p output
 sh tools/build-jc11s-hook.sh output/libprime-ssh.so
-# 64 MiB research fixture, NOT a proposed device partition size:
-python3 -m core.jc11s_image build --key /path/to/selected_ed25519.pub \
-  --hook output/libprime-ssh.so --size-bytes 67108864 --output output/data.ext4
-python3 -m core.jc11s_image verify output/data.ext4
-python3 -m core.jc11s_flash simulate output/data.ext4 --partition data \
-  --partition-size 67108864 --max-download 67108864
+# probe.json is captured from this specific connected device.
+python3 -m core.jc11s_flash build-device --probe probe.json \
+  --key /path/to/selected_ed25519.pub --hook output/libprime-ssh.so \
+  --output output/data.ext4 --sparse-output output/data.sparse
+python3 -m core.jc11s_flash simulate output/data.ext4 --probe probe.json \
+  --sparse-output output/rehearsal.sparse
 pytest
 ```
 
@@ -127,7 +149,8 @@ been established. Keep the recorded tool versions for reproduction.
 
 ```powershell
 .\tools\build-jc11s-image.ps1 -PublicKey C:\keys\prime.pub `
-  -Output C:\images\data.ext4 -SizeBytes 67108864 -Distribution Debian
+  -ProbeJson C:\images\this-device-probe.json `
+  -Output C:\images\data.ext4 -Distribution Debian
 ```
 
 This PoC uses **preprovisioned WSL** for ext4 tooling and ARM compilation. It does
@@ -143,7 +166,7 @@ Read-only native hardware evidence collector, from Windows Python with repositor
 requirements installed:
 
 ```powershell
-python -m core.jc11s_flash probe-windows
+python -m core.jc11s_flash probe-windows > this-device-probe.json
 ```
 
 It uses the existing discovery, descriptor validation, timeouts and cleanup,
@@ -185,20 +208,30 @@ Before any future implementation enables hardware writing:
    `PRIME_UNLIMITED_SSH_OK` result. Do not disable host-key checks. A secure first
    host-key enrollment channel is still required; a listening port is insufficient.
 
-No hardware was attached to this cloud task. Consequently flash support on the
-current target, fresh `/data` boot compatibility and end-to-end SSH installation
-are **open**, even though the offline filesystem and mock PoC are executable.
+The two observations “Fastboot partition `data`” and “Linux `/data` is mounted
+from `/dev/mmcblk0p11`” agree with the intended target, but neither Fastboot
+getvars nor the reference archive exposes the GPT entry number. Therefore the
+`data`→p11 mapping is **not yet independently proven**. A read-only GPT/firmware
+partition table, stock recovery inventory or equivalent authoritative evidence
+is still required. The installer names only bootloader partition `data`; it never
+turns `/data` or `mmcblk0p11` into a Fastboot command.
 
 ## Cloud validation record (2026-11-15)
 
-* Full repository suite: **99 passed**; changed Python modules pass Ruff.
+* The original PoC suite passed 99 tests. The current dynamic/sparse revision adds
+  multiple artificial geometries, limits, dense multi-part conversion, explicit
+  zero-fill reconstruction and full transfer simulation; see the PR checks for
+  the current count.
 * Real ARM hook compiled; ELF32 ARM EABI5, exported hook/version symbols, no
   shared-library dependencies or unresolved symbols.
-* Built and verified a **2,413,280,768-byte** raw ext4 image, including `e2fsck -fn`
-  and extraction/hash comparison of all five payload files.
-* Rehearsed all 2,413,280,768 bytes through the memory mock; resulting command
-  sequence: `download:8fd7be00`, `flash:data`, `reboot`. The rehearsal's transfer
-  limit was a synthetic test input, **not** a measured JC11S download limit.
+* The earlier full-size fixture matched one modified device only. It is retained
+  as historical validation, not as a size constant or reusable install image.
+* The current converter transformed that historical 2,413,280,768-byte fixture
+  under the newly measured 512 MiB limit into one 99,852-byte Android sparse
+  transfer (145 chunks). Offline reconstruction matched raw SHA256
+  `a8295f7e5d7882af12bb57b7eebc61191326089334ba84e6f2b820891581a56a`.
+  The memory rehearsal completed `download:0001860c`, `flash:data`, `reboot`.
+  This validates the converter and simulator against those inputs, not a hardware write.
 * Small-image repeated builds were byte-identical. No claim of a second
   full-size rebuild, Windows-host run, device flash, cold boot or SSH login.
 * The full-size cloud fixture uses a test-only public key with no retained

@@ -19,4 +19,4 @@ jobs:
           sudo apt-get install -y e2fsprogs gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf libegl1 libopengl0
       - run: python -m pip install -e '.[dev]'
       - run: python -m pytest
-      - run: ruff check core/jc11s_image.py core/jc11s_flash.py tests/test_jc11s_offline_poc.py
+      - run: ruff check core tests
