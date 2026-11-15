@@ -77,6 +77,18 @@ def test_download_stream_and_flash_data_only(tmp_path):
     assert progress == [(14, 14)]
 
 
+def test_flash_and_reboot_observers_run_after_command_write_before_okay():
+    io = FakeIo([b"OKAYflashed", b"OKAYrebooting"])
+    observed = []
+    session = FastbootSession(io)
+    assert session.flash("data", lambda: observed.append(("flash-sent", tuple(io.commands)))).payload == "flashed"
+    assert session.reboot(lambda: observed.append(("reboot-sent", tuple(io.commands)))).payload == "rebooting"
+    assert observed == [
+        ("flash-sent", (b"flash:data",)),
+        ("reboot-sent", (b"flash:data", b"reboot")),
+    ]
+
+
 def test_download_uses_bounded_64k_chunks_and_reports_each_completion(tmp_path):
     payload = tmp_path / "part.sparse"
     payload.write_bytes(b"x" * (128 * 1024 + 7))

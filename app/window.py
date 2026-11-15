@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QSettings, QStandardPaths, Qt, QThreadPool, Signal, Slot
@@ -181,6 +182,9 @@ class WorkflowPage(QWidget):
         self.artifacts: InstallerArtifacts | None = None
         self._flash_succeeded = False
         self._bench_flash_active = False
+        self._critical_write_active = False
+        self._write_status_unknown = False
+        self._flash_phase = "idle"
         self._worker: DiagnosticWorker | None = None
 
         outer = QHBoxLayout(self)
@@ -397,8 +401,29 @@ class WorkflowPage(QWidget):
         self.flash_button.setObjectName("primary")
         self.flash_button.clicked.connect(self.start_flash)
         layout.addWidget(self.flash_button, 0, Qt.AlignmentFlag.AlignLeft)
-        self.flash_progress = QProgressBar()
-        layout.addWidget(self.flash_progress)
+        self.critical_write_warning = label("USB NICHT TRENNEN – GERÄT NICHT AUSSCHALTEN")
+        self.critical_write_warning.setStyleSheet(
+            "background:#5a1010; color:#ffffff; font-weight:700; border-radius:9px; padding:14px;"
+        )
+        self.critical_write_warning.setVisible(False)
+        layout.addWidget(self.critical_write_warning)
+        layout.addWidget(label("Sparse download only", "muted"))
+        self.download_progress = QProgressBar()
+        self.download_progress.setRange(0, 100)
+        self.download_progress.setValue(0)
+        layout.addWidget(self.download_progress)
+        # Compatibility alias for existing integrations; this is never overall installation progress.
+        self.flash_progress = self.download_progress
+        self.flash_activity = QProgressBar()
+        self.flash_activity.setRange(0, 0)
+        self.flash_activity.setVisible(False)
+        layout.addWidget(self.flash_activity)
+        self.flash_phase_status = label("State: waiting to start.")
+        layout.addWidget(self.flash_phase_status)
+        self.flash_phase_log = QPlainTextEdit()
+        self.flash_phase_log.setReadOnly(True)
+        self.flash_phase_log.setMaximumHeight(150)
+        layout.addWidget(self.flash_phase_log)
         self.flash_status = label("No write has started.")
         layout.addWidget(self.flash_status)
         layout.addStretch()
@@ -439,6 +464,9 @@ class WorkflowPage(QWidget):
         self.artifacts = None
         self._flash_succeeded = False
         self._bench_flash_active = False
+        self._critical_write_active = False
+        self._write_status_unknown = False
+        self._flash_phase = "idle"
         if profile_id == ProfileId.JC11S and self.installer_service is None:
             fastboot = getattr(self.diagnostic_service, "fastboot", None)
             if fastboot is not None and hasattr(fastboot, "collect_partition_evidence"):
@@ -482,6 +510,10 @@ class WorkflowPage(QWidget):
         self.recovery_phrase.clear()
         self.experiment_phrase.clear()
         self.flash_progress.setValue(0)
+        self.flash_activity.setVisible(False)
+        self.critical_write_warning.setVisible(False)
+        self.flash_phase_status.setText("State: waiting to start.")
+        self.flash_phase_log.clear()
         self.flash_status.setText("No write has started.")
         self.ssh_status.setText("SSH has not been tested.")
         self.show_page(self.CONNECTION)
@@ -508,7 +540,12 @@ class WorkflowPage(QWidget):
                 else "All normal release gates satisfied."
             )
         )
-        self.flash_button.setEnabled(not blockers and self._review_confirmed())
+        self.flash_button.setEnabled(
+            not blockers
+            and self._review_confirmed()
+            and not self._critical_write_active
+            and not self._write_status_unknown
+        )
 
     def show_page(self, page: int) -> None:
         self.page_stack.setCurrentIndex(page)
@@ -774,6 +811,18 @@ class WorkflowPage(QWidget):
         app_data = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation))
         return app_data / "jc11s-first-flash-bench.jsonl"
 
+    def _set_flash_phase(self, phase: str, text: str) -> None:
+        if phase == self._flash_phase:
+            return
+        self._flash_phase = phase
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        self.flash_phase_status.setText("State: " + text)
+        self.flash_phase_log.appendPlainText(f"{timestamp}  {text}")
+        waiting = phase == "flash_wait"
+        self.flash_activity.setVisible(waiting)
+        if waiting:
+            self.flash_activity.setRange(0, 0)
+
     def start_flash(self) -> None:
         if self.installer_service is None or self.artifacts is None or not self._review_confirmed():
             return
@@ -795,10 +844,18 @@ class WorkflowPage(QWidget):
         if answer != QMessageBox.StandardButton.Yes:
             self.flash_status.setText("Flash cancelled by the user. No write command was sent.")
             return
+        self._critical_write_active = True
+        self._write_status_unknown = False
+        self._flash_succeeded = False
         self.flash_button.setEnabled(False)
         self.flash_progress.setRange(0, 100)
         self.flash_progress.setValue(0)
-        self.flash_status.setText("Revalidating the connected device before guarded flash…")
+        self.flash_phase_log.clear()
+        self.critical_write_warning.setText("USB NICHT TRENNEN – GERÄT NICHT AUSSCHALTEN")
+        self.critical_write_warning.setVisible(True)
+        self._set_flash_phase("verification", "Gerät und Image werden geprüft")
+        self.flash_status.setText("Revalidating the connected device and image before guarded flash…")
+        self._update_navigation()
         identifier = self.candidate_selector.currentData() if self.candidate_selector.isVisible() else None
         if self.bench_mode.isChecked():
             recovery = self.recovery_phrase.text()
@@ -834,20 +891,54 @@ class WorkflowPage(QWidget):
 
     @Slot(object)
     def _flash_progress_update(self, event) -> None:
+        if event[0] == "phase":
+            phase = event[1]
+            index = event[2] if len(event) > 2 else None
+            count = event[3] if len(event) > 3 else None
+            suffix = f" ({index}/{count})" if index is not None and count is not None else ""
+            labels = {
+                "verification_started": "Gerät und Image werden geprüft",
+                "verification_complete": "Geräte- und Imageprüfung erfolgreich",
+                "flash_command_sent": f"Fastboot flash:data gesendet{suffix}",
+                "flash_wait": f"Warten auf Bootloader-Flashabschluss{suffix}",
+                "flash_okay": f"Fastboot OKAY bestätigt{suffix}",
+                "reboot_requested": "Neustart angefordert",
+            }
+            self._set_flash_phase(phase, labels[phase])
+            if phase == "verification_complete":
+                self.flash_status.setText("Verification complete. Sparse download will start next.")
+            elif phase == "flash_wait":
+                self.flash_status.setText("Bootloader is writing /data. No completion percentage is available.")
+            elif phase == "flash_okay":
+                self.flash_status.setText("Bootloader confirmed flash:data with Fastboot OKAY.")
+            return
+
         stage, index, count, sent, total = event
         fraction = 0.0 if total <= 0 else min(sent / total, 1.0)
         percent = round(((index - 1 + fraction) / count) * 100) if count else 0
+        self._set_flash_phase("download", f"Sparse-Download läuft ({index}/{count})")
         self.flash_progress.setValue(percent)
-        self.flash_status.setText(
-            f"{stage.capitalize()} transfer {index}/{count}: {sent:,} of {total:,} bytes ({percent}%)."
-        )
+        if percent == 100:
+            self.flash_status.setText(
+                "Sparse download: 100%. Download complete; flash:data is NOT confirmed yet."
+            )
+        else:
+            self.flash_status.setText(
+                f"Sparse download {index}/{count}: {sent:,} of {total:,} bytes ({percent}%)."
+            )
 
     @Slot(object)
     def _flash_complete(self, message) -> None:
+        self._critical_write_active = False
         self._flash_succeeded = True
         self.flash_progress.setRange(0, 100)
         self.flash_progress.setValue(100)
-        self.flash_status.setText("Flash completed and reboot requested. " + redact(str(message)))
+        self.flash_activity.setVisible(False)
+        self.critical_write_warning.setVisible(False)
+        self._set_flash_phase("reboot_requested", "Neustart angefordert; SSH-Verifikation steht noch aus")
+        self.flash_status.setText(
+            "Flash confirmed and reboot requested. Installation awaits SSH verification. " + redact(str(message))
+        )
         if self._bench_flash_active and hasattr(self.installer_service, "record_bench_result"):
             self.installer_service.record_bench_result(
                 self.artifacts, self._bench_log_path(), "flash_succeeded", str(message)
@@ -856,10 +947,29 @@ class WorkflowPage(QWidget):
 
     @Slot(str)
     def _flash_failed(self, message: str) -> None:
+        failure = message.casefold()
+        connection_uncertain = any(
+            marker in failure for marker in ("timed out", "timeout", "disconnected", "not connected")
+        )
+        failed_during_commit = self._flash_phase == "flash_wait" and connection_uncertain
+        self._critical_write_active = False
         self._flash_succeeded = False
         self.flash_progress.setRange(0, 100)
         self.flash_progress.setValue(0)
-        self.flash_status.setText("Flash stopped; no reboot was sent: " + redact(message))
+        self.flash_activity.setVisible(False)
+        if failed_during_commit:
+            self._write_status_unknown = True
+            warning = "Schreibstatus unbekannt – Gerät nicht automatisch neu starten oder erneut flashen."
+            self.critical_write_warning.setText(
+                "USB NICHT TRENNEN – GERÄT NICHT AUSSCHALTEN\n" + warning
+            )
+            self.critical_write_warning.setVisible(True)
+            self._set_flash_phase("unknown", warning)
+            self.flash_status.setText(warning + " " + redact(message))
+        else:
+            self.critical_write_warning.setVisible(False)
+            self._set_flash_phase("failed", "Flash vor bestätigtem Abschluss gestoppt")
+            self.flash_status.setText("Flash stopped; no reboot was sent: " + redact(message))
         self._refresh_flash_gate()
         self._update_navigation()
 
@@ -881,6 +991,7 @@ class WorkflowPage(QWidget):
             )
 
         self.ssh_test_button.setEnabled(False)
+        self._set_flash_phase("ssh_verification", "SSH-Verifikation läuft")
         self.ssh_status.setText("Enrolling the trusted host key and testing authenticated SSH…")
         worker = TaskWorker(verify_connection)
         worker.signals.finished.connect(self._ssh_complete)
@@ -892,6 +1003,7 @@ class WorkflowPage(QWidget):
     def _ssh_complete(self, marker) -> None:
         self.ssh_test_button.setEnabled(True)
         self.ssh_status.setText("Authenticated SSH succeeded: " + redact(str(marker)))
+        self._set_flash_phase("complete", "Installation abgeschlossen; SSH-Verifikation erfolgreich")
         if self._bench_flash_active and hasattr(self.installer_service, "record_bench_result"):
             self.installer_service.record_bench_result(
                 self.artifacts, self._bench_log_path(), "first_boot_ssh_succeeded", str(marker)
@@ -901,6 +1013,7 @@ class WorkflowPage(QWidget):
     def _ssh_failed(self, message: str) -> None:
         self.ssh_test_button.setEnabled(True)
         self.ssh_status.setText("SSH verification failed: " + redact(message))
+        self._set_flash_phase("ssh_failed", "SSH-Verifikation fehlgeschlagen; erneuter Test möglich")
         if self._bench_flash_active and hasattr(self.installer_service, "record_bench_result"):
             self.installer_service.record_bench_result(
                 self.artifacts, self._bench_log_path(), "first_boot_or_ssh_failed", message
@@ -918,6 +1031,8 @@ class WorkflowPage(QWidget):
         self.ssh_status.setText("Failed first boot / SSH activation recorded as a bench result.")
 
     def go_back(self) -> None:
+        if self._critical_write_active:
+            return
         page = self.page_stack.currentIndex()
         if page == self.CONNECTION:
             self.exit_requested.emit()
@@ -925,6 +1040,8 @@ class WorkflowPage(QWidget):
             self.show_page(page - 1)
 
     def go_forward(self) -> None:
+        if self._critical_write_active:
+            return
         page = self.page_stack.currentIndex()
         if page == self.CONNECTION and self._diagnostics_allow_key_setup():
             self.show_page(self.SSH_KEY)
@@ -945,6 +1062,11 @@ class WorkflowPage(QWidget):
     def _update_navigation(self) -> None:
         page = self.page_stack.currentIndex()
         self.back_button.setText("Choose another device" if page == self.CONNECTION else "Back")
+        if self._critical_write_active:
+            self.back_button.setEnabled(False)
+            self.continue_button.setEnabled(False)
+            return
+        self.back_button.setEnabled(True)
         if page == self.CONNECTION:
             self.continue_button.setText("Continue to SSH key")
             self.continue_button.setEnabled(self._diagnostics_allow_key_setup())
@@ -998,6 +1120,15 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.workflow)
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        if self.workflow._critical_write_active:
+            QMessageBox.critical(
+                self,
+                "Flash in progress",
+                "USB NICHT TRENNEN – GERÄT NICHT AUSSCHALTEN\n\n"
+                "The window cannot be closed while a critical write is in progress.",
+            )
+            event.ignore()
+            return
         self.settings.setValue("window/size", self.size())
         if self.workflow.artifacts is not None:
             self.workflow.artifacts.cleanup()

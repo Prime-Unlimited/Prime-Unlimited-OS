@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.window import MainWindow, WorkflowPage
@@ -277,13 +278,14 @@ class ImmediatePool:
 
 
 class FakeInstaller:
-    def __init__(self, artifacts, policy=None, ssh_error=None):
+    def __init__(self, artifacts, policy=None, ssh_error=None, flash_error=None):
         self.artifacts = artifacts
         self.release_policy = policy or HardwareReleasePolicy()
         self.flash_calls = 0
         self.bench_flash_calls = 0
         self.bench_results = []
         self.ssh_error = ssh_error
+        self.flash_error = flash_error
         self.ssh = self
 
     def prepare(self, public_key, identifier=None):
@@ -291,14 +293,26 @@ class FakeInstaller:
 
     def flash(self, artifacts, confirmed, identifier=None, progress=None):
         self.flash_calls += 1
+        self._flash_progress(progress)
         return "rebooted"
 
     def flash_bench(self, artifacts, recovery, experiment, confirmed, identifier=None, progress=None):
         self.bench_flash_calls += 1
+        self._flash_progress(progress)
+        return "bench rebooted"
+
+    def _flash_progress(self, progress):
         if progress:
+            progress("phase", "verification_started")
+            progress("phase", "verification_complete")
             progress("download", 1, 1, 64, 128)
             progress("download", 1, 1, 128, 128)
-        return "bench rebooted"
+            progress("phase", "flash_command_sent", 1, 1)
+            progress("phase", "flash_wait", 1, 1)
+            if self.flash_error:
+                raise RuntimeError(self.flash_error)
+            progress("phase", "flash_okay", 1, 1)
+            progress("phase", "reboot_requested")
 
     def record_bench_result(self, artifacts, path, outcome, details):
         self.bench_results.append((outcome, details))
@@ -326,9 +340,9 @@ def installer_artifacts(tmp_path):
     return InstallerArtifacts(root, image, sparse, plan)
 
 
-def configured_installer_window(tmp_path, policy=None, ssh_error=None):
+def configured_installer_window(tmp_path, policy=None, ssh_error=None, flash_error=None):
     app = application()
-    installer = FakeInstaller(installer_artifacts(tmp_path), policy, ssh_error)
+    installer = FakeInstaller(installer_artifacts(tmp_path), policy, ssh_error, flash_error)
     window = MainWindow(
         QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat),
         thread_pool=ImmediatePool(),
@@ -417,5 +431,85 @@ def test_experimental_bench_requires_all_exact_confirmations_and_uses_separate_f
     assert installer.flash_calls == 0
     assert installer.bench_results[0][0] == "flash_succeeded"
     assert wizard.flash_progress.value() == 100
+    phase_log = wizard.flash_phase_log.toPlainText()
+    for phase in (
+        "Gerät und Image werden geprüft",
+        "Sparse-Download läuft",
+        "Fastboot flash:data gesendet",
+        "Warten auf Bootloader-Flashabschluss",
+        "Fastboot OKAY bestätigt",
+        "Neustart angefordert",
+    ):
+        assert phase in phase_log
+    assert "awaits SSH verification" in wizard.flash_status.text()
+    window.close()
+    app.processEvents()
+
+
+def test_download_100_is_not_installation_completion_and_flash_wait_is_indeterminate(tmp_path):
+    app, window, wizard, _ = configured_installer_window(tmp_path)
+    wizard.show_page(WorkflowPage.FLASH)
+    wizard._critical_write_active = True
+    wizard._flash_progress_update(("download", 1, 1, 128, 128))
+    assert wizard.download_progress.value() == 100
+    assert "NOT confirmed" in wizard.flash_status.text()
+    assert not wizard._flash_succeeded
+    assert not wizard.continue_button.isEnabled()
+
+    wizard._flash_progress_update(("phase", "flash_command_sent", 1, 1))
+    wizard._flash_progress_update(("phase", "flash_wait", 1, 1))
+    assert not wizard.flash_activity.isHidden()
+    assert (wizard.flash_activity.minimum(), wizard.flash_activity.maximum()) == (0, 0)
+    assert "No completion percentage" in wizard.flash_status.text()
+    wizard._critical_write_active = False
+    window.close()
+    app.processEvents()
+
+
+def test_timeout_while_waiting_for_flash_okay_marks_write_status_unknown(tmp_path, monkeypatch):
+    app, window, wizard, installer = configured_installer_window(
+        tmp_path, flash_error="WinUsb_ReadPipe timed out after a bounded wait and was cancelled."
+    )
+    wizard.prepare_image()
+    wizard.go_forward()
+    wizard.recovery_confirmation.setChecked(True)
+    wizard.data_loss_confirmation.setChecked(True)
+    wizard.erase_phrase.setText("ERASE DATA")
+    wizard.bench_mode.setChecked(True)
+    wizard.recovery_phrase.setText("JC11S OFW FAILSAFE RECOVERY TESTED")
+    wizard.experiment_phrase.setText("EXPERIMENTAL FIRST FLASH ERASE DATA")
+    wizard.go_forward()
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
+    wizard.start_flash()
+    assert installer.bench_flash_calls == 1
+    assert wizard._write_status_unknown
+    assert not wizard._flash_succeeded
+    assert not wizard.flash_button.isEnabled()
+    assert "Schreibstatus unbekannt" in wizard.flash_status.text()
+    assert "Fastboot OKAY bestätigt" not in wizard.flash_phase_log.toPlainText()
+    assert "Neustart angefordert" not in wizard.flash_phase_log.toPlainText()
+    window.close()
+    app.processEvents()
+
+
+def test_window_close_and_navigation_are_blocked_during_critical_write(tmp_path, monkeypatch):
+    app, window, wizard, _ = configured_installer_window(tmp_path)
+    wizard.show_page(WorkflowPage.FLASH)
+    wizard._critical_write_active = True
+    wizard._update_navigation()
+    page = wizard.page_stack.currentIndex()
+    wizard.go_back()
+    wizard.go_forward()
+    assert wizard.page_stack.currentIndex() == page
+    assert not wizard.back_button.isEnabled()
+    assert not wizard.continue_button.isEnabled()
+
+    shown = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda *args, **kwargs: shown.append(args[2]))
+    event = QCloseEvent()
+    window.closeEvent(event)
+    assert not event.isAccepted()
+    assert "USB NICHT TRENNEN" in shown[0]
+    wizard._critical_write_active = False
     window.close()
     app.processEvents()

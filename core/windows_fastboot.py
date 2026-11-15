@@ -279,6 +279,8 @@ class WindowsWinUsbFastbootTransport:
         from core.jc11s_flash import probe, validate_geometry
         from core.jc11s_image import verify_integrity
 
+        if progress is not None:
+            progress("phase", "verification_started")
         authorization.require(len(plan.transfers))
         if plan.partition != "data":
             raise WriteBlockedError("Only the Fastboot partition 'data' may be written.")
@@ -298,6 +300,8 @@ class WindowsWinUsbFastbootTransport:
                 or geometry.max_download_size != plan.max_download
             ):
                 raise WriteBlockedError("Connected-device geometry changed after image preparation.")
+            if progress is not None:
+                progress("phase", "verification_complete")
             for index, part in enumerate(plan.transfers, 1):
                 connection.set_timeout(pipe_in, self.download_timeout_ms)
                 connection.set_timeout(pipe_out, self.download_timeout_ms)
@@ -314,13 +318,20 @@ class WindowsWinUsbFastbootTransport:
                 )
                 connection.set_timeout(pipe_in, self.flash_timeout_ms)
                 connection.set_timeout(pipe_out, self.download_timeout_ms)
-                session.flash("data")
+                def flash_sent(current=index):
+                    if progress is not None:
+                        progress("phase", "flash_command_sent", current, len(plan.transfers))
+                        progress("phase", "flash_wait", current, len(plan.transfers))
+
+                session.flash("data", flash_sent)
                 if progress is not None:
-                    progress("flash", index, len(plan.transfers), part.stat().st_size, part.stat().st_size)
+                    progress("phase", "flash_okay", index, len(plan.transfers))
             try:
                 connection.set_timeout(pipe_in, self.timeout_ms)
                 connection.set_timeout(pipe_out, self.timeout_ms)
-                return session.reboot().payload
+                return session.reboot(
+                    lambda: progress("phase", "reboot_requested") if progress is not None else None
+                ).payload
             except (WinUsbDisconnected, WinUsbTimeout):
                 return "Device disconnected after successful flash and reboot command."
         finally:

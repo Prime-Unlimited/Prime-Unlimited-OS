@@ -66,8 +66,8 @@ class FastbootSession:
             raise ValueError("Fastboot variable name contains unsupported characters.")
         return self._exchange(f"getvar:{name}")
 
-    def reboot(self) -> FastbootResponse:
-        return self._exchange("reboot")
+    def reboot(self, sent_callback=None) -> FastbootResponse:
+        return self._exchange("reboot", sent_callback)
 
     def download_file(self, path: Path, maximum_size: int, progress=None) -> FastbootResponse:
         size = path.stat().st_size
@@ -93,16 +93,18 @@ class FastbootSession:
                     progress(sent, size)
         return self._read_terminal()
 
-    def flash(self, partition: str) -> FastbootResponse:
+    def flash(self, partition: str, sent_callback=None) -> FastbootResponse:
         if partition != "data":
             raise ValueError("This JC11S installer only permits the verified bootloader partition name 'data'.")
-        return self._exchange(f"flash:{partition}")
+        return self._exchange(f"flash:{partition}", sent_callback)
 
-    def _exchange(self, command: str) -> FastbootResponse:
+    def _exchange(self, command: str, sent_callback=None) -> FastbootResponse:
         encoded = command.encode("ascii")
         written = self.io.write(encoded)
         if written != len(encoded):
             raise FastbootProtocolError(f"Partial Fastboot command transfer: wrote {written} of {len(encoded)} bytes.")
+        if sent_callback is not None:
+            sent_callback()
         info: list[str] = []
         for _ in range(128):
             response = parse_response(self.io.read(64))

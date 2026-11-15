@@ -74,6 +74,18 @@ receive buffer. Command probes remain bounded at 2 seconds, but payload writes u
 the GUI byte counter. A timeout still cancels the pending WinUSB request, stops the
 transfer immediately, and never sends reboot.
 
+The flash UI treats transport progress as a state machine rather than an overall
+percentage. It timestamps verification, sparse download, command transmission,
+the indeterminate bootloader-write wait, the actually received Fastboot `OKAY`,
+and the reboot request. The only percentage shown belongs to sparse download.
+At 100% it explicitly says that `flash:data` is not yet confirmed. Navigation,
+repeat clicks, and window closing are blocked while a critical write is active,
+with `USB NICHT TRENNEN – GERÄT NICHT AUSSCHALTEN` continuously visible. A timeout
+or disconnect while awaiting the flash response produces `Schreibstatus unbekannt
+– Gerät nicht automatisch neu starten oder erneut flashen.` and disables another
+flash attempt for that application session. Installation completion is shown only
+after the later authenticated SSH verification succeeds.
+
 ## Scope, implementation and safety
 
 - Implement this as a Windows-only native WinUSB transport for **JC11S**; retain existing safe detection and a separate JP24 imbupd transport. macOS requires a separate implementation, not WinUSB.

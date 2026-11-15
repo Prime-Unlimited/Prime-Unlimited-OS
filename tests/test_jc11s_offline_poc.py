@@ -247,10 +247,14 @@ def test_hardware_transport_failure_never_reboots(artifacts, monkeypatch):
         def download_file(self, path, maximum_size, progress=None):
             return FastbootResponse(ResponseKind.OKAY, "")
 
-        def flash(self, partition):
+        def flash(self, partition, sent_callback=None):
+            if sent_callback:
+                sent_callback()
             raise FastbootCommandError("simulated bootloader rejection")
 
-        def reboot(self):
+        def reboot(self, sent_callback=None):
+            if sent_callback:
+                sent_callback()
             self.rebooted = True
             return FastbootResponse(ResponseKind.OKAY, "")
 
