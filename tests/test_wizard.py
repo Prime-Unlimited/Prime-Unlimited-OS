@@ -281,6 +281,8 @@ class FakeInstaller:
         self.artifacts = artifacts
         self.release_policy = policy or HardwareReleasePolicy()
         self.flash_calls = 0
+        self.bench_flash_calls = 0
+        self.bench_results = []
         self.ssh_error = ssh_error
         self.ssh = self
 
@@ -290,6 +292,13 @@ class FakeInstaller:
     def flash(self, artifacts, confirmed, identifier=None):
         self.flash_calls += 1
         return "rebooted"
+
+    def flash_bench(self, artifacts, mapping, recovery, experiment, confirmed, identifier=None):
+        self.bench_flash_calls += 1
+        return "bench rebooted"
+
+    def record_bench_result(self, artifacts, path, outcome, details):
+        self.bench_results.append((outcome, details))
 
     def enroll_host_key(self, *args):
         if self.ssh_error:
@@ -380,5 +389,30 @@ def test_ssh_connection_failure_is_shown(tmp_path):
     wizard.ssh_fingerprint.setText("SHA256:trusted")
     wizard.test_ssh()
     assert "connection refused" in wizard.ssh_status.text()
+    window.close()
+    app.processEvents()
+
+
+def test_experimental_bench_requires_all_exact_confirmations_and_uses_separate_flash(tmp_path, monkeypatch):
+    app, window, wizard, installer = configured_installer_window(tmp_path)
+    wizard.prepare_image()
+    wizard.go_forward()
+    wizard.recovery_confirmation.setChecked(True)
+    wizard.data_loss_confirmation.setChecked(True)
+    wizard.erase_phrase.setText("ERASE DATA")
+    wizard.bench_mode.setChecked(True)
+    wizard.mapping_phrase.setText("data = /dev/mmcblk0p11 = /data")
+    wizard.recovery_phrase.setText("JC11S OFW FAILSAFE RECOVERY TESTED")
+    assert not wizard.continue_button.isEnabled()
+    wizard.experiment_phrase.setText("EXPERIMENTAL FIRST FLASH ERASE DATA")
+    assert wizard.continue_button.isEnabled()
+    wizard.go_forward()
+    assert wizard.flash_button.isEnabled()
+    assert not installer.release_policy.partition_mapping_verified
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
+    wizard.start_flash()
+    assert installer.bench_flash_calls == 1
+    assert installer.flash_calls == 0
+    assert installer.bench_results[0][0] == "flash_succeeded"
     window.close()
     app.processEvents()

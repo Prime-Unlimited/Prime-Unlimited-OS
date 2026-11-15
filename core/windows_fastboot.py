@@ -139,6 +139,38 @@ class HardwareFlashAuthorization:
             raise WriteBlockedError("Hardware flash remains blocked: " + ", ".join(missing) + ".")
 
 
+@dataclass(frozen=True)
+class ExperimentalFirstFlashAuthorization:
+    """Separate one-device bench consent; never changes normal release gates."""
+
+    enabled: bool = False
+    mapping_confirmation: str = ""
+    recovery_confirmation: str = ""
+    experiment_confirmation: str = ""
+    user_confirmed_data_loss: bool = False
+
+    MAPPING_PHRASE = "data = /dev/mmcblk0p11 = /data"
+    RECOVERY_PHRASE = "JC11S OFW FAILSAFE RECOVERY TESTED"
+    EXPERIMENT_PHRASE = "EXPERIMENTAL FIRST FLASH ERASE DATA"
+
+    def require(self, transfer_count: int) -> None:
+        missing = []
+        if not self.enabled:
+            missing.append("experimental bench mode")
+        if self.mapping_confirmation.strip() != self.MAPPING_PHRASE:
+            missing.append("device-specific data/mmcblk0p11 mapping confirmation")
+        if self.recovery_confirmation.strip() != self.RECOVERY_PHRASE:
+            missing.append("JC11S OFW failsafe recovery confirmation")
+        if self.experiment_confirmation.strip() != self.EXPERIMENT_PHRASE:
+            missing.append("experimental first-flash confirmation")
+        if not self.user_confirmed_data_loss:
+            missing.append("immediate complete data-loss confirmation")
+        if transfer_count < 1:
+            missing.append("validated sparse transfer set")
+        if missing:
+            raise WriteBlockedError("Experimental first flash blocked: " + ", ".join(missing) + ".")
+
+
 class WindowsWinUsbFastbootTransport:
     """Read-only native transport plus explicitly invoked reboot."""
 
@@ -228,7 +260,7 @@ class WindowsWinUsbFastbootTransport:
     def flash_sparse_plan(
         self,
         plan,
-        authorization: HardwareFlashAuthorization,
+        authorization: HardwareFlashAuthorization | ExperimentalFirstFlashAuthorization,
         identifier: str | None = None,
         progress=None,
     ) -> str:
@@ -238,6 +270,8 @@ class WindowsWinUsbFastbootTransport:
         from core.jc11s_image import verify_integrity
 
         authorization.require(len(plan.transfers))
+        if plan.partition != "data":
+            raise WriteBlockedError("Only the Fastboot partition 'data' may be written.")
         image = verify_integrity(plan.image)
         sparse = verify_set(plan.sparse_directory)
         if image["size"] != plan.size or image["sha256"] != plan.sha256:

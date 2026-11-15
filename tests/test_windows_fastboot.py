@@ -4,6 +4,7 @@ import pytest
 
 from core.transports import WriteBlockedError
 from core.windows_fastboot import (
+    ExperimentalFirstFlashAuthorization,
     HardwareFlashAuthorization,
     InterfaceDescriptor,
     InterfaceInfo,
@@ -212,3 +213,41 @@ def test_hardware_flash_authorization_fails_closed():
     with pytest.raises(WriteBlockedError, match="multipart"):
         HardwareFlashAuthorization(True, True, True, True, False).require(2)
     HardwareFlashAuthorization(True, True, True, True, True).require(2)
+
+
+def test_experimental_first_flash_authorization_is_separate_and_exact():
+    normal = HardwareFlashAuthorization()
+    with pytest.raises(WriteBlockedError, match="partition mapping"):
+        normal.require(1)
+
+    bench = ExperimentalFirstFlashAuthorization(
+        True,
+        ExperimentalFirstFlashAuthorization.MAPPING_PHRASE,
+        ExperimentalFirstFlashAuthorization.RECOVERY_PHRASE,
+        ExperimentalFirstFlashAuthorization.EXPERIMENT_PHRASE,
+        True,
+    )
+    bench.require(4)
+    assert normal == HardwareFlashAuthorization()
+
+
+@pytest.mark.parametrize(
+    "authorization,missing",
+    [
+        (ExperimentalFirstFlashAuthorization(), "bench mode"),
+        (ExperimentalFirstFlashAuthorization(True), "mapping"),
+        (
+            ExperimentalFirstFlashAuthorization(
+                True,
+                ExperimentalFirstFlashAuthorization.MAPPING_PHRASE,
+                "unverified recovery",
+                ExperimentalFirstFlashAuthorization.EXPERIMENT_PHRASE,
+                True,
+            ),
+            "recovery",
+        ),
+    ],
+)
+def test_experimental_first_flash_rejects_incomplete_consent(authorization, missing):
+    with pytest.raises(WriteBlockedError, match=missing):
+        authorization.require(1)

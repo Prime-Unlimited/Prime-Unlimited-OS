@@ -22,7 +22,10 @@ from core.jc11s_flash import (
 )
 from core.jc11s_image import SOURCE, build, digest, public_key, run, validate_hook, verify, verify_integrity
 from core.transports import WriteBlockedError
-from core.windows_fastboot import HardwareFlashAuthorization, WindowsWinUsbFastbootTransport
+from core.windows_fastboot import (
+    ExperimentalFirstFlashAuthorization,
+    WindowsWinUsbFastbootTransport,
+)
 
 
 def evidence(size: int, limit: int, **overrides) -> ProbeEvidence:
@@ -252,10 +255,59 @@ def test_hardware_transport_failure_never_reboots(artifacts, monkeypatch):
     transport = WindowsWinUsbFastbootTransport(object())
     monkeypatch.setattr(transport, "_single_interface", lambda identifier=None: object())
     monkeypatch.setattr(transport, "_open_session", lambda interface: (connection, session, 0x81, 0x02))
-    authorization = HardwareFlashAuthorization(True, True, True, True, True)
+    authorization = ExperimentalFirstFlashAuthorization(
+        True,
+        ExperimentalFirstFlashAuthorization.MAPPING_PHRASE,
+        ExperimentalFirstFlashAuthorization.RECOVERY_PHRASE,
+        ExperimentalFirstFlashAuthorization.EXPERIMENT_PHRASE,
+        True,
+    )
     with pytest.raises(FastbootCommandError, match="rejection"):
         transport.flash_sparse_plan(plan, authorization)
     assert not session.rebooted
+    assert connection.closed
+
+
+def test_experimental_transport_rejects_wrong_device_before_transfer(artifacts, monkeypatch):
+    image = artifacts[3]
+    size = image.stat().st_size
+    geometry = validate_geometry(evidence(size, 1024 * 1024))
+    plan = prepare(image, geometry, artifacts[0] / "wrong-device-sparse")
+    wrong = evidence(size, 1024 * 1024)
+    wrong.values["product"] = "rk3288-not-jc11s"
+
+    class Connection:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    class Session:
+        downloaded = False
+        rebooted = False
+
+        def download_file(self, *args, **kwargs):
+            self.downloaded = True
+
+        def reboot(self):
+            self.rebooted = True
+
+    connection = Connection()
+    session = Session()
+    transport = WindowsWinUsbFastbootTransport(object())
+    monkeypatch.setattr(transport, "_single_interface", lambda identifier=None: object())
+    monkeypatch.setattr(transport, "_open_session", lambda interface: (connection, session, 0x81, 0x02))
+    monkeypatch.setattr("core.jc11s_flash.probe", lambda current: wrong)
+    authorization = ExperimentalFirstFlashAuthorization(
+        True,
+        ExperimentalFirstFlashAuthorization.MAPPING_PHRASE,
+        ExperimentalFirstFlashAuthorization.RECOVERY_PHRASE,
+        ExperimentalFirstFlashAuthorization.EXPERIMENT_PHRASE,
+        True,
+    )
+    with pytest.raises(ValueError, match="not the measured JC11S"):
+        transport.flash_sparse_plan(plan, authorization)
+    assert not session.downloaded and not session.rebooted
     assert connection.closed
 
 

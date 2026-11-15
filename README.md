@@ -10,6 +10,10 @@ Prime-Unlimited OS is a cross-platform desktop foundation for safely bootstrappi
 
 > **Development status:** the Windows application implements the complete guarded JC11S workflow through device-specific image preparation, sparse validation, data-loss review, Fastboot transport, reboot and SSH verification. Hardware writing remains blocked by the independent release policy until partition mapping, first-boot firmware compatibility and recovery are demonstrated.
 
+An explicitly labeled JC11S first-flash bench mode is available separately for the
+documented tester-controlled experiment. It requires exact mapping, OFW-failsafe,
+experimental and data-loss confirmations and does not relax the normal release policy.
+
 ## Supported devices (in development)
 
 | Device | Hardware profile | Initial USB transport | SSH after setup |

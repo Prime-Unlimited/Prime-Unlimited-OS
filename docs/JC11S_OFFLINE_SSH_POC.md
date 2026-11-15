@@ -169,6 +169,35 @@ The PySide6 assistant now covers detection, key management, device-specific buil
 sparse verification, data-loss/recovery review, flash status, reboot and
 host-key-pinned SSH verification. Normal users do not need to enter Linux commands.
 
+### Experimental first-flash bench mode
+
+The normal `HardwareReleasePolicy` remains closed. A separate JC11S-only bench
+authorization exists for the tester's first controlled write. It does not set or
+reuse any normal release-policy field. The UI requires all of the following exact,
+immediate confirmations before enabling the bench button:
+
+- `data = /dev/mmcblk0p11 = /data`, recording the tester's same-device observation
+  that the stock Linux `/data` mount uses `/dev/mmcblk0p11` and that the JC11S
+  bootloader exposes the intended ext4 partition under the label `data`;
+- `JC11S OFW FAILSAFE RECOVERY TESTED`, recording the tester's reported repeated
+  OFW restoration and observed failsafe boot when `/data` is invalid;
+- `EXPERIMENTAL FIRST FLASH ERASE DATA`, plus the existing `ERASE DATA` phrase and
+  complete-data-loss check box.
+
+This is bench evidence, not a general hardware revision guarantee. Immediately
+before writing, the transport reopens the selected WinUSB device, validates the
+exact JC11S product and measured bootloader profile, ext4 type, dynamic partition
+size and download limit, and rechecks both raw and sparse reconstruction SHA-256.
+The only permitted write command remains `flash:data`. A failed download or flash
+stops the loop and never reaches reboot. Reboot is sent only after every transfer
+succeeds.
+
+The application appends JSON Lines records to
+`jc11s-first-flash-bench.jsonl` in its application-data directory. Flash success,
+authenticated first-boot SSH success, and explicit or observed first-boot/SSH
+failure are recorded with image size and SHA-256. A failed first boot is a bench
+result, not silently treated as an installer success.
+
 The native WinUSB transport implements Fastboot 0.4 `download`, bounded payload
 streaming, terminal `OKAY`/`FAIL` processing and the allowlisted `flash:data`
 command. It re-probes product, firmware, partition type/size and download limit

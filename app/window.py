@@ -177,6 +177,7 @@ class WorkflowPage(QWidget):
         self.key_pair: KeyPair | None = None
         self.artifacts: InstallerArtifacts | None = None
         self._flash_succeeded = False
+        self._bench_flash_active = False
         self._worker: DiagnosticWorker | None = None
 
         outer = QHBoxLayout(self)
@@ -358,11 +359,29 @@ class WorkflowPage(QWidget):
         self.data_loss_confirmation = QCheckBox("I understand that the complete /data partition will be overwritten.")
         self.erase_phrase = QLineEdit()
         self.erase_phrase.setPlaceholderText("Type ERASE DATA")
+        self.bench_mode = QCheckBox("Enable EXPERIMENTAL JC11S first-flash bench mode for this device")
+        self.mapping_phrase = QLineEdit()
+        self.mapping_phrase.setPlaceholderText("Type: data = /dev/mmcblk0p11 = /data")
+        self.recovery_phrase = QLineEdit()
+        self.recovery_phrase.setPlaceholderText("Type: JC11S OFW FAILSAFE RECOVERY TESTED")
+        self.experiment_phrase = QLineEdit()
+        self.experiment_phrase.setPlaceholderText("Type: EXPERIMENTAL FIRST FLASH ERASE DATA")
         for widget in (self.recovery_confirmation, self.data_loss_confirmation):
             widget.stateChanged.connect(self._update_navigation)
             layout.addWidget(widget)
         self.erase_phrase.textChanged.connect(self._update_navigation)
         layout.addWidget(self.erase_phrase)
+        self.bench_mode.stateChanged.connect(self._update_navigation)
+        layout.addWidget(self.bench_mode)
+        bench_warning = label(
+            "Bench only: confirm that stock JC11S device evidence associated Fastboot 'data' with "
+            "/dev/mmcblk0p11 mounted at /data, and that this tester has recovered this device through OFW failsafe."
+        )
+        bench_warning.setStyleSheet("background:#3a1717; color:#ffb4b4; border-radius:9px; padding:14px;")
+        layout.addWidget(bench_warning)
+        for field in (self.mapping_phrase, self.recovery_phrase, self.experiment_phrase):
+            field.textChanged.connect(self._update_navigation)
+            layout.addWidget(field)
         layout.addStretch()
         return page
 
@@ -397,11 +416,14 @@ class WorkflowPage(QWidget):
         self.ssh_fingerprint.setPlaceholderText("Trusted host-key fingerprint (SHA256:…)")
         self.ssh_test_button = QPushButton("Test authenticated SSH")
         self.ssh_test_button.clicked.connect(self.test_ssh)
+        self.first_boot_failed_button = QPushButton("Record failed first boot / SSH activation")
+        self.first_boot_failed_button.clicked.connect(self.record_failed_first_boot)
         self.ssh_status = label("SSH has not been tested.")
         layout.addWidget(self.ssh_host)
         layout.addWidget(self.ssh_passphrase)
         layout.addWidget(self.ssh_fingerprint)
         layout.addWidget(self.ssh_test_button, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.first_boot_failed_button, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self.ssh_status)
         layout.addStretch()
         return page
@@ -415,6 +437,7 @@ class WorkflowPage(QWidget):
             self.artifacts.cleanup()
         self.artifacts = None
         self._flash_succeeded = False
+        self._bench_flash_active = False
         if profile_id == ProfileId.JC11S and self.installer_service is None:
             fastboot = getattr(self.diagnostic_service, "fastboot", None)
             if fastboot is not None and hasattr(fastboot, "collect_partition_evidence"):
@@ -454,6 +477,10 @@ class WorkflowPage(QWidget):
         self.recovery_confirmation.setChecked(False)
         self.data_loss_confirmation.setChecked(False)
         self.erase_phrase.clear()
+        self.bench_mode.setChecked(False)
+        self.mapping_phrase.clear()
+        self.recovery_phrase.clear()
+        self.experiment_phrase.clear()
         self.flash_progress.setValue(0)
         self.flash_status.setText("No write has started.")
         self.ssh_status.setText("SSH has not been tested.")
@@ -462,6 +489,8 @@ class WorkflowPage(QWidget):
     def _refresh_flash_gate(self) -> None:
         if self.profile_id != ProfileId.JC11S or self.installer_service is None:
             blockers = (self.profile.blocker if self.profile else "Installer service unavailable.",)
+        elif self.bench_mode.isChecked():
+            blockers = () if self._bench_confirmed() else ("Experimental bench confirmations are incomplete",)
         else:
             blockers = self.installer_service.release_policy.blockers
             if (
@@ -471,7 +500,13 @@ class WorkflowPage(QWidget):
             ):
                 blockers += ("Multipart sparse flashing is not verified on the InMusic bootloader",)
         self.blocker_text.setText(
-            "Hardware write blocked:\n• " + "\n• ".join(blockers) if blockers else "All release gates satisfied."
+            "Hardware write blocked:\n• " + "\n• ".join(blockers)
+            if blockers
+            else (
+                "EXPERIMENTAL FIRST-FLASH BENCH authorization ready for data only."
+                if self.bench_mode.isChecked()
+                else "All normal release gates satisfied."
+            )
         )
         self.flash_button.setEnabled(not blockers and self._review_confirmed())
 
@@ -720,11 +755,25 @@ class WorkflowPage(QWidget):
         self._update_navigation()
 
     def _review_confirmed(self) -> bool:
-        return (
+        base = (
             self.recovery_confirmation.isChecked()
             and self.data_loss_confirmation.isChecked()
             and self.erase_phrase.text().strip() == "ERASE DATA"
         )
+        return base and (not self.bench_mode.isChecked() or self._bench_confirmed())
+
+    def _bench_confirmed(self) -> bool:
+        return (
+            self.bench_mode.isChecked()
+            and self.mapping_phrase.text().strip() == "data = /dev/mmcblk0p11 = /data"
+            and self.recovery_phrase.text().strip() == "JC11S OFW FAILSAFE RECOVERY TESTED"
+            and self.experiment_phrase.text().strip() == "EXPERIMENTAL FIRST FLASH ERASE DATA"
+            and self.data_loss_confirmation.isChecked()
+        )
+
+    def _bench_log_path(self) -> Path:
+        app_data = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation))
+        return app_data / "jc11s-first-flash-bench.jsonl"
 
     def start_flash(self) -> None:
         if self.installer_service is None or self.artifacts is None or not self._review_confirmed():
@@ -735,7 +784,12 @@ class WorkflowPage(QWidget):
         answer = QMessageBox.warning(
             self,
             "Final /data erase confirmation",
-            "This is the final confirmation. The complete data partition will be overwritten now. Continue?",
+            (
+                "EXPERIMENTAL JC11S FIRST FLASH. Only Fastboot partition data will be overwritten. "
+                "The complete filesystem and all settings will be lost. Continue?"
+                if self.bench_mode.isChecked()
+                else "This is the final confirmation. The complete data partition will be overwritten now. Continue?"
+            ),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -746,7 +800,27 @@ class WorkflowPage(QWidget):
         self.flash_progress.setRange(0, 0)
         self.flash_status.setText("Revalidating the connected device before guarded flash…")
         identifier = self.candidate_selector.currentData() if self.candidate_selector.isVisible() else None
-        worker = TaskWorker(lambda: self.installer_service.flash(self.artifacts, True, identifier))
+        if self.bench_mode.isChecked():
+            mapping = self.mapping_phrase.text()
+            recovery = self.recovery_phrase.text()
+            experiment = self.experiment_phrase.text()
+            self._bench_flash_active = True
+
+            def task():
+                return self.installer_service.flash_bench(
+                    self.artifacts,
+                    mapping,
+                    recovery,
+                    experiment,
+                    True,
+                    identifier,
+                )
+        else:
+            self._bench_flash_active = False
+
+            def task():
+                return self.installer_service.flash(self.artifacts, True, identifier)
+        worker = TaskWorker(task)
         worker.signals.finished.connect(self._flash_complete)
         worker.signals.failed.connect(self._flash_failed)
         self._worker = worker
@@ -758,6 +832,10 @@ class WorkflowPage(QWidget):
         self.flash_progress.setRange(0, 100)
         self.flash_progress.setValue(100)
         self.flash_status.setText("Flash completed and reboot requested. " + redact(str(message)))
+        if self._bench_flash_active and hasattr(self.installer_service, "record_bench_result"):
+            self.installer_service.record_bench_result(
+                self.artifacts, self._bench_log_path(), "flash_succeeded", str(message)
+            )
         self._update_navigation()
 
     @Slot(str)
@@ -798,11 +876,30 @@ class WorkflowPage(QWidget):
     def _ssh_complete(self, marker) -> None:
         self.ssh_test_button.setEnabled(True)
         self.ssh_status.setText("Authenticated SSH succeeded: " + redact(str(marker)))
+        if self._bench_flash_active and hasattr(self.installer_service, "record_bench_result"):
+            self.installer_service.record_bench_result(
+                self.artifacts, self._bench_log_path(), "first_boot_ssh_succeeded", str(marker)
+            )
 
     @Slot(str)
     def _ssh_failed(self, message: str) -> None:
         self.ssh_test_button.setEnabled(True)
         self.ssh_status.setText("SSH verification failed: " + redact(message))
+        if self._bench_flash_active and hasattr(self.installer_service, "record_bench_result"):
+            self.installer_service.record_bench_result(
+                self.artifacts, self._bench_log_path(), "first_boot_or_ssh_failed", message
+            )
+
+    def record_failed_first_boot(self) -> None:
+        if not self._bench_flash_active or self.artifacts is None or not self._flash_succeeded:
+            return
+        self.installer_service.record_bench_result(
+            self.artifacts,
+            self._bench_log_path(),
+            "first_boot_or_ssh_failed",
+            "Tester explicitly reported that first boot or SSH activation did not succeed.",
+        )
+        self.ssh_status.setText("Failed first boot / SSH activation recorded as a bench result.")
 
     def go_back(self) -> None:
         page = self.page_stack.currentIndex()
