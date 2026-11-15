@@ -1,3 +1,5 @@
+<img width="2560" height="1280" alt="Prime Unlimited OS Brand-selection" src="https://github.com/user-attachments/assets/905fe545-5fff-40ac-b722-6164de8211fd" />
+
 # Prime Unlimited OS
 
 Open-source modding platform for Denon Prime 4+ and Prime 4 G2.
