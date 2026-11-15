@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -30,7 +31,7 @@ from app.logo import PrimeUnlimitedLogo
 from core.device_detection import DetectionState
 from core.diagnostic_service import DiagnosticReport, UsbDiagnosticService
 from core.diagnostics import redact
-from core.keys import KeyPair, KeyValidationError, generate_keypair, validate_keypair
+from core.keys import KeyPair, KeyValidationError, generate_keypair_paths, validate_keypair
 from core.profiles import PROFILES, DeviceProfile, ProfileId
 from core.windows_installer import InstallerArtifacts, Jc11sInstallerService
 
@@ -41,6 +42,13 @@ def label(text: str, object_name: str = "") -> QLabel:
     if object_name:
         item.setObjectName(object_name)
     return item
+
+
+def executable_directory() -> Path:
+    """Directory containing the packaged EXE, or the launch directory in source runs."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path.cwd().resolve()
 
 
 class DeviceCard(QFrame):
@@ -180,6 +188,7 @@ class WorkflowPage(QWidget):
         self.key_pair: KeyPair | None = None
         self._key_passphrase = ""
         self._pending_ssh_host = ""
+        self._ssh_verified = False
         self.artifacts: InstallerArtifacts | None = None
         self._flash_succeeded = False
         self._bench_flash_active = False
@@ -408,17 +417,13 @@ class WorkflowPage(QWidget):
         self.ssh_host = QLineEdit()
         self.ssh_host.setPlaceholderText("Device IP address")
         self.ssh_host.setAccessibleName("Device IP address")
-        self.ssh_key_path = QLineEdit()
-        self.ssh_key_path.setReadOnly(True)
-        self.ssh_key_path.setPlaceholderText("Validated private key from step 2")
-        self.ssh_key_path.setAccessibleName("Selected SSH private key")
-        self.ssh_test_button = QPushButton("Test authenticated SSH")
+        self.ssh_test_button = QPushButton("TEST SSH")
+        self.ssh_test_button.setObjectName("primary")
         self.ssh_test_button.clicked.connect(self.test_ssh)
         self.first_boot_failed_button = QPushButton("Record failed first boot / SSH activation")
         self.first_boot_failed_button.clicked.connect(self.record_failed_first_boot)
         self.ssh_status = label("SSH has not been tested.")
         layout.addWidget(self.ssh_host)
-        layout.addWidget(self.ssh_key_path)
         layout.addWidget(self.ssh_test_button, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self.first_boot_failed_button, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self.ssh_status)
@@ -432,6 +437,7 @@ class WorkflowPage(QWidget):
         self.key_pair = None
         self._key_passphrase = ""
         self._pending_ssh_host = ""
+        self._ssh_verified = False
         if self.artifacts is not None:
             self.artifacts.cleanup()
         self.artifacts = None
@@ -467,8 +473,9 @@ class WorkflowPage(QWidget):
         self.candidate_details.clear()
         self.candidate_details.setVisible(False)
         self.reboot_button.setVisible(False)
-        self.private_key_path.clear()
-        self.public_key_path.clear()
+        key_directory = executable_directory()
+        self.private_key_path.setText(str(key_directory / "prime_unlimited_ed25519"))
+        self.public_key_path.setText(str(key_directory / "prime_unlimited_ed25519.pub"))
         self.passphrase.clear()
         self.confirm_passphrase.clear()
         self.key_status.setText("SSH key setup is required. There is no skip option.")
@@ -485,7 +492,7 @@ class WorkflowPage(QWidget):
         self.flash_status.setText("No write has started.")
         self.ssh_status.setText("SSH has not been tested.")
         self.ssh_host.clear()
-        self.ssh_key_path.clear()
+        self.first_boot_failed_button.setVisible(True)
         self.show_page(self.CONNECTION)
 
     def _refresh_flash_gate(self) -> None:
@@ -683,11 +690,33 @@ class WorkflowPage(QWidget):
         if passphrase != self.confirm_passphrase.text():
             self._key_error("The passphrase confirmation does not match.")
             return
-        directory = QFileDialog.getExistingDirectory(self, "Choose a secure key folder")
-        if not directory:
+        private_path = Path(self.private_key_path.text().strip())
+        public_path = Path(self.public_key_path.text().strip())
+        if not self.private_key_path.text().strip() or not self.public_key_path.text().strip():
+            self._key_error("Choose paths for both the private and public SSH key files.")
+            return
+        if private_path.exists() or public_path.exists():
+            QMessageBox.warning(
+                self,
+                "SSH key files already exist",
+                "The selected key files will not be overwritten. Choose different filenames, or use "
+                "Validate imported pair to reuse the existing files.",
+            )
+            self._key_error("Existing SSH key files were left unchanged.")
             return
         try:
-            pair = generate_keypair(Path(directory), passphrase)
+            pair = generate_keypair_paths(private_path, public_path, passphrase)
+        except PermissionError:
+            fallback = Path(
+                QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
+            ) / "Prime-Unlimited-OS"
+            self.private_key_path.setText(str(fallback / "prime_unlimited_ed25519"))
+            self.public_key_path.setText(str(fallback / "prime_unlimited_ed25519.pub"))
+            self._key_error(
+                "The selected folder is not writable. A writable Documents folder has been suggested; "
+                "review it and select Generate new key again."
+            )
+            return
         except (KeyValidationError, FileExistsError, OSError) as exc:
             self._key_error(str(exc))
             return
@@ -708,7 +737,6 @@ class WorkflowPage(QWidget):
         self._key_passphrase = passphrase
         self.private_key_path.setText(str(pair.private_key))
         self.public_key_path.setText(str(pair.public_key))
-        self.ssh_key_path.setText(str(pair.private_key))
         self.passphrase.clear()
         self.confirm_passphrase.clear()
         self.key_status.setText("Ed25519 key pair validated. The private key remains on this computer.")
@@ -1012,16 +1040,21 @@ class WorkflowPage(QWidget):
     @Slot(object)
     def _ssh_complete(self, marker) -> None:
         self.ssh_test_button.setEnabled(True)
-        self.ssh_status.setText("Authenticated SSH succeeded: " + redact(str(marker)))
+        self._ssh_verified = True
+        self.ssh_status.setText("SSH-Verbindung erfolgreich")
+        self.first_boot_failed_button.setVisible(False)
         self._set_flash_phase("complete", "Installation abgeschlossen; SSH-Verifikation erfolgreich")
         if self._bench_flash_active and hasattr(self.installer_service, "record_bench_result"):
             self.installer_service.record_bench_result(
                 self.artifacts, self._bench_log_path(), "first_boot_ssh_succeeded", str(marker)
             )
+        self._update_navigation()
 
     @Slot(str)
     def _ssh_failed(self, message: str) -> None:
         self.ssh_test_button.setEnabled(True)
+        self._ssh_verified = False
+        self.first_boot_failed_button.setVisible(True)
         self.ssh_status.setText("SSH verification failed: " + redact(message))
         self._set_flash_phase("ssh_failed", "SSH-Verifikation fehlgeschlagen; erneuter Test möglich")
         if self._bench_flash_active and hasattr(self.installer_service, "record_bench_result"):
@@ -1061,6 +1094,8 @@ class WorkflowPage(QWidget):
             self.show_page(self.FLASH)
         elif page == self.FLASH and self._flash_succeeded:
             self.show_page(self.SSH_TEST)
+        elif page == self.SSH_TEST and self._ssh_verified:
+            self.exit_requested.emit()
 
     def _diagnostics_allow_key_setup(self) -> bool:
         if self.diagnostic_report is None:
@@ -1090,7 +1125,7 @@ class WorkflowPage(QWidget):
             self.continue_button.setEnabled(self._flash_succeeded)
         else:
             self.continue_button.setText("Finish after successful SSH test")
-            self.continue_button.setEnabled(False)
+            self.continue_button.setEnabled(self._ssh_verified)
 
 
 class MainWindow(QMainWindow):

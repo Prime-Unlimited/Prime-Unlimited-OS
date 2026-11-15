@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from core.processes import run_process
 from core.usb_discovery import DeviceFamily, UsbDiscovery, UsbInterface, create_usb_discovery
 
 
@@ -44,7 +45,7 @@ class FastbootTransport:
 
     def probe(self, identifier: str | None = None) -> list[UsbDevice]:
         try:
-            result = subprocess.run(
+            result = run_process(
                 [self.executable, "devices"], capture_output=True, text=True, timeout=10, check=False
             )
         except (FileNotFoundError, subprocess.TimeoutExpired) as exc:

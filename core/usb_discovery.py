@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
 
+from core.processes import run_process
+
 
 class DeviceFamily(StrEnum):
     JC11S = "jc11s"
@@ -150,7 +152,7 @@ class CommandRunner(Protocol):
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+    return run_process(command, capture_output=True, text=True, timeout=20, check=False)
 
 
 class MacOsUsbDiscovery:

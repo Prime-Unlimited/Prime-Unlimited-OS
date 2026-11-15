@@ -54,7 +54,16 @@ jobs:
       - name: Test native image build without WSL
         run: python -m pytest tests/test_windows_installer.py -m native_windows
       - run: python -m PyInstaller packaging/prime-unlimited-os.spec
+      - name: Record Windows executable SHA256
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist\Prime-Unlimited-OS.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash *Prime-Unlimited-OS.exe" | Set-Content -Encoding ascii dist\Prime-Unlimited-OS.exe.sha256
+          "Windows EXE SHA256: ``$hash``" | Add-Content $env:GITHUB_STEP_SUMMARY
+          Write-Output "WINDOWS_EXE_SHA256=$hash"
       - uses: actions/upload-artifact@v4
         with:
           name: Prime-Unlimited-OS-Windows-test
-          path: dist/Prime-Unlimited-OS.exe
+          path: |
+            dist/Prime-Unlimited-OS.exe
+            dist/Prime-Unlimited-OS.exe.sha256

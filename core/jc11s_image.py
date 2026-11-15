@@ -8,12 +8,13 @@ import json
 import os
 import re
 import struct
-import subprocess
 import tempfile
 from pathlib import Path
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+from core.processes import run_process
 
 EPOCH = "1700000000"
 UUID = "914fa90d-f643-42d5-a91c-184916a58cd5"
@@ -37,7 +38,7 @@ def run(
         env["PATH"] = str(tool_directory) + os.pathsep + env.get("PATH", "")
     if mke2fs_config is not None:
         env["MKE2FS_CONFIG"] = str(mke2fs_config)
-    result = subprocess.run(args, env=env, capture_output=True, text=True, check=True, **kwargs)
+    result = run_process(args, env=env, capture_output=True, text=True, check=True, **kwargs)
     return result.stdout
 
 

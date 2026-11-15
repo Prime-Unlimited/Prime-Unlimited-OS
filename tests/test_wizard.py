@@ -57,6 +57,62 @@ def test_wizard_navigation_requires_diagnostics_and_ssh_key(tmp_path: Path):
     app.processEvents()
 
 
+def test_key_paths_default_to_executable_directory(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("app.window.executable_directory", lambda: tmp_path)
+    app = application()
+    window = MainWindow(QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat))
+    window.open_workflow(ProfileId.JC11S)
+    wizard = window.workflow
+    assert wizard.private_key_path.text() == str(tmp_path / "prime_unlimited_ed25519")
+    assert wizard.public_key_path.text() == str(tmp_path / "prime_unlimited_ed25519.pub")
+    window.close()
+    app.processEvents()
+
+
+def test_generate_key_uses_prefilled_or_custom_paths_without_dialog(tmp_path: Path):
+    app = application()
+    window = MainWindow(QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat))
+    window.open_workflow(ProfileId.JC11S)
+    wizard = window.workflow
+    private = tmp_path / "chosen" / "my_prime_key"
+    public = tmp_path / "chosen" / "my_prime_key.pub"
+    wizard.private_key_path.setText(str(private))
+    wizard.public_key_path.setText(str(public))
+    wizard.passphrase.setText("test passphrase")
+    wizard.confirm_passphrase.setText("test passphrase")
+
+    wizard.generate_key()
+
+    assert wizard.key_pair.private_key == private.resolve()
+    assert wizard.key_pair.public_key == public.resolve()
+    assert wizard._key_passphrase == "test passphrase"
+    window.close()
+    app.processEvents()
+
+
+def test_generate_key_refuses_existing_files(tmp_path: Path, monkeypatch):
+    app = application()
+    window = MainWindow(QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat))
+    window.open_workflow(ProfileId.JC11S)
+    wizard = window.workflow
+    private = tmp_path / "existing"
+    private.write_text("unchanged", encoding="utf-8")
+    wizard.private_key_path.setText(str(private))
+    wizard.public_key_path.setText(str(tmp_path / "existing.pub"))
+    wizard.passphrase.setText("test passphrase")
+    wizard.confirm_passphrase.setText("test passphrase")
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args))
+
+    wizard.generate_key()
+
+    assert warnings
+    assert private.read_text(encoding="utf-8") == "unchanged"
+    assert wizard.key_pair is None
+    window.close()
+    app.processEvents()
+
+
 def test_wrong_device_and_no_device_block_navigation(tmp_path: Path):
     app = application()
     window = MainWindow(QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat))
@@ -432,12 +488,13 @@ def test_ssh_page_reuses_key_and_passphrase_and_prompts_for_discovered_host_key(
 
     wizard.test_ssh()
 
-    assert wizard.ssh_key_path.text() == str(wizard.key_pair.private_key)
     assert installer.ssh_trusted
     assert installer.ssh_verify_args[0] == "192.0.2.8"
     assert installer.ssh_verify_args[1] == wizard.key_pair.private_key
     assert installer.ssh_verify_args[2] == "test passphrase"
-    assert "succeeded" in wizard.ssh_status.text().lower()
+    assert wizard.ssh_status.text() == "SSH-Verbindung erfolgreich"
+    assert wizard.continue_button.isEnabled()
+    assert wizard.first_boot_failed_button.isHidden()
     window.close()
     app.processEvents()
 
