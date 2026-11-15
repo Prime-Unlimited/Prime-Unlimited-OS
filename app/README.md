@@ -4,6 +4,6 @@ The PySide6 desktop wizard starts with explicit device selection and presents de
 
 Relevant USB candidates show actual VID/PID and discovery source alongside explicitly inferred transport/family information. Model identity, revision compatibility, and installation remain separate. Multiple candidates require an explicit selection and diagnostic rerun; unknown revisions remain blocked.
 
-SSH setup has no skip path. The wizard can generate a passphrase-protected Ed25519 pair or validate an imported pair, keeps the private key on the computer, clears passphrase fields after validation, and then stops at the installation safety gate. Authenticated SSH verification and the mod dashboard stay locked until a validated bootstrap can safely be installed.
+SSH setup has no skip path. The wizard can generate a passphrase-protected Ed25519 pair or validate an imported pair, keeps the private key on the computer, and clears passphrase fields after validation. For JC11S it then drives the automatic WSL image build, sparse validation, destructive-data review, separately gated WinUSB flash, reboot and host-key-pinned SSH verification. The evidence-based release gates remain false until mapping, first boot and recovery are demonstrated; a user checkbox cannot override them.
 
 Run it from the repository root with `python -m app.main`. UI strings are English and structured so Qt translation catalogs can be introduced without changing core services.
