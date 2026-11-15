@@ -148,7 +148,7 @@ been established. Keep the recorded tool versions for reproduction.
 ## Native Windows offline build
 
 The packaged desktop application builds directly on Windows. Its PyInstaller
-payload contains MSYS2 e2fsprogs (`mke2fs`, `debugfs`, `e2fsck`, the MSYS runtime,
+payload contains Cygwin e2fsprogs (`mke2fs`, `debugfs`, `e2fsck`, the Cygwin runtime,
 all transitive DLLs and configuration) plus an ARMv7 hook built from `bootstrap/jc11s/hook.c` by the
 Linux CI job. The hook is accepted only when both its ELF32/ARM ABI and the bundled
 SHA-256 provenance record match. The Windows job obtains the tools while assembling

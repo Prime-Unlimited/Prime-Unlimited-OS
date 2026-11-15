@@ -38,4 +38,10 @@ Copy-Item $config (Join-Path $etc "mke2fs.conf")
 
 $licenseRoot = Join-Path $Source "share\licenses\e2fsprogs"
 if (Test-Path $licenseRoot) { Copy-Item "$licenseRoot\*" $licenses -Recurse }
+@(
+    (Join-Path $Source "usr\share\doc\e2fsprogs"),
+    (Join-Path $Source "usr\share\doc\Cygwin\e2fsprogs.README"),
+    (Join-Path $Source "usr\share\doc\Cygwin\cygwin-doc.README"),
+    (Join-Path $Source "COPYING")
+) | Where-Object { Test-Path $_ } | ForEach-Object { Copy-Item $_ $licenses -Recurse -Force }
 
