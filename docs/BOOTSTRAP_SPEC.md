@@ -45,6 +45,8 @@ A real Prime 4+ on Windows was accessed directly through Microsoft's existing Wi
 
 `FastbootTransport` and `ImbupdTransport` must implement separate read-only probing and guarded writing. A transport being detected does not by itself prove a device profile. Never fall back from a failed JP24 probe to a JC11S image.
 
+USB discovery, family candidacy, transport detection, protocol verification, model verification, revision verification, and installation authorization are separate states. Known VID/PID values and product strings are discovery hints only. New revisions may be displayed and diagnosed, but they remain blocked until independently validated. See [Revision-aware USB discovery](USB_DISCOVERY.md).
+
 ## Security and recovery
 
 - No shared passwords, private SSH keys, firmware binaries or credentials in Git.

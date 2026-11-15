@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QRunnable, QSettings, Qt, QThreadPool, Signal, Slot
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -98,16 +99,22 @@ class WorkerSignals(QObject):
 
 
 class DiagnosticWorker(QRunnable):
-    def __init__(self, service: UsbDiagnosticService, profile_id: ProfileId) -> None:
+    def __init__(
+        self,
+        service: UsbDiagnosticService,
+        profile_id: ProfileId,
+        selected_device: str | None = None,
+    ) -> None:
         super().__init__()
         self.service = service
         self.profile_id = profile_id
+        self.selected_device = selected_device
         self.signals = WorkerSignals()
 
     @Slot()
     def run(self) -> None:
         try:
-            self.signals.finished.emit(self.service.probe(self.profile_id))
+            self.signals.finished.emit(self.service.probe(self.profile_id, self.selected_device))
         except Exception as exc:  # GUI boundary: turn unexpected probe failures into diagnostics.
             self.signals.failed.emit(redact(str(exc)))
 
@@ -194,6 +201,14 @@ class WorkflowPage(QWidget):
         self.connection_instructions = label("", "subtitle")
         layout.addWidget(self.connection_title)
         layout.addWidget(self.connection_instructions)
+        self.candidate_selector = QComboBox()
+        self.candidate_selector.setAccessibleName("Discovered USB candidate")
+        self.candidate_selector.setVisible(False)
+        self.candidate_selector.currentIndexChanged.connect(self._show_selected_candidate)
+        layout.addWidget(self.candidate_selector)
+        self.candidate_details = label("", "muted")
+        self.candidate_details.setVisible(False)
+        layout.addWidget(self.candidate_details)
         self.run_diagnostics_button = QPushButton("Run read-only diagnostics")
         self.run_diagnostics_button.setObjectName("primary")
         self.run_diagnostics_button.clicked.connect(self.run_diagnostics)
@@ -315,6 +330,10 @@ class WorkflowPage(QWidget):
         self.diagnostic_status.setText("Diagnostics have not run.")
         self.diagnostic_status.setStyleSheet("")
         self.diagnostic_log.clear()
+        self.candidate_selector.clear()
+        self.candidate_selector.setVisible(False)
+        self.candidate_details.clear()
+        self.candidate_details.setVisible(False)
         self.reboot_button.setVisible(False)
         self.private_key_path.clear()
         self.public_key_path.clear()
@@ -335,7 +354,8 @@ class WorkflowPage(QWidget):
         self.continue_button.setEnabled(False)
         self.diagnostic_status.setText("Running read-only USB diagnostics…")
         self.diagnostic_log.setPlainText("Waiting for USB probes. No write command will run.")
-        worker = DiagnosticWorker(self.diagnostic_service, self.profile_id)
+        selected_device = self.candidate_selector.currentData() if self.candidate_selector.isVisible() else None
+        worker = DiagnosticWorker(self.diagnostic_service, self.profile_id, selected_device)
         worker.signals.finished.connect(self.handle_diagnostic_report)
         worker.signals.failed.connect(self.handle_diagnostic_failure)
         self._worker = worker
@@ -347,16 +367,77 @@ class WorkflowPage(QWidget):
         self.run_diagnostics_button.setEnabled(True)
         self.diagnostic_log.setPlainText("\n".join(redact(line) for line in report.log_lines))
         self.diagnostic_status.setText(report.result.message)
+        self._populate_candidates(report)
         can_reboot = (
             self.profile_id == ProfileId.JC11S and report.reboot_available and report.fastboot_version is not None
         )
         self.reboot_button.setVisible(can_reboot)
         self.reboot_button.setEnabled(can_reboot)
-        if report.result.state in {DetectionState.MATCH, DetectionState.UNVERIFIED}:
+        if report.result.state in {
+            DetectionState.MATCH,
+            DetectionState.UNVERIFIED,
+            DetectionState.CANDIDATE,
+        }:
             self.diagnostic_status.setStyleSheet("color:#ffd18a;")
         else:
             self.diagnostic_status.setStyleSheet("color:#ff7b7b;")
         self._update_navigation()
+
+    def _populate_candidates(self, report: DiagnosticReport) -> None:
+        previous = self.candidate_selector.currentData()
+        displayed_devices = report.candidates or report.discovered_devices
+        self.candidate_selector.blockSignals(True)
+        self.candidate_selector.clear()
+        for candidate in displayed_devices:
+            family = ", ".join(item.value.upper() for item in candidate.candidate_families)
+            self.candidate_selector.addItem(
+                f"{candidate.display_name} — {candidate.vid_pid} — {family or 'unknown family'}",
+                candidate.discovery_key,
+            )
+        if previous is not None:
+            index = self.candidate_selector.findData(previous)
+            if index >= 0:
+                self.candidate_selector.setCurrentIndex(index)
+        self.candidate_selector.blockSignals(False)
+        visible = bool(displayed_devices)
+        self.candidate_selector.setVisible(visible)
+        self.candidate_details.setVisible(visible)
+        self._show_selected_candidate()
+
+    def _show_selected_candidate(self) -> None:
+        if self.diagnostic_report is None:
+            return
+        key = self.candidate_selector.currentData()
+        displayed_devices = self.diagnostic_report.candidates or self.diagnostic_report.discovered_devices
+        candidate = next(
+            (item for item in displayed_devices if item.discovery_key == key),
+            None,
+        )
+        if candidate is None:
+            self.candidate_details.clear()
+            return
+        transports = ", ".join(item.value for item in candidate.candidate_transports) or "Unverified"
+        if candidate.verification.protocol_verified:
+            transport_status = f"Protocol verified ({candidate.bootloader or 'version unknown'})"
+        elif candidate.verification.transport_detected:
+            transport_status = "Transport detected; protocol unverified"
+        else:
+            transport_status = f"{transports} (inferred; unverified)"
+        interface = next(
+            (item for item in candidate.interfaces if item.interface_class is not None),
+            None,
+        )
+        interface_text = ""
+        if interface is not None:
+            descriptor = (
+                f"{interface.interface_class:02X}/{interface.interface_subclass:02X}/{interface.interface_protocol:02X}"
+            )
+            interface_text = f"\nInterface: {descriptor}  ·  Endpoints: {', '.join(interface.endpoints)}"
+        self.candidate_details.setText(
+            f"USB detected: Yes  ·  VID/PID: {candidate.vid_pid}  ·  Source: {candidate.source}\n"
+            f"Transport: {transport_status}  ·  Model identity: Unverified{interface_text}\n"
+            "Hardware revision: Unknown  ·  Installation: Blocked"
+        )
 
     @Slot(str)
     def handle_diagnostic_failure(self, message: str) -> None:

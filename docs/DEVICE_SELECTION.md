@@ -43,6 +43,14 @@ After native Windows protocol verification, the diagnostic screen may offer **Re
 - Never guess, switch transport silently, or fall back to another image.
 - The absence of a Fastboot/imbupd response is not by itself a definitive model identification; verify positive evidence before writing.
 
+## Dynamic candidates and revisions
+
+The wizard shows relevant USB candidates with their actual VID/PID, discovery source, and inferred transport. Inferred information is labeled as such. Model identity, hardware revision, and installation authorization are shown separately.
+
+When multiple candidates exist, the user must choose one explicitly and run diagnostics again. A name resembling Prime 4+ or Prime 4 G2 can make a device a candidate but cannot verify its model. A safe Fastboot response can verify the protocol but cannot verify the product or revision. Unknown or new revisions remain diagnostic-only with installation blocked.
+
+On macOS, JP24 discovery uses structured IORegistry output and falls back to structured `system_profiler` data. This fixes Issue #3, where IORegistry contained the Prime 4 G2 but `system_profiler SPUSBDataType` returned empty output.
+
 ## Mandatory SSH
 
 SSH is required for Prime Unlimited OS. There is no skip option. The desktop app uses SSH/SFTP for all later compatible mods, updates and file transfers. A successful USB write without verified SSH access is **not** a completed setup.

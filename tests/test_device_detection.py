@@ -16,7 +16,7 @@ def test_wrong_transport_never_switches_profile():
 
 def test_transport_presence_is_not_identity():
     result = match_selected_profile(ProfileId.JP24, [ProbeEvidence("imbupd", 1)])
-    assert result.state == DetectionState.UNVERIFIED
+    assert result.state == DetectionState.CANDIDATE
     assert not result.may_continue
 
 
@@ -26,6 +26,9 @@ def test_ambiguous_devices_stop():
 
 
 def test_positive_matching_identity_may_continue():
-    result = match_selected_profile(ProfileId.JC11S, [ProbeEvidence("fastboot", 1, ProfileId.JC11S)])
+    result = match_selected_profile(
+        ProfileId.JC11S,
+        [ProbeEvidence("fastboot", 1, ProfileId.JC11S, transport_verified=True)],
+    )
     assert result.state == DetectionState.MATCH
     assert result.may_continue

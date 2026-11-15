@@ -14,6 +14,7 @@ class DetectionState(StrEnum):
     WRONG_PROFILE = "wrong_profile"
     AMBIGUOUS = "ambiguous"
     UNVERIFIED = "unverified"
+    CANDIDATE = "candidate"
     TRANSPORT_ERROR = "transport_error"
 
 
@@ -23,6 +24,7 @@ class ProbeEvidence:
     count: int
     verified_profile: ProfileId | None = None
     details: str = ""
+    transport_verified: bool = False
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,13 @@ def match_selected_profile(selected: ProfileId, evidence: list[ProbeEvidence]) -
         return DetectionResult(
             DetectionState.WRONG_PROFILE,
             f"The connected device does not match the selection. Go back and select {target}.",
+            False,
+        )
+    if not item.transport_verified:
+        return DetectionResult(
+            DetectionState.CANDIDATE,
+            "A possible device-family candidate was discovered, but its transport, model, and "
+            "revision are unverified. Installation is blocked.",
             False,
         )
     if item.verified_profile is None:

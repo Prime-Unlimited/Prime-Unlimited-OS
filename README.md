@@ -21,6 +21,7 @@ Prime-Unlimited OS is a cross-platform desktop foundation for safely bootstrappi
 
 - Polished PySide6 desktop wizard with manual Prime 4+ (JC11S) and Prime 4 G2 (JP24) selection.
 - Native Windows WinUSB diagnostics for JC11S, including verified Fastboot protocol version display and an explicitly confirmed reboot action.
+- Revision-aware Windows and macOS USB discovery with IORegistry fallback, normalized evidence, and explicit compatibility states.
 - Separate JC11S Fastboot and JP24 imbupd paths with fail-closed writers.
 - Explicit handling for absent, wrong, multiple, ambiguous, and unverified devices.
 - Mandatory passphrase-protected Ed25519 generation or existing key-pair validation.
@@ -67,7 +68,7 @@ Sign and notarize release artifacts using project-controlled credentials. Creden
 - **JP24:** VID:PID `15e4:d014` is only transport evidence. The imbupd protocol implementation, positive model identity, redistributable ARM64 payload, and proven backup/recovery procedure remain unavailable.
 - A USB command reporting success is insufficient. Completion will require normal device operation and an authenticated, host-key-verified SSH session on port 22 (JC11S) or 2222 (JP24).
 
-On Windows, keep the existing Microsoft `WINUSB` / `winusb.inf` driver. The verified JC11S diagnostic path does not require Zadig, WSL2, or `usbipd-win`. Google's `fastboot.exe` did not enumerate the tested controller, so the app uses Windows APIs directly. See the [native Windows bench notes](docs/JC11S_WINDOWS_WINUSB_FASTBOOT.md), [bootstrap specification](docs/BOOTSTRAP_SPEC.md), [device selection flow](docs/DEVICE_SELECTION.md), and [JC11S technical record](docs/JC11S_PROCESS.md).
+On Windows, keep the existing Microsoft `WINUSB` / `winusb.inf` driver. The verified JC11S diagnostic path does not require Zadig, WSL2, or `usbipd-win`. Google's `fastboot.exe` did not enumerate the tested controller, so the app uses Windows APIs directly. See [revision-aware USB discovery](docs/USB_DISCOVERY.md), the [native Windows bench notes](docs/JC11S_WINDOWS_WINUSB_FASTBOOT.md), [bootstrap specification](docs/BOOTSTRAP_SPEC.md), [device selection flow](docs/DEVICE_SELECTION.md), and [JC11S technical record](docs/JC11S_PROCESS.md).
 
 ## Disclaimer
 

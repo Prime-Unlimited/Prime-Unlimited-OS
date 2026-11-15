@@ -15,7 +15,7 @@ QPushButton { background: #1d2831; border: 1px solid #33424e; border-radius: 9px
 QPushButton:hover { border-color: #29d3ff; }
 QPushButton#primary { background: #18bde8; color: #061117; border: 0; }
 QPushButton#primary:disabled { background: #30414a; color: #71808a; }
-QLineEdit, QPlainTextEdit { background: #0c1116; border: 1px solid #2b3944;
+QLineEdit, QPlainTextEdit, QComboBox { background: #0c1116; border: 1px solid #2b3944;
                            border-radius: 8px; padding: 9px; selection-background-color: #187f9c; }
 QProgressBar { background: #202831; border: 0; border-radius: 4px; height: 8px; text-align: center; }
 QProgressBar::chunk { background: #21c9f3; border-radius: 4px; }

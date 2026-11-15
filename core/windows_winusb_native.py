@@ -33,6 +33,10 @@ DIGCF_PRESENT = 0x00000002
 DIGCF_DEVICEINTERFACE = 0x00000010
 SPDRP_HARDWAREID = 0x00000001
 SPDRP_SERVICE = 0x00000004
+SPDRP_MFG = 0x0000000B
+SPDRP_FRIENDLYNAME = 0x0000000C
+SPDRP_LOCATION_INFORMATION = 0x0000000D
+SPDRP_DEVICEDESC = 0x00000000
 
 GENERIC_READ = 0x80000000
 GENERIC_WRITE = 0x40000000
@@ -507,9 +511,23 @@ class NativeWinUsbApi:
         instance_id = self._instance_id(handle, device_info)
         hardware_ids = self._registry_property(handle, device_info, SPDRP_HARDWAREID)
         service = self._registry_property(handle, device_info, SPDRP_SERVICE)
+        manufacturer = self._registry_property(handle, device_info, SPDRP_MFG)
+        friendly_name = self._registry_property(handle, device_info, SPDRP_FRIENDLYNAME)
+        description = self._registry_property(handle, device_info, SPDRP_DEVICEDESC)
+        location = self._registry_property(handle, device_info, SPDRP_LOCATION_INFORMATION)
         if not instance_id:
             return None
-        return InterfaceInfo(path, instance_id, tuple(hardware_ids), service[0] if service else "")
+        serial = instance_id.rsplit("\\", 1)[-1] if "\\" in instance_id else None
+        return InterfaceInfo(
+            path,
+            instance_id,
+            tuple(hardware_ids),
+            service[0] if service else "",
+            manufacturer=manufacturer[0] if manufacturer else None,
+            product=(friendly_name or description or [None])[0],
+            location=location[0] if location else None,
+            serial=serial,
+        )
 
     def _instance_id(self, handle, device_info: SP_DEVINFO_DATA) -> str:
         buffer = ctypes.create_unicode_buffer(1024)

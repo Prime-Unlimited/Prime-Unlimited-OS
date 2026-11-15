@@ -12,6 +12,7 @@ from typing import Protocol
 
 from core.fastboot_protocol import FastbootProtocolError, FastbootSession
 from core.transports import TransportError, UsbDevice, WriteBlockedError
+from core.usb_discovery import UsbInterface
 
 JC11S_VID = 0x15E4
 JC11S_PID = 0xD007
@@ -42,12 +43,20 @@ class WinUsbAmbiguousDevice(WinUsbError):
     pass
 
 
+class NotFastbootInterface(WinUsbError):
+    """An accessible WinUSB interface does not expose Fastboot descriptors."""
+
+
 @dataclass(frozen=True)
 class InterfaceInfo:
     path: str
     instance_id: str
     hardware_ids: tuple[str, ...]
     service: str
+    manufacturer: str | None = None
+    product: str | None = None
+    location: str | None = None
+    serial: str | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +111,8 @@ class _FastbootPipeIo:
 class VerifiedWindowsFastboot:
     interface: InterfaceInfo
     protocol_version: str
+    pipe_in: int
+    pipe_out: int
 
 
 class WindowsWinUsbFastbootTransport:
@@ -111,8 +122,8 @@ class WindowsWinUsbFastbootTransport:
         self.api = api
         self.timeout_ms = timeout_ms
 
-    def probe(self) -> list[UsbDevice]:
-        verified = self.discover()
+    def probe(self, identifier: str | None = None) -> list[UsbDevice]:
+        verified = self.discover(identifier)
         return [
             UsbDevice(
                 transport="fastboot",
@@ -123,37 +134,53 @@ class WindowsWinUsbFastbootTransport:
                     "WinUSB interface accessible",
                     "Fastboot protocol verified",
                 ),
+                transport_verified=True,
+                interface_details=UsbInterface(
+                    path=item.interface.path,
+                    interface_class=FASTBOOT_CLASS,
+                    interface_subclass=FASTBOOT_SUBCLASS,
+                    interface_protocol=FASTBOOT_PROTOCOL,
+                    endpoints=(f"IN 0x{item.pipe_in:02X}", f"OUT 0x{item.pipe_out:02X}"),
+                    driver=item.interface.service,
+                ),
             )
             for item in verified
         ]
 
-    def discover(self) -> list[VerifiedWindowsFastboot]:
-        candidates = [item for item in self.api.enumerate_interfaces() if self._is_jc11s_hint(item)]
+    def discover(self, identifier: str | None = None) -> list[VerifiedWindowsFastboot]:
+        candidates = [item for item in self.api.enumerate_interfaces() if self._is_winusb_candidate(item)]
         grouped: dict[str, list[InterfaceInfo]] = {}
         for candidate in candidates:
             grouped.setdefault(candidate.instance_id.casefold(), []).append(candidate)
+        if identifier is not None:
+            grouped = {
+                key: items for key, items in grouped.items() if items[0].instance_id.casefold() == identifier.casefold()
+            }
         verified: list[VerifiedWindowsFastboot] = []
         for interfaces in grouped.values():
-            item = self._verify_physical_device(interfaces)
+            item = self._verify_physical_device(
+                interfaces,
+                family_hint=any(self._has_jc11s_family_hint(interface) for interface in interfaces),
+            )
             if item is not None:
                 verified.append(item)
         if len(verified) > 1:
             raise WinUsbAmbiguousDevice("Multiple JC11S-compatible WinUSB devices were found.")
         return verified
 
-    def getvar(self, name: str) -> str:
-        interface = self._single_interface()
-        connection, session = self._open_session(interface)
+    def getvar(self, name: str, identifier: str | None = None) -> str:
+        interface = self._single_interface(identifier)
+        connection, session, _, _ = self._open_session(interface)
         try:
             response = session.getvar(name)
             return response.payload
         finally:
             connection.close()
 
-    def reboot(self) -> str:
+    def reboot(self, identifier: str | None = None) -> str:
         """Send reboot after UI confirmation; a resulting disconnect is expected."""
-        interface = self._single_interface()
-        connection, session = self._open_session(interface)
+        interface = self._single_interface(identifier)
+        connection, session, _, _ = self._open_session(interface)
         try:
             try:
                 response = session.reboot()
@@ -166,35 +193,47 @@ class WindowsWinUsbFastbootTransport:
     def install(self, package) -> None:
         raise WriteBlockedError("JC11S flashing is not implemented or enabled.")
 
-    def _single_interface(self) -> InterfaceInfo:
-        verified = self.discover()
+    def _single_interface(self, identifier: str | None = None) -> InterfaceInfo:
+        verified = self.discover(identifier)
         if not verified:
             raise WinUsbError("No accessible JC11S WinUSB Fastboot interface was found.")
         return verified[0].interface
 
-    def _verify_physical_device(self, interfaces: list[InterfaceInfo]) -> VerifiedWindowsFastboot | None:
+    def _verify_physical_device(
+        self,
+        interfaces: list[InterfaceInfo],
+        family_hint: bool,
+    ) -> VerifiedWindowsFastboot | None:
         errors: list[Exception] = []
+        transport_seen = False
         for interface in interfaces:
             connection = None
             try:
-                connection, session = self._open_session(interface)
+                connection, session, pipe_in, pipe_out = self._open_session(interface)
+                transport_seen = True
                 version = session.getvar("version")
                 if not version.payload:
                     raise FastbootProtocolError("Fastboot returned an empty protocol version.")
-                return VerifiedWindowsFastboot(interface, version.payload)
+                return VerifiedWindowsFastboot(interface, version.payload, pipe_in, pipe_out)
+            except NotFastbootInterface as exc:
+                if family_hint:
+                    errors.append(exc)
+                continue
             except (WinUsbError, FastbootProtocolError) as exc:
                 errors.append(exc)
             finally:
                 if connection is not None:
                     connection.close()
         if errors:
+            if not family_hint and not transport_seen:
+                return None
             last_error = errors[-1]
             if isinstance(last_error, WinUsbError):
                 raise last_error
             raise WinUsbError(f"JC11S WinUSB interface validation failed: {last_error}")
         return None
 
-    def _open_session(self, interface: InterfaceInfo) -> tuple[WinUsbConnection, FastbootSession]:
+    def _open_session(self, interface: InterfaceInfo) -> tuple[WinUsbConnection, FastbootSession, int, int]:
         connection = self.api.open_interface(interface.path)
         try:
             descriptor = connection.descriptor()
@@ -203,7 +242,7 @@ class WindowsWinUsbFastbootTransport:
                 descriptor.interface_subclass,
                 descriptor.interface_protocol,
             ) != (FASTBOOT_CLASS, FASTBOOT_SUBCLASS, FASTBOOT_PROTOCOL):
-                raise WinUsbError("USB interface descriptors do not match Fastboot FF/42/03.")
+                raise NotFastbootInterface("USB interface descriptors do not match Fastboot FF/42/03.")
             pipes = connection.pipes()
             bulk_in = [
                 pipe for pipe in pipes if pipe.pipe_type == USB_PIPE_TYPE_BULK and pipe.pipe_id & USB_ENDPOINT_IN
@@ -212,19 +251,24 @@ class WindowsWinUsbFastbootTransport:
                 pipe for pipe in pipes if pipe.pipe_type == USB_PIPE_TYPE_BULK and not pipe.pipe_id & USB_ENDPOINT_IN
             ]
             if len(bulk_in) != 1 or len(bulk_out) != 1:
-                raise WinUsbError("Fastboot requires exactly one bulk IN and one bulk OUT endpoint.")
+                raise NotFastbootInterface("Fastboot requires exactly one bulk IN and one bulk OUT endpoint.")
             connection.set_timeout(bulk_in[0].pipe_id, self.timeout_ms)
             connection.set_timeout(bulk_out[0].pipe_id, self.timeout_ms)
             io = _FastbootPipeIo(connection, bulk_in[0].pipe_id, bulk_out[0].pipe_id)
-            return connection, FastbootSession(io)
+            return connection, FastbootSession(io), bulk_in[0].pipe_id, bulk_out[0].pipe_id
         except Exception:
             connection.close()
             raise
 
     @staticmethod
-    def _is_jc11s_hint(interface: InterfaceInfo) -> bool:
+    def _is_winusb_candidate(interface: InterfaceInfo) -> bool:
+        return interface.service.casefold() == "winusb"
+
+    @staticmethod
+    def _has_jc11s_family_hint(interface: InterfaceInfo) -> bool:
         ids = " ".join(interface.hardware_ids).upper()
-        return "VID_15E4&PID_D007" in ids and interface.service.casefold() == "winusb"
+        names = " ".join(filter(None, (interface.manufacturer, interface.product))).casefold()
+        return "VID_15E4&PID_D007" in ids or "prime 4 plus" in names or "prime 4+" in names
 
 
 def create_windows_fastboot_transport() -> WindowsWinUsbFastbootTransport:

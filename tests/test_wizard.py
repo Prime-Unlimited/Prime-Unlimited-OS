@@ -8,6 +8,12 @@ from core.device_detection import DetectionResult, DetectionState
 from core.diagnostic_service import DiagnosticReport
 from core.keys import generate_keypair
 from core.profiles import ProfileId
+from core.usb_discovery import (
+    CandidateTransport,
+    DeviceFamily,
+    DiscoveredUsbDevice,
+    VerificationState,
+)
 
 
 def application():
@@ -134,5 +140,85 @@ def test_reboot_requires_confirmation_and_runs_only_after_yes(tmp_path: Path, mo
     window.workflow.request_reboot()
     assert service.calls == 1
     assert window.workflow.diagnostic_report is None
+    window.close()
+    app.processEvents()
+
+
+def test_wizard_displays_candidates_and_passes_explicit_selection(tmp_path: Path):
+    candidates = tuple(
+        DiscoveredUsbDevice(
+            discovery_key=f"port-{number}",
+            display_name="PRIME 4 G2 — Possible new hardware revision",
+            vendor_id=0x9999,
+            product_id=0x1200 + number,
+            candidate_families=(DeviceFamily.JP24,),
+            candidate_transports=(CandidateTransport.IMBUPD,),
+            verification=VerificationState(candidate=True),
+            source="macOS IORegistry",
+        )
+        for number in (1, 2)
+    )
+    diagnostic_report = DiagnosticReport(
+        DetectionResult(DetectionState.AMBIGUOUS, "Select one candidate.", False),
+        ("Two candidates",),
+        candidates=candidates,
+    )
+
+    class Service:
+        def __init__(self):
+            self.selected = None
+
+        def probe(self, profile, selected_device=None):
+            self.selected = selected_device
+            return diagnostic_report
+
+    class ImmediatePool:
+        def start(self, worker):
+            worker.run()
+
+    app = application()
+    service = Service()
+    window = MainWindow(
+        QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat),
+        diagnostic_service=service,
+        thread_pool=ImmediatePool(),
+    )
+    window.show()
+    window.open_workflow(ProfileId.JP24)
+    window.workflow.handle_diagnostic_report(diagnostic_report)
+    assert window.workflow.candidate_selector.count() == 2
+    assert "9999:1201" in window.workflow.candidate_details.text()
+    assert "Installation: Blocked" in window.workflow.candidate_details.text()
+    window.workflow.candidate_selector.setCurrentIndex(1)
+    window.workflow.run_diagnostics()
+    assert service.selected == "port-2"
+    assert not window.workflow.continue_button.isEnabled()
+    window.close()
+    app.processEvents()
+
+
+def test_wizard_offers_safe_view_for_unknown_usb_hardware(tmp_path: Path):
+    app = application()
+    window = MainWindow(QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat))
+    window.show()
+    window.open_workflow(ProfileId.JP24)
+    unknown = DiscoveredUsbDevice(
+        discovery_key="unknown-port",
+        display_name="Unknown USB device",
+        vendor_id=0x1234,
+        product_id=0x5678,
+        source="macOS IORegistry",
+    )
+    unknown_report = DiagnosticReport(
+        DetectionResult(DetectionState.NO_DEVICE, "No supported USB device was found.", False),
+        ("One unknown USB device",),
+        discovered_devices=(unknown,),
+    )
+    window.workflow.handle_diagnostic_report(unknown_report)
+    assert window.workflow.candidate_selector.count() == 1
+    assert "unknown family" in window.workflow.candidate_selector.currentText()
+    assert "1234:5678" in window.workflow.candidate_details.text()
+    assert "Installation: Blocked" in window.workflow.candidate_details.text()
+    assert not window.workflow.continue_button.isEnabled()
     window.close()
     app.processEvents()

@@ -151,8 +151,41 @@ def test_confirmed_reboot_treats_expected_disconnect_as_success():
     assert discovery.closed and reboot.closed
 
 
-def test_unrelated_winusb_device_is_ignored_without_opening():
+def test_unrelated_winusb_device_is_descriptor_checked_without_protocol_command():
     unrelated = InterfaceInfo("other", "USB\\OTHER", (r"USB\VID_1234&PID_5678",), "WINUSB")
-    api = FakeApi([unrelated])
+    connection = FakeConnection(descriptor=InterfaceDescriptor(0xFF, 0x00, 0x00, 2))
+    api = FakeApi([unrelated], [connection])
     assert WindowsWinUsbFastbootTransport(api).probe() == []
-    assert api.opened == []
+    assert api.opened == ["other"]
+    assert connection.writes == []
+    assert connection.closed
+
+
+def test_changed_identifiers_with_prime4plus_name_are_safely_protocol_probed():
+    future = InterfaceInfo(
+        path="future-path",
+        instance_id="USB\\FUTURE",
+        hardware_ids=(r"USB\VID_9999&PID_0001",),
+        service="WINUSB",
+        manufacturer="Denon DJ",
+        product="PRIME 4 Plus future revision",
+    )
+    connection = FakeConnection([b"OKAY0.4"])
+    devices = WindowsWinUsbFastbootTransport(FakeApi([future], [connection])).probe()
+    assert len(devices) == 1
+    assert devices[0].protocol_version == "0.4"
+    assert devices[0].verified_model is None
+
+
+def test_unknown_identifiers_with_fastboot_descriptor_are_transport_verified_only():
+    future = InterfaceInfo(
+        path="future-fastboot",
+        instance_id="USB\\UNKNOWN-REVISION",
+        hardware_ids=(r"USB\VID_9999&PID_9999",),
+        service="WINUSB",
+    )
+    connection = FakeConnection([b"OKAY0.4"])
+    devices = WindowsWinUsbFastbootTransport(FakeApi([future], [connection])).probe()
+    assert len(devices) == 1
+    assert devices[0].transport_verified
+    assert devices[0].verified_model is None
