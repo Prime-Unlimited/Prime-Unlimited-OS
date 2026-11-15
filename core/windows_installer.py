@@ -67,15 +67,18 @@ class ExperimentalFirstFlashPolicy:
 
     def authorize(
         self,
-        recovery_confirmation: str,
-        experiment_confirmation: str,
+        experimental_confirmation: bool,
         confirmed_data_loss: bool,
     ) -> ExperimentalFirstFlashAuthorization:
         return ExperimentalFirstFlashAuthorization(
             enabled=self.available,
             mapping_evidence_verified=self.mapping_evidence_verified,
-            recovery_confirmation=recovery_confirmation,
-            experiment_confirmation=experiment_confirmation,
+            recovery_confirmation=(
+                ExperimentalFirstFlashAuthorization.RECOVERY_PHRASE if experimental_confirmation else ""
+            ),
+            experiment_confirmation=(
+                ExperimentalFirstFlashAuthorization.EXPERIMENT_PHRASE if experimental_confirmation else ""
+            ),
             user_confirmed_data_loss=confirmed_data_loss,
         )
 
@@ -188,15 +191,13 @@ class Jc11sInstallerService:
     def flash_bench(
         self,
         artifacts: InstallerArtifacts,
-        recovery_confirmation: str,
-        experiment_confirmation: str,
+        experimental_confirmation: bool,
         confirmed_data_loss: bool,
         identifier: str | None = None,
         progress=None,
     ):
         authorization = self.bench_policy.authorize(
-            recovery_confirmation,
-            experiment_confirmation,
+            experimental_confirmation,
             confirmed_data_loss,
         )
         return self.transport.flash_sparse_plan(artifacts.plan, authorization, identifier, progress)

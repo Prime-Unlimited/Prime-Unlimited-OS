@@ -47,8 +47,7 @@ def test_native_builder_stops_before_temp_build_when_prerequisites_missing(tmp_p
 def test_bench_policy_does_not_open_normal_release_policy():
     policy = ExperimentalFirstFlashPolicy()
     authorization = policy.authorize(
-        "JC11S OFW FAILSAFE RECOVERY TESTED",
-        "EXPERIMENTAL FIRST FLASH ERASE DATA",
+        True,
         True,
     )
     authorization.require(2)

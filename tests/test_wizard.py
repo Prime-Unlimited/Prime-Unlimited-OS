@@ -296,7 +296,7 @@ class FakeInstaller:
         self._flash_progress(progress)
         return "rebooted"
 
-    def flash_bench(self, artifacts, recovery, experiment, confirmed, identifier=None, progress=None):
+    def flash_bench(self, artifacts, experimental, confirmed, identifier=None, progress=None):
         self.bench_flash_calls += 1
         self._flash_progress(progress)
         return "bench rebooted"
@@ -357,21 +357,16 @@ def configured_installer_window(tmp_path, policy=None, ssh_error=None, flash_err
     return app, window, wizard, installer
 
 
-def test_full_gui_build_review_and_recovery_gate(tmp_path):
+def test_image_build_goes_directly_to_flash_without_review_page(tmp_path):
     app, window, wizard, installer = configured_installer_window(tmp_path)
     assert wizard.page_stack.currentIndex() == WorkflowPage.PREPARE
     wizard.prepare_image()
     assert wizard.artifacts is installer.artifacts
     assert "123,456" in wizard.plan_summary.text()
     wizard.go_forward()
-    assert wizard.page_stack.currentIndex() == WorkflowPage.REVIEW
-    assert not wizard.continue_button.isEnabled()
-    wizard.recovery_confirmation.setChecked(True)
-    wizard.data_loss_confirmation.setChecked(True)
-    wizard.erase_phrase.setText("ERASE DATA")
-    assert wizard.continue_button.isEnabled()
-    wizard.go_forward()
     assert wizard.page_stack.currentIndex() == WorkflowPage.FLASH
+    assert wizard.steps.count() == 5
+    assert all("review" not in wizard.steps.item(index).text().lower() for index in range(wizard.steps.count()))
     assert not wizard.flash_button.isEnabled()
     assert "recovery path" in wizard.blocker_text.text()
     assert installer.flash_calls == 0
@@ -384,10 +379,7 @@ def test_final_user_cancel_sends_no_flash(tmp_path, monkeypatch):
     app, window, wizard, installer = configured_installer_window(tmp_path, policy)
     wizard.prepare_image()
     wizard.go_forward()
-    wizard.recovery_confirmation.setChecked(True)
     wizard.data_loss_confirmation.setChecked(True)
-    wizard.erase_phrase.setText("ERASE DATA")
-    wizard.go_forward()
     assert wizard.flash_button.isEnabled()
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.StandardButton.No)
     wizard.start_flash()
@@ -410,19 +402,12 @@ def test_ssh_connection_failure_is_shown(tmp_path):
     app.processEvents()
 
 
-def test_experimental_bench_requires_all_exact_confirmations_and_uses_separate_flash(tmp_path, monkeypatch):
+def test_experimental_bench_uses_click_confirmations_and_separate_flash(tmp_path, monkeypatch):
     app, window, wizard, installer = configured_installer_window(tmp_path)
     wizard.prepare_image()
     wizard.go_forward()
-    wizard.recovery_confirmation.setChecked(True)
     wizard.data_loss_confirmation.setChecked(True)
-    wizard.erase_phrase.setText("ERASE DATA")
     wizard.bench_mode.setChecked(True)
-    wizard.recovery_phrase.setText("JC11S OFW FAILSAFE RECOVERY TESTED")
-    assert not wizard.continue_button.isEnabled()
-    wizard.experiment_phrase.setText("EXPERIMENTAL FIRST FLASH ERASE DATA")
-    assert wizard.continue_button.isEnabled()
-    wizard.go_forward()
     assert wizard.flash_button.isEnabled()
     assert not installer.release_policy.partition_mapping_verified
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
@@ -472,13 +457,8 @@ def test_timeout_while_waiting_for_flash_okay_marks_write_status_unknown(tmp_pat
     )
     wizard.prepare_image()
     wizard.go_forward()
-    wizard.recovery_confirmation.setChecked(True)
     wizard.data_loss_confirmation.setChecked(True)
-    wizard.erase_phrase.setText("ERASE DATA")
     wizard.bench_mode.setChecked(True)
-    wizard.recovery_phrase.setText("JC11S OFW FAILSAFE RECOVERY TESTED")
-    wizard.experiment_phrase.setText("EXPERIMENTAL FIRST FLASH ERASE DATA")
-    wizard.go_forward()
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
     wizard.start_flash()
     assert installer.bench_flash_calls == 1

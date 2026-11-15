@@ -174,13 +174,11 @@ host-key-pinned SSH verification. Normal users do not need to enter Linux comman
 The normal `HardwareReleasePolicy` remains closed. A separate JC11S-only bench
 authorization exists for the tester's first controlled write. It does not set or
 reuse any normal release-policy field. The mapping is retained as a documented
-bench-policy evidence record and is not redundantly typed into the UI. The UI
-requires all of the following exact, immediate confirmations before enabling the bench button:
-
-- `JC11S OFW FAILSAFE RECOVERY TESTED`, recording the tester's reported repeated
-  OFW restoration and observed failsafe boot when `/data` is invalid;
-- `EXPERIMENTAL FIRST FLASH ERASE DATA`, plus the existing `ERASE DATA` phrase and
-  complete-data-loss check box.
+bench-policy evidence record and is not redundantly typed into the UI. There is
+no separate destructive-review page and no confirmation phrase. After image
+creation the wizard goes directly to the guarded flash page, where the tester
+must select the experimental JC11S mode, check the single complete-data-loss
+confirmation, and accept the final `/data` overwrite dialog.
 
 This is bench evidence, not a general hardware revision guarantee. Immediately
 before writing, the transport reopens the selected WinUSB device, validates the
@@ -204,9 +202,9 @@ disconnect, partial transfer or bootloader failure stops the sequence; reboot is
 sent only after every part reports successful flash.
 
 Implementation and authorization are separate. `HardwareReleasePolicy` currently
-keeps all real writes disabled. The GUI cannot turn evidence gates into true by
-checking a box. The immediate `ERASE DATA` confirmation is necessary but cannot
-substitute for engineering validation. Multipart plans additionally require a
+keeps the normal release path closed. Its evidence gates cannot be changed by a
+checkbox. The separately labeled bench checkbox authorizes only the documented
+JC11S experiment and cannot substitute for general engineering validation. Multipart plans additionally require a
 target-specific proof that repeated sparse `flash:data` calls do not erase earlier
 parts.
 

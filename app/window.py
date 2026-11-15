@@ -161,9 +161,8 @@ class WorkflowPage(QWidget):
     SSH_KEY = 1
     PREPARE = 2
     INSTALLATION = PREPARE
-    REVIEW = 3
-    FLASH = 4
-    SSH_TEST = 5
+    FLASH = 3
+    SSH_TEST = 4
 
     def __init__(
         self,
@@ -211,7 +210,6 @@ class WorkflowPage(QWidget):
         self.page_stack.addWidget(self._build_connection_page())
         self.page_stack.addWidget(self._build_key_page())
         self.page_stack.addWidget(self._build_prepare_page())
-        self.page_stack.addWidget(self._build_review_page())
         self.page_stack.addWidget(self._build_flash_page())
         self.page_stack.addWidget(self._build_ssh_page())
         body.addWidget(self.page_stack, 1)
@@ -348,52 +346,24 @@ class WorkflowPage(QWidget):
         layout.addStretch()
         return page
 
-    def _build_review_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.addWidget(label("Review destructive installation", "title"))
-        self.plan_summary = label("")
-        layout.addWidget(self.plan_summary)
-        warning = label(
-            "This operation replaces the complete /data filesystem. Device settings, Wi-Fi configuration, "
-            "local library metadata and every other file on that partition will be lost."
-        )
-        warning.setStyleSheet("background:#3a1717; color:#ffb4b4; border-radius:9px; padding:14px;")
-        layout.addWidget(warning)
-        self.recovery_confirmation = QCheckBox(
-            "I understand that an OFW file alone is not a tested recovery path and recovery must be demonstrated."
-        )
-        self.data_loss_confirmation = QCheckBox("I understand that the complete /data partition will be overwritten.")
-        self.erase_phrase = QLineEdit()
-        self.erase_phrase.setPlaceholderText("Type ERASE DATA")
-        self.bench_mode = QCheckBox("Enable EXPERIMENTAL JC11S first-flash bench mode for this device")
-        self.recovery_phrase = QLineEdit()
-        self.recovery_phrase.setPlaceholderText("Type: JC11S OFW FAILSAFE RECOVERY TESTED")
-        self.experiment_phrase = QLineEdit()
-        self.experiment_phrase.setPlaceholderText("Type: EXPERIMENTAL FIRST FLASH ERASE DATA")
-        for widget in (self.recovery_confirmation, self.data_loss_confirmation):
-            widget.stateChanged.connect(self._update_navigation)
-            layout.addWidget(widget)
-        self.erase_phrase.textChanged.connect(self._update_navigation)
-        layout.addWidget(self.erase_phrase)
-        self.bench_mode.stateChanged.connect(self._update_navigation)
-        layout.addWidget(self.bench_mode)
-        bench_warning = label(
-            "Bench only: the policy records the observed JC11S data → /dev/mmcblk0p11 → /data mapping. "
-            "Confirm below that this tester has recovered this device through OFW failsafe."
-        )
-        bench_warning.setStyleSheet("background:#3a1717; color:#ffb4b4; border-radius:9px; padding:14px;")
-        layout.addWidget(bench_warning)
-        for field in (self.recovery_phrase, self.experiment_phrase):
-            field.textChanged.connect(self._update_navigation)
-            layout.addWidget(field)
-        layout.addStretch()
-        return page
-
     def _build_flash_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.addWidget(label("Hardware flash", "title"))
+        self.plan_summary = label("")
+        layout.addWidget(self.plan_summary)
+        warning = label(
+            "Alle Einstellungen und Daten auf /data werden gelöscht. "
+            "Die OFW-Partitionen sind nicht Ziel dieses Flashvorgangs."
+        )
+        warning.setStyleSheet("background:#3a1717; color:#ffb4b4; border-radius:9px; padding:14px;")
+        layout.addWidget(warning)
+        self.data_loss_confirmation = QCheckBox("Ich verstehe, dass meine Daten gelöscht werden")
+        self.data_loss_confirmation.stateChanged.connect(self._refresh_flash_gate)
+        layout.addWidget(self.data_loss_confirmation)
+        self.bench_mode = QCheckBox("Experimentellen JC11S-Erstflash für dieses Gerät freigeben")
+        self.bench_mode.stateChanged.connect(self._refresh_flash_gate)
+        layout.addWidget(self.bench_mode)
         self.blocker_text = label("")
         self.blocker_text.setStyleSheet("background:#2b2114; color:#ffd18a; border-radius:9px; padding:14px;")
         layout.addWidget(self.blocker_text)
@@ -476,9 +446,8 @@ class WorkflowPage(QWidget):
             "1  USB connection & diagnostics",
             "2  Mandatory SSH key",
             "3  Device-specific image build",
-            "4  Data-loss and recovery review",
-            "5  Guarded hardware flash",
-            "6  Authenticated SSH test",
+            "4  Guarded hardware flash",
+            "5  Authenticated SSH test",
         ):
             self.steps.addItem(step)
         self.connection_title.setText(f"Connect {self.profile.display_name}")
@@ -503,12 +472,8 @@ class WorkflowPage(QWidget):
         self.build_progress.setValue(0)
         self.build_status.setText("Image has not been built.")
         self.plan_summary.clear()
-        self.recovery_confirmation.setChecked(False)
         self.data_loss_confirmation.setChecked(False)
-        self.erase_phrase.clear()
         self.bench_mode.setChecked(False)
-        self.recovery_phrase.clear()
-        self.experiment_phrase.clear()
         self.flash_progress.setValue(0)
         self.flash_activity.setVisible(False)
         self.critical_write_warning.setVisible(False)
@@ -792,20 +757,10 @@ class WorkflowPage(QWidget):
         self._update_navigation()
 
     def _review_confirmed(self) -> bool:
-        base = (
-            self.recovery_confirmation.isChecked()
-            and self.data_loss_confirmation.isChecked()
-            and self.erase_phrase.text().strip() == "ERASE DATA"
-        )
-        return base and (not self.bench_mode.isChecked() or self._bench_confirmed())
+        return self.data_loss_confirmation.isChecked()
 
     def _bench_confirmed(self) -> bool:
-        return (
-            self.bench_mode.isChecked()
-            and self.recovery_phrase.text().strip() == "JC11S OFW FAILSAFE RECOVERY TESTED"
-            and self.experiment_phrase.text().strip() == "EXPERIMENTAL FIRST FLASH ERASE DATA"
-            and self.data_loss_confirmation.isChecked()
-        )
+        return self.bench_mode.isChecked() and self.data_loss_confirmation.isChecked()
 
     def _bench_log_path(self) -> Path:
         app_data = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation))
@@ -858,8 +813,6 @@ class WorkflowPage(QWidget):
         self._update_navigation()
         identifier = self.candidate_selector.currentData() if self.candidate_selector.isVisible() else None
         if self.bench_mode.isChecked():
-            recovery = self.recovery_phrase.text()
-            experiment = self.experiment_phrase.text()
             self._bench_flash_active = True
 
             def task(progress):
@@ -868,8 +821,7 @@ class WorkflowPage(QWidget):
 
                 return self.installer_service.flash_bench(
                     self.artifacts,
-                    recovery,
-                    experiment,
+                    True,
                     True,
                     identifier,
                     report,
@@ -1048,8 +1000,6 @@ class WorkflowPage(QWidget):
         elif page == self.SSH_KEY and self.key_pair is not None:
             self.show_page(self.PREPARE)
         elif page == self.PREPARE and self.artifacts is not None:
-            self.show_page(self.REVIEW)
-        elif page == self.REVIEW and self._review_confirmed():
             self.show_page(self.FLASH)
         elif page == self.FLASH and self._flash_succeeded:
             self.show_page(self.SSH_TEST)
@@ -1076,9 +1026,6 @@ class WorkflowPage(QWidget):
         elif page == self.PREPARE:
             self.continue_button.setText("Review installation")
             self.continue_button.setEnabled(self.artifacts is not None)
-        elif page == self.REVIEW:
-            self.continue_button.setText("Continue to guarded flash")
-            self.continue_button.setEnabled(self._review_confirmed())
         elif page == self.FLASH:
             self._refresh_flash_gate()
             self.continue_button.setText("Continue to SSH test")
