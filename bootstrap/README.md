@@ -9,7 +9,7 @@ SSH is **mandatory**, not an optional mod. The first installation uses the devic
 
 The USB bootstrap prepares a device-specific data image with a **user-specific public key**. Private keys remain on the computer. Only after boot and a successful SSH login may the desktop app enable mod management.
 
-**No flashing code is included yet.** A future implementation must validate device identity, firmware, image integrity, backup/recovery and user consent before writing `/data`.
+**Hardware flashing remains disabled.** An independent JC11S offline image builder, ALSA SSH hook and memory-only flash rehearsal are now available; see [`docs/JC11S_OFFLINE_SSH_POC.md`](../docs/JC11S_OFFLINE_SSH_POC.md). Fresh hardware boot/SSH remains unverified. A future implementation must validate device identity, firmware, image integrity, backup/recovery and user consent before writing `/data`.
 
 ## Documentation
 

@@ -190,6 +190,17 @@ class WindowsWinUsbFastbootTransport:
         finally:
             connection.close()
 
+    def collect_partition_evidence(self, identifier: str | None = None):
+        """Read-only PoC probes; no partition mapping or flash authorization inferred."""
+        from core.jc11s_flash import probe
+
+        interface = self._single_interface(identifier)
+        connection, session, _, _ = self._open_session(interface)
+        try:
+            return probe(session)
+        finally:
+            connection.close()
+
     def install(self, package) -> None:
         raise WriteBlockedError("JC11S flashing is not implemented or enabled.")
 

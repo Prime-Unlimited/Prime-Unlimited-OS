@@ -189,3 +189,16 @@ def test_unknown_identifiers_with_fastboot_descriptor_are_transport_verified_onl
     assert len(devices) == 1
     assert devices[0].transport_verified
     assert devices[0].verified_model is None
+
+
+def test_partition_evidence_uses_native_session_and_closes():
+    # Discovery and the subsequent read-only probe open separate handles.
+    discovery = FakeConnection([b"OKAY0.4"])
+    diagnostics = FakeConnection([b"OKAY0.4"] + [b"FAILunsupported"] * 12)
+    transport = WindowsWinUsbFastbootTransport(FakeApi([INTERFACE], [discovery, diagnostics]))
+    evidence = transport.collect_partition_evidence()
+    assert evidence.values == {"version": "0.4"}
+    assert "partition-size:data" in evidence.unsupported
+    assert "partition-size:userdata" in evidence.unsupported
+    assert all(data.startswith(b"getvar:") for _, data in diagnostics.writes)
+    assert discovery.closed and diagnostics.closed
