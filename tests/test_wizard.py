@@ -287,6 +287,9 @@ class FakeInstaller:
         self.ssh_error = ssh_error
         self.flash_error = flash_error
         self.ssh = self
+        self.ssh_trusted = False
+        self.ssh_pinned = False
+        self.ssh_verify_args = None
 
     def prepare(self, public_key, identifier=None):
         return self.artifacts
@@ -320,10 +323,26 @@ class FakeInstaller:
     def enroll_host_key(self, *args):
         if self.ssh_error:
             raise RuntimeError(self.ssh_error)
+        self.ssh_trusted = True
+        self.ssh_pinned = True
+
+    def inspect_host_key(self, *args):
+        if self.ssh_error:
+            raise RuntimeError(self.ssh_error)
+        from core.ssh_service import HostIdentity
+
+        return HostIdentity("ssh-ed25519", "SHA256:device-key")
+
+    def is_host_key_trusted(self, *args):
+        return self.ssh_trusted
+
+    def has_pinned_host(self, *args):
+        return self.ssh_pinned
 
     def verify_ssh(self, *args):
         if self.ssh_error:
             raise RuntimeError(self.ssh_error)
+        self.ssh_verify_args = args
         return "PRIME_UNLIMITED_SSH_OK"
 
 
@@ -352,7 +371,7 @@ def configured_installer_window(tmp_path, policy=None, ssh_error=None, flash_err
     wizard = window.workflow
     wizard.handle_diagnostic_report(report(DetectionState.MATCH))
     wizard.go_forward()
-    wizard._accept_key_pair(generate_keypair(tmp_path / "keys", "test passphrase"))
+    wizard._accept_key_pair(generate_keypair(tmp_path / "keys", "test passphrase"), "test passphrase")
     wizard.go_forward()
     return app, window, wizard, installer
 
@@ -395,9 +414,69 @@ def test_ssh_connection_failure_is_shown(tmp_path):
     wizard._flash_succeeded = True
     wizard.show_page(WorkflowPage.SSH_TEST)
     wizard.ssh_host.setText("192.0.2.1")
-    wizard.ssh_fingerprint.setText("SHA256:trusted")
     wizard.test_ssh()
     assert "connection refused" in wizard.ssh_status.text()
+    window.close()
+    app.processEvents()
+
+
+def test_ssh_page_reuses_key_and_passphrase_and_prompts_for_discovered_host_key(tmp_path, monkeypatch):
+    policy = HardwareReleasePolicy(True, True, True, True)
+    app, window, wizard, installer = configured_installer_window(tmp_path, policy)
+    wizard._flash_succeeded = True
+    wizard.show_page(WorkflowPage.SSH_TEST)
+    wizard.ssh_host.setText("192.0.2.8")
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes
+    )
+
+    wizard.test_ssh()
+
+    assert wizard.ssh_key_path.text() == str(wizard.key_pair.private_key)
+    assert installer.ssh_trusted
+    assert installer.ssh_verify_args[0] == "192.0.2.8"
+    assert installer.ssh_verify_args[1] == wizard.key_pair.private_key
+    assert installer.ssh_verify_args[2] == "test passphrase"
+    assert "succeeded" in wizard.ssh_status.text().lower()
+    window.close()
+    app.processEvents()
+
+
+def test_ssh_first_contact_rejection_does_not_authenticate(tmp_path, monkeypatch):
+    policy = HardwareReleasePolicy(True, True, True, True)
+    app, window, wizard, installer = configured_installer_window(tmp_path, policy)
+    wizard._flash_succeeded = True
+    wizard.show_page(WorkflowPage.SSH_TEST)
+    wizard.ssh_host.setText("192.0.2.9")
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.No
+    )
+
+    wizard.test_ssh()
+
+    assert not installer.ssh_trusted
+    assert installer.ssh_verify_args is None
+    assert "not trusted" in wizard.ssh_status.text().lower()
+    window.close()
+    app.processEvents()
+
+
+def test_changed_pinned_ssh_host_key_is_blocked_without_reenrollment(tmp_path, monkeypatch):
+    policy = HardwareReleasePolicy(True, True, True, True)
+    app, window, wizard, installer = configured_installer_window(tmp_path, policy)
+    installer.ssh_pinned = True
+    wizard._flash_succeeded = True
+    wizard.show_page(WorkflowPage.SSH_TEST)
+    wizard.ssh_host.setText("192.0.2.10")
+    prompts = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: prompts.append(args))
+
+    wizard.test_ssh()
+
+    assert not prompts
+    assert not installer.ssh_trusted
+    assert installer.ssh_verify_args is None
+    assert "changed" in wizard.ssh_status.text().lower()
     window.close()
     app.processEvents()
 

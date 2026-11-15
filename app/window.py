@@ -178,6 +178,8 @@ class WorkflowPage(QWidget):
         self.profile_id: ProfileId | None = None
         self.diagnostic_report: DiagnosticReport | None = None
         self.key_pair: KeyPair | None = None
+        self._key_passphrase = ""
+        self._pending_ssh_host = ""
         self.artifacts: InstallerArtifacts | None = None
         self._flash_succeeded = False
         self._bench_flash_active = False
@@ -404,20 +406,19 @@ class WorkflowPage(QWidget):
         layout = QVBoxLayout(page)
         layout.addWidget(label("Verify installed SSH access", "title"))
         self.ssh_host = QLineEdit()
-        self.ssh_host.setPlaceholderText("Device IP address or hostname")
-        self.ssh_passphrase = QLineEdit()
-        self.ssh_passphrase.setEchoMode(QLineEdit.EchoMode.Password)
-        self.ssh_passphrase.setPlaceholderText("Private-key passphrase")
-        self.ssh_fingerprint = QLineEdit()
-        self.ssh_fingerprint.setPlaceholderText("Trusted host-key fingerprint (SHA256:…)")
+        self.ssh_host.setPlaceholderText("Device IP address")
+        self.ssh_host.setAccessibleName("Device IP address")
+        self.ssh_key_path = QLineEdit()
+        self.ssh_key_path.setReadOnly(True)
+        self.ssh_key_path.setPlaceholderText("Validated private key from step 2")
+        self.ssh_key_path.setAccessibleName("Selected SSH private key")
         self.ssh_test_button = QPushButton("Test authenticated SSH")
         self.ssh_test_button.clicked.connect(self.test_ssh)
         self.first_boot_failed_button = QPushButton("Record failed first boot / SSH activation")
         self.first_boot_failed_button.clicked.connect(self.record_failed_first_boot)
         self.ssh_status = label("SSH has not been tested.")
         layout.addWidget(self.ssh_host)
-        layout.addWidget(self.ssh_passphrase)
-        layout.addWidget(self.ssh_fingerprint)
+        layout.addWidget(self.ssh_key_path)
         layout.addWidget(self.ssh_test_button, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self.first_boot_failed_button, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self.ssh_status)
@@ -429,6 +430,8 @@ class WorkflowPage(QWidget):
         self.profile = PROFILES[profile_id]
         self.diagnostic_report = None
         self.key_pair = None
+        self._key_passphrase = ""
+        self._pending_ssh_host = ""
         if self.artifacts is not None:
             self.artifacts.cleanup()
         self.artifacts = None
@@ -481,6 +484,8 @@ class WorkflowPage(QWidget):
         self.flash_phase_log.clear()
         self.flash_status.setText("No write has started.")
         self.ssh_status.setText("SSH has not been tested.")
+        self.ssh_host.clear()
+        self.ssh_key_path.clear()
         self.show_page(self.CONNECTION)
 
     def _refresh_flash_gate(self) -> None:
@@ -686,7 +691,7 @@ class WorkflowPage(QWidget):
         except (KeyValidationError, FileExistsError, OSError) as exc:
             self._key_error(str(exc))
             return
-        self._accept_key_pair(pair)
+        self._accept_key_pair(pair, passphrase)
 
     def validate_imported_key(self) -> None:
         private_path = Path(self.private_key_path.text())
@@ -696,12 +701,14 @@ class WorkflowPage(QWidget):
         except KeyValidationError as exc:
             self._key_error(str(exc))
             return
-        self._accept_key_pair(KeyPair(private_path, public_path))
+        self._accept_key_pair(KeyPair(private_path, public_path), self.passphrase.text())
 
-    def _accept_key_pair(self, pair: KeyPair) -> None:
+    def _accept_key_pair(self, pair: KeyPair, passphrase: str = "") -> None:
         self.key_pair = pair
+        self._key_passphrase = passphrase
         self.private_key_path.setText(str(pair.private_key))
         self.public_key_path.setText(str(pair.public_key))
+        self.ssh_key_path.setText(str(pair.private_key))
         self.passphrase.clear()
         self.confirm_passphrase.clear()
         self.key_status.setText("Ed25519 key pair validated. The private key remains on this computer.")
@@ -929,23 +936,74 @@ class WorkflowPage(QWidget):
         if not self._flash_succeeded or self.installer_service is None or self.key_pair is None:
             return
         host = self.ssh_host.text().strip()
-        fingerprint = self.ssh_fingerprint.text().strip()
-        if not host or not fingerprint.startswith("SHA256:"):
-            self.ssh_status.setText("Enter the device address and a trusted SHA256 host-key fingerprint.")
+        if not host:
+            self.ssh_status.setText("Enter the device IP address.")
             return
-        app_data = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation))
-        known_hosts = app_data / "known_hosts"
-
-        def verify_connection():
-            self.installer_service.ssh.enroll_host_key(host, 22, fingerprint, known_hosts)
-            return self.installer_service.verify_ssh(
-                host, self.key_pair.private_key, self.ssh_passphrase.text(), known_hosts
-            )
-
+        self._pending_ssh_host = host
         self.ssh_test_button.setEnabled(False)
         self._set_flash_phase("ssh_verification", "SSH-Verifikation läuft")
-        self.ssh_status.setText("Enrolling the trusted host key and testing authenticated SSH…")
-        worker = TaskWorker(verify_connection)
+        self.ssh_status.setText("Reading the device SSH host key…")
+        worker = TaskWorker(lambda: self.installer_service.ssh.inspect_host_key(host, 22))
+        worker.signals.finished.connect(self._ssh_identity_ready)
+        worker.signals.failed.connect(self._ssh_failed)
+        self._worker = worker
+        self.thread_pool.start(worker)
+
+    def _known_hosts_path(self) -> Path:
+        app_data = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation))
+        return app_data / "known_hosts"
+
+    @Slot(object)
+    def _ssh_identity_ready(self, identity) -> None:
+        host = self._pending_ssh_host
+        known_hosts = self._known_hosts_path()
+        if self.installer_service.ssh.is_host_key_trusted(host, 22, identity, known_hosts):
+            self._start_authenticated_ssh_test(host, known_hosts)
+            return
+        if self.installer_service.ssh.has_pinned_host(host, 22, known_hosts):
+            self.ssh_test_button.setEnabled(True)
+            self.ssh_status.setText(
+                "SSH host key changed. Connection blocked; the stored trusted key was not replaced."
+            )
+            self._set_flash_phase("ssh_failed", "SSH-Hostschlüssel stimmt nicht mit gespeichertem Schlüssel überein")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Trust this device's SSH key?",
+            f"First SSH connection to {host}.\n\n"
+            f"Host-key type: {identity.algorithm}\n"
+            f"Fingerprint: {identity.fingerprint}\n\n"
+            "Confirm only if this is the Prime 4+ you just installed. The key will be saved and "
+            "strictly checked on future connections.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.ssh_test_button.setEnabled(True)
+            self.ssh_status.setText("SSH host key was not trusted. No connection was attempted.")
+            return
+        expected = identity.fingerprint
+
+        def enroll_and_verify():
+            self.installer_service.ssh.enroll_host_key(host, 22, expected, known_hosts)
+            return self.installer_service.verify_ssh(
+                host, self.key_pair.private_key, self._key_passphrase, known_hosts
+            )
+
+        self.ssh_status.setText("Saving the confirmed host key and testing authenticated SSH…")
+        worker = TaskWorker(enroll_and_verify)
+        worker.signals.finished.connect(self._ssh_complete)
+        worker.signals.failed.connect(self._ssh_failed)
+        self._worker = worker
+        self.thread_pool.start(worker)
+
+    def _start_authenticated_ssh_test(self, host: str, known_hosts: Path) -> None:
+        self.ssh_status.setText("Known host key matched. Testing authenticated SSH…")
+        worker = TaskWorker(
+            lambda: self.installer_service.verify_ssh(
+                host, self.key_pair.private_key, self._key_passphrase, known_hosts
+            )
+        )
         worker.signals.finished.connect(self._ssh_complete)
         worker.signals.failed.connect(self._ssh_failed)
         self._worker = worker
