@@ -1018,8 +1018,24 @@ class WorkflowPage(QWidget):
         self._refresh_flash_gate()
         self._update_navigation()
 
+    def _check_installation_key(self) -> bool:
+        """Reject changed client keys; use the passphrase validated before image creation."""
+        if self.key_pair is None or self._validated_public_key is None:
+            self.ssh_status.setText("No validated installation key is available.")
+            return False
+        try:
+            validate_keypair(
+                self.key_pair.private_key, self.key_pair.public_key, self._key_passphrase
+            )
+            if self.key_pair.public_key.read_bytes() != self._validated_public_key:
+                raise KeyValidationError("The installation public key has changed.")
+        except (KeyValidationError, OSError) as exc:
+            self.ssh_status.setText("Installation key verification failed: " + redact(str(exc)))
+            return False
+        return True
+
     def test_ssh(self) -> None:
-        if not self._flash_succeeded or self.installer_service is None or self.key_pair is None:
+        if not self._flash_succeeded or self.installer_service is None or not self._check_installation_key():
             return
         host = self.ssh_host.text().strip()
         if not host:
@@ -1097,7 +1113,7 @@ class WorkflowPage(QWidget):
 
     @Slot(object)
     def _ssh_complete(self, marker) -> None:
-        self.ssh_test_button.setEnabled(True)
+        self.ssh_test_button.setEnabled(False)
         self._ssh_verified = True
         self.ssh_status.setText("SSH connection successful")
         self.first_boot_failed_button.setVisible(False)
