@@ -568,6 +568,14 @@ class WorkflowPage(QWidget):
     @Slot(object)
     def handle_diagnostic_report(self, report: DiagnosticReport) -> None:
         self.diagnostic_report = report
+        if (
+            self.profile_id == ProfileId.JC11S
+            and report.result.may_continue
+            and self.installer_service is None
+        ):
+            fastboot = getattr(self.diagnostic_service, "fastboot", None)
+            if fastboot is not None and hasattr(fastboot, "collect_partition_evidence"):
+                self.installer_service = Jc11sInstallerService(fastboot)
         self.run_diagnostics_button.setEnabled(True)
         self.diagnostic_log.setPlainText("\n".join(redact(line) for line in report.log_lines))
         self.diagnostic_status.setText(report.result.message)
