@@ -41,17 +41,17 @@ class UsbDiagnosticService:
             name, transport = "imbupd", self.imbupd
         else:
             raise ValueError("Select a supported device first.")
-        for name, transport in ((name, transport),):
+        for probe_name, probe_transport in ((name, transport),):
             try:
-                devices = transport.probe()
+                devices = probe_transport.probe()
             except TransportError as exc:
-                log.append(f"{name}: unavailable ({exc})")
+                log.append(f"{probe_name}: unavailable ({exc})")
                 continue
-            evidence.append(ProbeEvidence(name, len(devices)))
-            if name == "fastboot" and selected == ProfileId.JC11S and len(devices) == 1:
+            evidence.append(ProbeEvidence(probe_name, len(devices)))
+            if probe_name == "fastboot" and selected == ProfileId.JC11S and len(devices) == 1:
                 # A USB VID/PID or a Fastboot interface alone never authorizes writing.
                 # Require the device's actual bootloader product identity.
-                getvar = getattr(transport, "getvar", None)
+                getvar = getattr(probe_transport, "getvar", None)
                 if getvar is not None:
                     try:
                         product = getvar("product", devices[0].identifier).strip()
