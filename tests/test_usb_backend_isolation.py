@@ -86,3 +86,40 @@ def test_gui_workflows_created_only_after_selection():
     assert window.jc11s_workflow is None
     window.close()
     app.processEvents()
+
+
+def test_stale_jp24_result_cannot_authorize_current_selection():
+    from PySide6.QtWidgets import QApplication
+    from app.window import WorkflowPage
+    from core.device_detection import DetectionResult, DetectionState
+    from core.diagnostic_service import DiagnosticReport
+    app = QApplication.instance() or QApplication([])
+    wizard = WorkflowPage(diagnostic_service=Mock())
+    wizard.set_profile(ProfileId.JP24)
+    wizard._diagnostic_epoch = 5
+    wizard._diagnostic_busy = True
+    stale = DiagnosticReport(DetectionResult(DetectionState.MATCH, "old result", True), ())
+    wizard._accept_report(4, stale)
+    assert wizard.diagnostic_report is None
+    assert not wizard._diagnostics_allow_key_setup()
+    wizard.close()
+    app.processEvents()
+
+
+def test_switch_back_does_not_reuse_previous_jp24_result():
+    from PySide6.QtWidgets import QApplication
+    from app.window import WorkflowPage
+    from core.device_detection import DetectionResult, DetectionState
+    from core.diagnostic_service import DiagnosticReport
+    app = QApplication.instance() or QApplication([])
+    wizard = WorkflowPage(diagnostic_service=Mock())
+    wizard.set_profile(ProfileId.JP24)
+    wizard.handle_diagnostic_report(
+        DiagnosticReport(DetectionResult(DetectionState.MATCH, "verified", True), ())
+    )
+    assert wizard._diagnostics_allow_key_setup()
+    wizard.set_profile(ProfileId.JP24)
+    assert wizard.diagnostic_report is None
+    assert not wizard._diagnostics_allow_key_setup()
+    wizard.close()
+    app.processEvents()
