@@ -323,8 +323,10 @@ class WorkflowPage(QWidget):
 
         actions = QHBoxLayout()
         generate = QPushButton("Generate new key")
+        self.generate_key_button = generate
         generate.clicked.connect(self.generate_key)
         validate = QPushButton("Validate imported pair")
+        self.validate_key_button = validate
         validate.clicked.connect(self.validate_imported_key)
         actions.addWidget(generate)
         actions.addWidget(validate)
@@ -439,6 +441,11 @@ class WorkflowPage(QWidget):
         self.diagnostic_report = None
         self.key_pair = None
         self._key_passphrase = ""
+        self._validated_public_key = None
+        self.generate_key_button.setEnabled(True)
+        self.validate_key_button.setEnabled(True)
+        self.private_key_path.setReadOnly(False)
+        self.public_key_path.setReadOnly(False)
         self._pending_ssh_host = ""
         self._ssh_verified = False
         if self.artifacts is not None:
@@ -488,6 +495,8 @@ class WorkflowPage(QWidget):
         self.data_loss_confirmation.setChecked(False)
         self.bench_mode.setChecked(False)
         self.flash_progress.setValue(0)
+        self.flash_button.setVisible(True)
+        self.prepare_button.setEnabled(True)
         self.flash_activity.setVisible(False)
         self.critical_write_warning.setVisible(False)
         self.flash_phase_status.setText("State: waiting to start.")
@@ -525,6 +534,7 @@ class WorkflowPage(QWidget):
             and self._review_confirmed()
             and not self._critical_write_active
             and not self._write_status_unknown
+            and not self._flash_succeeded
         )
 
     def show_page(self, page: int) -> None:
@@ -716,6 +726,8 @@ class WorkflowPage(QWidget):
             self.public_key_path.setText(path)
 
     def generate_key(self) -> None:
+        if self.key_pair is not None:
+            return
         passphrase = self.passphrase.text()
         if passphrase != self.confirm_passphrase.text():
             self._key_error("The passphrase confirmation does not match.")
@@ -753,6 +765,8 @@ class WorkflowPage(QWidget):
         self._accept_key_pair(pair, passphrase)
 
     def validate_imported_key(self) -> None:
+        if self.key_pair is not None:
+            return
         private_path = Path(self.private_key_path.text())
         public_path = Path(self.public_key_path.text())
         try:
@@ -765,6 +779,11 @@ class WorkflowPage(QWidget):
     def _accept_key_pair(self, pair: KeyPair, passphrase: str = "") -> None:
         self.key_pair = pair
         self._key_passphrase = passphrase
+        self._validated_public_key = pair.public_key.read_bytes()
+        self.generate_key_button.setEnabled(False)
+        self.validate_key_button.setEnabled(False)
+        self.private_key_path.setReadOnly(True)
+        self.public_key_path.setReadOnly(True)
         self.private_key_path.setText(str(pair.private_key))
         self.public_key_path.setText(str(pair.public_key))
         self.passphrase.clear()
@@ -780,6 +799,11 @@ class WorkflowPage(QWidget):
         self._update_navigation()
 
     def prepare_image(self) -> None:
+        if self.artifacts is not None or not self.prepare_button.isEnabled():
+            return
+        if self.key_pair is not None and self.key_pair.public_key.read_bytes() != self._validated_public_key:
+            self.build_status.setText("Validated public key changed. Image build blocked.")
+            return
         if self.installer_service is None or self.key_pair is None:
             self.build_status.setText("JC11S installer service and a validated SSH key are required.")
             return
@@ -800,7 +824,7 @@ class WorkflowPage(QWidget):
         self.artifacts = artifacts
         self.build_progress.setRange(0, 100)
         self.build_progress.setValue(100)
-        self.prepare_button.setEnabled(True)
+        self.prepare_button.setEnabled(False)
         plan = artifacts.plan
         self.build_status.setText("Exact-size ext4 image and sparse transfer set verified.")
         self.plan_summary.setText(
@@ -844,6 +868,8 @@ class WorkflowPage(QWidget):
             self.flash_activity.setRange(0, 0)
 
     def start_flash(self) -> None:
+        if self._flash_succeeded or self._critical_write_active or self._write_status_unknown:
+            return
         if self.installer_service is None or self.artifacts is None or not self._review_confirmed():
             return
         self._refresh_flash_gate()
@@ -871,9 +897,9 @@ class WorkflowPage(QWidget):
         self.flash_progress.setRange(0, 100)
         self.flash_progress.setValue(0)
         self.flash_phase_log.clear()
-        self.critical_write_warning.setText("USB NICHT TRENNEN – GERÄT NICHT AUSSCHALTEN")
+        self.critical_write_warning.setText("DO NOT DISCONNECT USB – DO NOT POWER OFF THE DEVICE")
         self.critical_write_warning.setVisible(True)
-        self._set_flash_phase("verification", "Gerät und Image werden geprüft")
+        self._set_flash_phase("verification", "Verifying device and image")
         self.flash_status.setText("Revalidating the connected device and image before guarded flash…")
         self._update_navigation()
         identifier = self.candidate_selector.currentData() if self.candidate_selector.isVisible() else None
@@ -948,11 +974,13 @@ class WorkflowPage(QWidget):
     def _flash_complete(self, message) -> None:
         self._critical_write_active = False
         self._flash_succeeded = True
+        self.flash_button.setEnabled(False)
+        self.flash_button.setVisible(False)
         self.flash_progress.setRange(0, 100)
         self.flash_progress.setValue(100)
         self.flash_activity.setVisible(False)
         self.critical_write_warning.setVisible(False)
-        self._set_flash_phase("reboot_requested", "Neustart angefordert; SSH-Verifikation steht noch aus")
+        self._set_flash_phase("reboot_requested", "Reboot requested; SSH verification pending")
         self.flash_status.setText(
             "Flash confirmed and reboot requested. Installation awaits SSH verification. " + redact(str(message))
         )
@@ -976,16 +1004,16 @@ class WorkflowPage(QWidget):
         self.flash_activity.setVisible(False)
         if failed_during_commit:
             self._write_status_unknown = True
-            warning = "Schreibstatus unbekannt – Gerät nicht automatisch neu starten oder erneut flashen."
+            warning = "Write status unknown – do not reboot or flash again automatically."
             self.critical_write_warning.setText(
-                "USB NICHT TRENNEN – GERÄT NICHT AUSSCHALTEN\n" + warning
+                "DO NOT DISCONNECT USB – DO NOT POWER OFF THE DEVICE\n" + warning
             )
             self.critical_write_warning.setVisible(True)
             self._set_flash_phase("unknown", warning)
             self.flash_status.setText(warning + " " + redact(message))
         else:
             self.critical_write_warning.setVisible(False)
-            self._set_flash_phase("failed", "Flash vor bestätigtem Abschluss gestoppt")
+            self._set_flash_phase("failed", "Flash stopped before confirmed completion")
             self.flash_status.setText("Flash stopped; no reboot was sent: " + redact(message))
         self._refresh_flash_gate()
         self._update_navigation()
@@ -999,7 +1027,7 @@ class WorkflowPage(QWidget):
             return
         self._pending_ssh_host = host
         self.ssh_test_button.setEnabled(False)
-        self._set_flash_phase("ssh_verification", "SSH-Verifikation läuft")
+        self._set_flash_phase("ssh_verification", "SSH verification in progress")
         self.ssh_status.setText("Reading the device SSH host key…")
         worker = TaskWorker(lambda: self.installer_service.ssh.inspect_host_key(host, 22))
         worker.signals.finished.connect(self._ssh_identity_ready)
@@ -1018,27 +1046,27 @@ class WorkflowPage(QWidget):
         if self.installer_service.ssh.is_host_key_trusted(host, 22, identity, known_hosts):
             self._start_authenticated_ssh_test(host, known_hosts)
             return
-        if self.installer_service.ssh.has_pinned_host(host, 22, known_hosts):
-            self.ssh_test_button.setEnabled(True)
-            self.ssh_status.setText(
-                "SSH host key changed. Connection blocked; the stored trusted key was not replaced."
-            )
-            self._set_flash_phase("ssh_failed", "SSH-Hostschlüssel stimmt nicht mit gespeichertem Schlüssel überein")
-            return
-        answer = QMessageBox.question(
+        changed = self.installer_service.ssh.has_pinned_host(host, 22, known_hosts)
+        warning = (
+            "WARNING: The SSH host key has changed. This can happen after reflashing, "
+            "but may also indicate a different device or a security attack. "
+            "Verify the device and fingerprint independently before proceeding."
+            if changed else
+            "First SSH connection. Verify that this is your intended Prime 4+ device."
+        )
+        answer = QMessageBox.warning(
             self,
-            "Trust this device's SSH key?",
-            f"First SSH connection to {host}.\n\n"
-            f"Host-key type: {identity.algorithm}\n"
-            f"Fingerprint: {identity.fingerprint}\n\n"
-            "Confirm only if this is the Prime 4+ you just installed. The key will be saved and "
-            "strictly checked on future connections.",
+            "SSH host key changed" if changed else "Trust this device's SSH host key?",
+            f"Device: {host}\\nHost key type: {identity.algorithm}\\n"
+            f"New SHA256 fingerprint: {identity.fingerprint}\\n\\n"
+            + warning
+            + "\\n\\nReplace the stored host key for this device and test SSH?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
             self.ssh_test_button.setEnabled(True)
-            self.ssh_status.setText("SSH host key was not trusted. No connection was attempted.")
+            self.ssh_status.setText("SSH host key not approved. No authentication attempted.")
             return
         expected = identity.fingerprint
 
@@ -1071,9 +1099,9 @@ class WorkflowPage(QWidget):
     def _ssh_complete(self, marker) -> None:
         self.ssh_test_button.setEnabled(True)
         self._ssh_verified = True
-        self.ssh_status.setText("SSH-Verbindung erfolgreich")
+        self.ssh_status.setText("SSH connection successful")
         self.first_boot_failed_button.setVisible(False)
-        self._set_flash_phase("complete", "Installation abgeschlossen; SSH-Verifikation erfolgreich")
+        self._set_flash_phase("complete", "Installation complete; SSH verification successful")
         if self._bench_flash_active and hasattr(self.installer_service, "record_bench_result"):
             self.installer_service.record_bench_result(
                 self.artifacts, self._bench_log_path(), "first_boot_ssh_succeeded", str(marker)
@@ -1086,7 +1114,7 @@ class WorkflowPage(QWidget):
         self._ssh_verified = False
         self.first_boot_failed_button.setVisible(True)
         self.ssh_status.setText("SSH verification failed: " + redact(message))
-        self._set_flash_phase("ssh_failed", "SSH-Verifikation fehlgeschlagen; erneuter Test möglich")
+        self._set_flash_phase("ssh_failed", "SSH verification failed; retry available")
         if self._bench_flash_active and hasattr(self.installer_service, "record_bench_result"):
             self.installer_service.record_bench_result(
                 self.artifacts, self._bench_log_path(), "first_boot_or_ssh_failed", message
