@@ -47,11 +47,14 @@ jobs:
       - name: Build verified JC11S hook
         run: |
           sh tools/build-jc11s-hook.sh bootstrap/jc11s/libprime-ssh.so
-          sha256sum bootstrap/jc11s/libprime-ssh.so
+          cd bootstrap/jc11s
+          sha256sum libprime-ssh.so > libprime-ssh.so.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: jc11s-build-input-${{ github.sha }}
-          path: bootstrap/jc11s/libprime-ssh.so
+          path: |
+            bootstrap/jc11s/libprime-ssh.so
+            bootstrap/jc11s/libprime-ssh.so.sha256
           if-no-files-found: error
 
   windows:
