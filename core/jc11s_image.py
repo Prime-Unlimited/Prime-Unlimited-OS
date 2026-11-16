@@ -108,7 +108,7 @@ def build(
         "system/var-lib/alsa/conf.d/99-prime-ssh.conf",
     ):
         content, mode = files[name]
-        files[name] = (content.replace(b"\\r\\n", b"\\n"), mode)
+        files[name] = (content.replace(b"\r\n", b"\n"), mode)
     directories = {"prime-ssh/hostkeys"}
     for name in files:
         directories.update(str(p) for p in Path(name).parents if str(p) != ".")
