@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,10 @@ def test_generate_and_validate_ed25519_pair(tmp_path: Path):
     pair = generate_keypair(tmp_path, "correct horse battery staple")
     public = validate_keypair(pair.private_key, pair.public_key, "correct horse battery staple")
     assert public.startswith("ssh-ed25519 ")
-    assert pair.private_key.stat().st_mode & 0o777 == 0o600
+    # POSIX mode bits do not represent NTFS ACLs on Windows.
+    # Windows key ACL hardening needs its own security-specific test.
+    if os.name != "nt":
+        assert pair.private_key.stat().st_mode & 0o777 == 0o600
     assert b"PRIVATE" not in pair.public_key.read_bytes()
 
 
