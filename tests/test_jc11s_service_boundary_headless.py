@@ -28,7 +28,7 @@ class ServiceBoundaryTests(TestCase):
             instance = SimpleNamespace(fastboot=transport, prepare=Mock())
             self.created.append(instance)
             return instance
-        self.ns = {'ProfileId': ProfileId, 'DetectionState': DetectionState,
+        self.ns = {'ProfileId': ProfileId, 'DetectionState': DetectionState, 'DiagnosticReport': DiagnosticReport,
                    'Jc11sInstallerService': installer, 'redact': lambda x: x,
                    'TaskWorker': lambda fn: SimpleNamespace(signals=SimpleNamespace(finished=Mock(), failed=Mock()))}
         self.on_report = workflow_method('handle_diagnostic_report', self.ns)
