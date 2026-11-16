@@ -8,7 +8,7 @@ from typing import Protocol
 
 from core.jc11s_device_detection import DetectionResult, DetectionState, ProbeEvidence, match_selected_profile
 from core.profiles import ProfileId
-from core.transports import FastbootTransport, ImbupdTransport, TransportError, redacted_identifier
+from core.transports import FastbootTransport, TransportError, redacted_identifier
 from core.usb_discovery import DeviceFamily, DiscoveredUsbDevice, UsbDiscovery, create_usb_discovery
 from core.windows_fastboot import WinUsbAmbiguousDevice, create_windows_fastboot_transport
 
