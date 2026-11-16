@@ -59,7 +59,7 @@ def personalize(
     if not auth_path.startswith("/") or ".." in Path(auth_path).parts:
         raise ValueError("Unsafe authorized keys path in base SSH configuration.")
     # Do not accept an unrecognized service layout or accidentally inject elsewhere.
-    if not auth_path.startswith("/sc5000-custom/"):
+    if not re.fullmatch(r"/[A-Za-z0-9_./-]+", auth_path) or not auth_path.startswith("/sc5000-custom/"):
         raise ValueError("Unsupported SSH authorized keys path in reference image.")
     shutil.copyfile(source, output)
     try:
