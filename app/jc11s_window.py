@@ -28,9 +28,9 @@ from PySide6.QtWidgets import (
 )
 
 from app.logo import PrimeUnlimitedLogo
+from core.diagnostics import redact
 from core.jc11s_device_detection import DetectionState
 from core.jc11s_diagnostic_service import DiagnosticReport, UsbDiagnosticService
-from core.diagnostics import redact
 from core.keys import KeyPair, KeyValidationError, generate_keypair_paths, validate_keypair
 from core.profiles import PROFILES, DeviceProfile, ProfileId
 from core.windows_installer import InstallerArtifacts, Jc11sInstallerService
