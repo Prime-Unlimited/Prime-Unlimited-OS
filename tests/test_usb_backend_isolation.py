@@ -95,6 +95,7 @@ def test_gui_workflows_created_only_after_selection():
 
 def test_stale_jp24_result_cannot_authorize_current_selection():
     from PySide6.QtWidgets import QApplication
+
     from app.window import WorkflowPage
     from core.device_detection import DetectionResult, DetectionState
     from core.diagnostic_service import DiagnosticReport
@@ -114,6 +115,7 @@ def test_stale_jp24_result_cannot_authorize_current_selection():
 
 def test_switch_back_does_not_reuse_previous_jp24_result():
     from PySide6.QtWidgets import QApplication
+
     from app.window import WorkflowPage
     from core.device_detection import DetectionResult, DetectionState
     from core.diagnostic_service import DiagnosticReport
