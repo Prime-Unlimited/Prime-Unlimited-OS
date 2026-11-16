@@ -2,13 +2,13 @@
 
 Status: Root SSH access works fully automatically on real hardware - flash,
 reboot, SSH in, no manual intervention. Confirmed end to end through the GUI
-installer itself (device selection → USB diagnostics → SSH key setup →
-flash → automatic reboot → `ssh -p 2222 root@<device-ip>`). The payload is
-in [`ssh-bootstrap/`](ssh-bootstrap/); the flash step is wired into
-`core/jp24_bootstrap.py` / `core/transports.py`. Not yet wired: an
-authenticated post-flash SSH connection test inside the wizard itself
-(currently a manual step after the GUI finishes) and the mod-manager flow
-in `core/ssh_service.py` / `core/mods.py`.
+installer itself, including the authenticated connection test built into
+the wizard: device selection → USB diagnostics → SSH key setup → flash →
+automatic reboot → host-key inspection/trust → authenticated login test.
+The payload is in [`ssh-bootstrap/`](ssh-bootstrap/); the flash step is
+wired into `core/jp24_bootstrap.py` / `core/transports.py`, and the SSH
+test into `core/ssh_service.py`. Not yet wired: the mod-manager flow
+(`core/mods.py`).
 
 ## Device identity
 
@@ -115,12 +115,10 @@ Survives firmware updates: they only replace the root partition image
 
 ## Not yet done
 
-- No authenticated SSH connection test inside the wizard itself (the GUI
-  flash step succeeds and reboots the device; verifying the SSH login is
-  currently a manual step afterward)
-- No automatic device-IP discovery (mDNS/avahi or router ARP scan)
+- No automatic device-IP discovery (mDNS/avahi or router ARP scan) - the
+  SSH test page requires typing it in manually
 - No uninstall path exposed through the installer UI (manual removal via
   an active SSH session works: delete `/data/prime4-mod/` and the
   `99-prime4-mod.conf` file, then reboot)
-- The mod-manager flow (`core/ssh_service.py`, `core/mods.py`) is not yet
-  connected to this device profile
+- The mod-manager flow (`core/mods.py`) is not yet connected to this
+  device profile - step 5 in the wizard remains locked
