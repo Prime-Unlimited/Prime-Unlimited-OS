@@ -368,15 +368,15 @@ class WorkflowPage(QWidget):
         self.plan_summary = label("")
         layout.addWidget(self.plan_summary)
         warning = label(
-            "Alle Einstellungen und Daten auf /data werden gelöscht. "
+            "All settings and data on /data will be erased. "
             "Die OFW-Partitionen sind nicht Ziel dieses Flashvorgangs."
         )
         warning.setStyleSheet("background:#3a1717; color:#ffb4b4; border-radius:9px; padding:14px;")
         layout.addWidget(warning)
-        self.data_loss_confirmation = QCheckBox("Ich verstehe, dass meine Daten gelöscht werden")
+        self.data_loss_confirmation = QCheckBox("I understand that my data will be erased")
         self.data_loss_confirmation.stateChanged.connect(self._refresh_flash_gate)
         layout.addWidget(self.data_loss_confirmation)
-        self.bench_mode = QCheckBox("Experimentellen JC11S-Erstflash für dieses Gerät freigeben")
+        self.bench_mode = QCheckBox("Authorize experimental JC11S first flash for this device")
         self.bench_mode.stateChanged.connect(self._refresh_flash_gate)
         layout.addWidget(self.bench_mode)
         self.blocker_text = label("")
@@ -386,7 +386,7 @@ class WorkflowPage(QWidget):
         self.flash_button.setObjectName("primary")
         self.flash_button.clicked.connect(self.start_flash)
         layout.addWidget(self.flash_button, 0, Qt.AlignmentFlag.AlignLeft)
-        self.critical_write_warning = label("USB NICHT TRENNEN – GERÄT NICHT AUSSCHALTEN")
+        self.critical_write_warning = label("DO NOT DISCONNECT USB – DO NOT POWER OFF THE DEVICE")
         self.critical_write_warning.setStyleSheet(
             "background:#5a1010; color:#ffffff; font-weight:700; border-radius:9px; padding:14px;"
         )
@@ -940,12 +940,12 @@ class WorkflowPage(QWidget):
             count = event[3] if len(event) > 3 else None
             suffix = f" ({index}/{count})" if index is not None and count is not None else ""
             labels = {
-                "verification_started": "Gerät und Image werden geprüft",
-                "verification_complete": "Geräte- und Imageprüfung erfolgreich",
-                "flash_command_sent": f"Fastboot flash:data gesendet{suffix}",
-                "flash_wait": f"Warten auf Bootloader-Flashabschluss{suffix}",
-                "flash_okay": f"Fastboot OKAY bestätigt{suffix}",
-                "reboot_requested": "Neustart angefordert",
+                "verification_started": "Verifying device and image",
+                "verification_complete": "Device and image verification successful",
+                "flash_command_sent": f"Fastboot flash:data sent{suffix}",
+                "flash_wait": f"Waiting for bootloader flash completion{suffix}",
+                "flash_okay": f"Fastboot OKAY confirmed{suffix}",
+                "reboot_requested": "Reboot requested",
             }
             self._set_flash_phase(phase, labels[phase])
             if phase == "verification_complete":
@@ -959,7 +959,7 @@ class WorkflowPage(QWidget):
         stage, index, count, sent, total = event
         fraction = 0.0 if total <= 0 else min(sent / total, 1.0)
         percent = round(((index - 1 + fraction) / count) * 100) if count else 0
-        self._set_flash_phase("download", f"Sparse-Download läuft ({index}/{count})")
+        self._set_flash_phase("download", f"Sparse download in progress ({index}/{count})")
         self.flash_progress.setValue(percent)
         if percent == 100:
             self.flash_status.setText(
@@ -1224,7 +1224,7 @@ class Jc11sMainWindow(QMainWindow):
             QMessageBox.critical(
                 self,
                 "Flash in progress",
-                "USB NICHT TRENNEN – GERÄT NICHT AUSSCHALTEN\n\n"
+                "DO NOT DISCONNECT USB – DO NOT POWER OFF THE DEVICE\n\n"
                 "The window cannot be closed while a critical write is in progress.",
             )
             event.ignore()
