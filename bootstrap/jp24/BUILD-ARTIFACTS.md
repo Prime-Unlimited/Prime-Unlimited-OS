@@ -124,3 +124,23 @@ A fresh 256 MiB image was built locally with the matching public key. Generated 
 Static disassembly of the vendor `_imbupd_write_partition` confirms that stream completion is a zero-length bulk OUT transfer (length 0), not a one-byte `00` payload. The native writer now sends that zero-length transfer, serializes the sequence as 32-bit little-endian (the vendor's 16-bit counter is zero-extended on wire), validates all 32 response-sequence bits, and requires status 1 for property and erase replies. The native tool compiled with libusb 1.0.30. libusb documents zero-length packet transmission through a zero-length transfer: [libusb caveats](https://libusb.sourceforge.io/api-1.0/libusb_caveats.html).
 
 The local Python flash API still gates writes on verified JP24 identity, mains power, unchanged device evidence, matching image SHA-256, explicit acknowledgement that all of `/data` will be replaced, and the exact typed confirmation phrase. No flash, reboot, or USB query was run during this preparation. The 256 MiB profile was previously reported by the user as having worked, but its maximum partition capacity has not been independently measured. There is no verified raw `/data` backup/restore route.
+
+
+## Repository coordination snapshot (2026-11-16)
+
+The GitHub repository was reviewed across all issues and pull requests. The default `main` branch is at `8903643d`; active device work is being developed on feature branches. This JP24 bootstrap branch is at `e12f18c` and is not represented by an open pull request, so the writer hardening recorded above has not yet been integrated into the desktop-installer branches.
+
+| Item | State | Scope / current relevance |
+|---|---|---|
+| [Issue #3](https://github.com/Prime-Unlimited/Prime-Unlimited-OS/issues/3) | Open | macOS IORegistry sees JP24 while `system_profiler` is empty. PR #2 contains a structured IORegistry fallback and keeps this evidence transport-only; the issue itself remains open. |
+| [PR #1](https://github.com/Prime-Unlimited/Prime-Unlimited-OS/pull/1) | Merged to `dev/project-foundation` | Initial guarded desktop installer foundation. |
+| [PR #2](https://github.com/Prime-Unlimited/Prime-Unlimited-OS/pull/2) | Open | Windows WinUSB/JC11S and revision-aware USB discovery; includes the macOS IORegistry candidate-detection change for Issue #3. |
+| [PR #4](https://github.com/Prime-Unlimited/Prime-Unlimited-OS/pull/4) | Open draft | JC11S offline SSH PoC. Hardware release policy remains default-deny. |
+| [PR #5](https://github.com/Prime-Unlimited/Prime-Unlimited-OS/pull/5) | Merged to `feat/desktop-installer-foundation` | JP24 payload and reported real-device root SSH success. The merged snapshot's C writer is older than this branch: it uses separate sequence counters, sends one zero byte for completion, and does not strictly validate the start/final response. Do not treat that source snapshot as the corrected writer. |
+| [PR #6](https://github.com/Prime-Unlimited/Prime-Unlimited-OS/pull/6) | Open | Windows/macOS installer CI workflow; latest recorded run succeeded. |
+| [PR #7](https://github.com/Prime-Unlimited/Prime-Unlimited-OS/pull/7) | Open draft | JC11S WinUSB integration with the existing JP24 desktop work; still marked not ready to merge. Latest recorded CI run succeeded. |
+| [PR #8](https://github.com/Prime-Unlimited/Prime-Unlimited-OS/pull/8) | Closed, withdrawn, not merged | Withdrawn EngineX-based JC11S approach. |
+| [PR #9](https://github.com/Prime-Unlimited/Prime-Unlimited-OS/pull/9) | Closed, withdrawn, not merged | Withdrawn reference-image approach. |
+| [PR #10](https://github.com/Prime-Unlimited/Prime-Unlimited-OS/pull/10) | Open draft | JC11S direct-start SSH integration; latest recorded CI run succeeded, while installer-produced hardware validation remains pending. |
+
+No issue comments, PR conversation comments, or submitted PR reviews were present in the retrieved threads. CI workflow runs were recorded as successful for PRs #6, #7, and #10; no PR workflow run was returned for #2 or #4. These statuses are a point-in-time snapshot and will need rechecking before merging.
