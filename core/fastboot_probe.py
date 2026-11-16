@@ -63,7 +63,12 @@ def interpret_fastboot(output: str) -> FastbootInfo:
 def is_jc11s_candidate(info: FastbootInfo) -> bool:
     """Informational only: not an authorization to flash.
 
-    The actual JC11S Fastboot product string has not yet been confirmed.
-    Partition size and ext4 type are not unique model identifiers.
+    Partition size is deliberately not an identity signal: it is measured for
+    each device and may differ across JC11S revisions.
     """
-    return info.partition_type_data == "ext4" and info.partition_size_data == 0x8FD7BE00 and info.is_userspace is False
+    return (
+        info.product == "rk3288-az01-jc11s"
+        and info.partition_type_data == "ext4"
+        and info.partition_size_data is not None
+        and info.is_userspace is False
+    )
