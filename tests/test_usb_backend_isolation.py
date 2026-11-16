@@ -79,6 +79,7 @@ def test_jp24_uses_historical_ioreg_transport():
 def test_gui_workflows_created_only_after_selection():
     from PySide6.QtCore import QSettings
     from PySide6.QtWidgets import QApplication
+
     from app.window import MainWindow
 
     app = QApplication.instance() or QApplication([])
