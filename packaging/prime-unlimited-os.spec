@@ -7,7 +7,7 @@ project_root = os.path.abspath(os.path.join(SPECPATH, ".."))
 datas = collect_data_files("app")
 # Bundle the JC11S bootstrap sources and JP24 firmware-update helper sources.
 # Compiled ARMv7 hook and Windows e2fsprogs must be supplied by a verified build step.
-for folder in ("bootstrap/jc11s", "devices/jp24/ssh-bootstrap", "assets"):
+for folder in ("bootstrap/jc11s", "devices/jp24/ssh-bootstrap", "assets", "vendor/windows/e2fsprogs"):
     source = os.path.join(project_root, folder)
     if os.path.isdir(source):
         datas.append((source, folder))
