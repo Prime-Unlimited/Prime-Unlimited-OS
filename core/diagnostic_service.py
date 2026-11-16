@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import platform
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 from core.device_detection import DetectionResult, ProbeEvidence, match_selected_profile
@@ -24,7 +25,7 @@ class UsbDiagnosticService:
     """Runs both read-only probes so a wrong selected transport is reported safely."""
 
     def __init__(self, fastboot: Probe | None = None, imbupd: Probe | None = None) -> None:
-        self.fastboot = fastboot or FastbootTransport()
+        self.fastboot = fastboot if fastboot is not None else self._default_fastboot()
         self.imbupd = imbupd or ImbupdTransport()
 
     def probe(self, selected: ProfileId) -> DiagnosticReport:
@@ -37,6 +38,22 @@ class UsbDiagnosticService:
                 log.append(f"{name}: unavailable ({exc})")
                 continue
             evidence.append(ProbeEvidence(name, len(devices)))
+            if name == "fastboot" and selected == ProfileId.JC11S and len(devices) == 1:
+                # A USB VID/PID or a Fastboot interface alone never authorizes writing.
+                # Require the device's actual bootloader product identity.
+                getvar = getattr(transport, "getvar", None)
+                if getvar is not None:
+                    try:
+                        product = getvar("product", devices[0].identifier).strip()
+                        log.append(f"fastboot: product {product or '<empty>'}")
+                        if product == "rk3288-az01-jc11s":
+                            evidence[-1] = replace(evidence[-1], verified_profile=ProfileId.JC11S)
+                        elif product:
+                            log.append("fastboot: unexpected product; installation blocked")
+                    except (TransportError, OSError, ValueError) as exc:
+                        log.append(f"fastboot: product verification failed ({exc})")
+                else:
+                    log.append("fastboot: product verification unavailable")
             if devices:
                 identifiers = ", ".join(redacted_identifier(item.identifier) for item in devices)
                 log.append(f"{name}: found {len(devices)} interface(s): {identifiers}")
@@ -45,3 +62,11 @@ class UsbDiagnosticService:
         result = match_selected_profile(selected, evidence)
         log.append(result.message)
         return DiagnosticReport(result, tuple(log))
+
+    @staticmethod
+    def _default_fastboot():
+        if platform.system() == "Windows":
+            from core.windows_fastboot import create_windows_fastboot_transport
+
+            return create_windows_fastboot_transport()
+        return FastbootTransport()
