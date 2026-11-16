@@ -113,7 +113,7 @@ class NativeWindowsImageBuilder:
             self.hook,
             self.hook_digest,
         ]
-        missing = tuple(str(path.relative_to(self.source_root)) for path in required if not path.is_file())
+        missing = tuple(path.relative_to(self.source_root).as_posix() for path in required if not path.is_file())
         if missing:
             return BuildPrerequisites(False, missing)
         try:
