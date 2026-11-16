@@ -33,3 +33,17 @@ def test_jc11s_ssh_config_avoids_unsupported_pam_option():
     assert "PubkeyAuthentication yes" in config
     assert "PasswordAuthentication no" in config
     assert "PermitRootLogin prohibit-password" in config
+
+
+def test_jc11s_image_normalizes_linux_payload_line_endings():
+    """Windows checkout CRLF must not leak into the JC11S ext4 payload."""
+    source = (ROOT / "core/jc11s_image.py").read_text()
+    assert 'content.replace(b"\\r\\n", b"\\n")' in source
+    for path in (
+        "prime-ssh/activate.sh",
+        "prime-ssh/sshd_config",
+        "system/var/overlay/lib/alsa/conf.d/99-prime-ssh.conf",
+        "system/var-lib/alsa/conf.d/99-prime-ssh.conf",
+    ):
+        assert f'"{path}"' in source
+    assert "files[name] = (content.replace" in source
