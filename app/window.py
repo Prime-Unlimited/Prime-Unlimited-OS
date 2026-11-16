@@ -904,6 +904,9 @@ class WorkflowPage(QWidget):
             self.continue_button.setEnabled(False)
 
 
+from app.jc11s_window import WorkflowPage as Jc11sWorkflowPage
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -920,21 +923,41 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.selection = SelectionPage()
         self.workflow = WorkflowPage(diagnostic_service, thread_pool)
+        self.jc11s_workflow = Jc11sWorkflowPage(thread_pool=thread_pool)
         self.selection.selected.connect(self.open_workflow)
         self.workflow.exit_requested.connect(lambda: self.stack.setCurrentWidget(self.selection))
+        self.jc11s_workflow.exit_requested.connect(lambda: self.stack.setCurrentWidget(self.selection))
         self.stack.addWidget(self.selection)
         self.stack.addWidget(self.workflow)
+        self.stack.addWidget(self.jc11s_workflow)
         self.setCentralWidget(self.stack)
         QShortcut(
             QKeySequence("Alt+Left"),
             self,
-            activated=self.workflow.go_back,
+            activated=self._go_back,
         )
 
     def open_workflow(self, profile_id: ProfileId) -> None:
-        self.workflow.set_profile(profile_id)
-        self.stack.setCurrentWidget(self.workflow)
+        if profile_id == ProfileId.JC11S:
+            self.jc11s_workflow.set_profile(profile_id)
+            self.stack.setCurrentWidget(self.jc11s_workflow)
+        else:
+            self.workflow.set_profile(profile_id)
+            self.stack.setCurrentWidget(self.workflow)
+
+    def _go_back(self) -> None:
+        if self.stack.currentWidget() is self.jc11s_workflow:
+            self.jc11s_workflow.go_back()
+        elif self.stack.currentWidget() is self.workflow:
+            self.workflow.go_back()
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        if self.jc11s_workflow._critical_write_active:
+            QMessageBox.critical(self, "Flash in progress", "USB NICHT TRENNEN – GERÄT NICHT AUSSCHALTEN")
+            event.ignore()
+            return
+        if self.jc11s_workflow.artifacts is not None:
+            self.jc11s_workflow.artifacts.cleanup()
+            self.jc11s_workflow.artifacts = None
         self.settings.setValue("window/size", self.size())
         super().closeEvent(event)
