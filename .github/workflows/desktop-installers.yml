@@ -6,6 +6,7 @@ on:
     branches:
       - feat/desktop-installer-foundation
       - feat/integrate-jc11s-jp24
+      - fix/jc11s-hardware-verified-ssh-bootstrap
   pull_request:
     branches:
       - feat/desktop-installer-foundation
