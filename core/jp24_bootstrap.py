@@ -7,9 +7,10 @@ invoking :func:`flash_bootstrap`, since it overwrites the device's /data
 partition and there is no automated recovery path if the device is
 disconnected mid-write.
 
-The actual mechanism (ALSA boot hook -> boot-activate.sh -> sshd on port
-2222) is documented in devices/jp24/README.md and was confirmed via a
-live root shell on real hardware.
+The actual mechanism (ALSA boot hook forks and execs sshd directly on
+port 2222, no shell script or systemd unit involved) is documented in
+devices/jp24/README.md and was confirmed fully automatically - flash,
+reboot, SSH in - on real hardware.
 """
 
 from __future__ import annotations

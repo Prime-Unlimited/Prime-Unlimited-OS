@@ -1,10 +1,14 @@
 # Prime 4 G2 (JP24)
 
-Status: Root SSH access has been demonstrated on a real device (confirmed
-via a live root shell). The payload is in [`ssh-bootstrap/`](ssh-bootstrap/).
-It is not yet wired into the shared installer's device/flow abstractions
-(`core/device_detection.py`, `core/ssh_service.py`, etc.) - this is the raw,
-device-specific bootstrap used to get there.
+Status: Root SSH access works fully automatically on real hardware - flash,
+reboot, SSH in, no manual intervention. Confirmed end to end through the GUI
+installer itself (device selection → USB diagnostics → SSH key setup →
+flash → automatic reboot → `ssh -p 2222 root@<device-ip>`). The payload is
+in [`ssh-bootstrap/`](ssh-bootstrap/); the flash step is wired into
+`core/jp24_bootstrap.py` / `core/transports.py`. Not yet wired: an
+authenticated post-flash SSH connection test inside the wizard itself
+(currently a manual step after the GUI finishes) and the mod-manager flow
+in `core/ssh_service.py` / `core/mods.py`.
 
 ## Device identity
 
@@ -27,12 +31,13 @@ device-specific bootstrap used to get there.
 3. The conf.d file's `hook_func` + `@hooks` block `dlopen()`s
    `libalsa-boot-hook.so` (built from `alsa-boot-hook.c`) and calls
    `prime4_mod_alsa_hook()`, which runs as root.
-4. That hook forks and execs `boot-activate.sh`, which writes a transient
-   systemd unit and starts `sshd` on port 2222 (port 22 is occupied by
-   inMusic's own sshd, which only accepts their CA-signed certs).
+4. That hook forks and `execl()`s `sshd` directly (no shell script, no
+   systemd unit) on port 2222 - port 22 is occupied by inMusic's own
+   sshd, which only accepts their CA-signed certs.
 
-Two bugs blocked this for a long time and are worth calling out
-explicitly, since they fail completely silently:
+Four bugs blocked this for a long time, each silent by default - sshd and
+ALSA both just do nothing observable rather than report an error anyone
+would see without adding diagnostics first:
 
 - **musl vs glibc**: the hook `.so` must be built for glibc
   (`zig cc -target aarch64-linux-gnu.2.17 ...`), not musl. A musl build
@@ -42,26 +47,49 @@ explicitly, since they fail completely silently:
   `hook_func.NAME { lib "..." func NAME }` plus `@hooks [ { func NAME } ]`.
   The top-level `alsa.conf` syntax (`hooks.0 { type hooks ... }`) does not
   get evaluated when merged in this way.
-- The hook's exported symbol names must match exactly (the "Cd1s fix"):
-  `prime4_mod_alsa_hook`, `snd_config_hook_prime4_mod_alsa_hook`, and both
-  `_dlsym_config_hook_001` version-tag data symbols. Without these, LED
-  and button control on the device break even though the hook itself
-  still loads.
+- **Missing privilege-separation directory**: `sshd` refuses to start
+  without `/var/run/sshd` - normally created by its systemd unit's
+  tmpfiles.d entry before sshd is ever invoked. Without it sshd exits
+  immediately (a `<defunct>` zombie); `fork()`/`execl()` both still look
+  successful from the caller's side. `mkdir("/var/run/sshd", 0755)`
+  before exec'ing it.
+- **`execl()`'s `argv[0]` must be the absolute path**: `sshd` re-execs
+  itself for privilege separation and checks its own `argv[0]` for that;
+  passing just `"sshd"` instead of `"/usr/sbin/sshd"` makes it exit with
+  "sshd re-exec requires execution with an absolute path" - again only on
+  its own stderr. This one is particularly deceptive: typing the exact
+  same command into an interactive shell always works, because a shell
+  sets `argv[0]` to whatever you typed (the full path), masking the bug
+  during manual testing.
+
+The hook's exported symbol names must also match exactly (the "Cd1s
+fix"): `prime4_mod_alsa_hook`, `snd_config_hook_prime4_mod_alsa_hook`,
+and both `_dlsym_config_hook_001` version-tag data symbols. Without
+these, LED and button control on the device break even though the hook
+itself still loads fine.
 
 `fork()`/`execve()` from inside the hook are not restricted on this
 device - this was a real concern during development but turned out not
-to be the actual blocker once the two bugs above were fixed.
+to be the actual blocker once the bugs above were fixed.
 
 ## Files
 
-- `ssh-bootstrap/alsa-boot-hook.c` - the ALSA hook shared library
+- `ssh-bootstrap/alsa-boot-hook.c` - the ALSA hook shared library (also
+  starts sshd directly - no separate boot script needed)
 - `ssh-bootstrap/99-prime4-mod.conf` - the ALSA conf.d file
-- `ssh-bootstrap/boot-activate.sh` - starts sshd via a transient systemd unit
 - `ssh-bootstrap/build-data-image.sh` - builds the ext4 `/data` image
   (macOS, needs `e2fsprogs` and either `zig` or `aarch64-linux-gnu-gcc`)
 - `ssh-bootstrap/imbupd_write_mac.c` - the USB flash tool (macOS/libusb)
 
 ## Usage
+
+Via the GUI installer (`python -m app.main`, run in the user's own
+terminal - not through an agent's sandboxed shell, which can break
+`system_profiler`/`ioreg`-based USB detection): select "Denon DJ Prime 4
+G2" → run diagnostics → generate or import an SSH key → "Flash and enable
+SSH".
+
+Or directly:
 
 ```bash
 brew install libusb e2fsprogs
@@ -87,8 +115,12 @@ Survives firmware updates: they only replace the root partition image
 
 ## Not yet done
 
-- Not wired into the shared installer's Python `core/` abstractions
+- No authenticated SSH connection test inside the wizard itself (the GUI
+  flash step succeeds and reboots the device; verifying the SSH login is
+  currently a manual step afterward)
 - No automatic device-IP discovery (mDNS/avahi or router ARP scan)
 - No uninstall path exposed through the installer UI (manual removal via
   an active SSH session works: delete `/data/prime4-mod/` and the
   `99-prime4-mod.conf` file, then reboot)
+- The mod-manager flow (`core/ssh_service.py`, `core/mods.py`) is not yet
+  connected to this device profile
