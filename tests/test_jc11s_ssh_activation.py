@@ -1,20 +1,25 @@
-"""Guard against regressions in the JC11S SSH activation recipe.
+"""Guard against regressions in the hardware-verified JC11S SSH bootstrap."""
 
-The historical EngineX 5.3.0.2 hardware report confirmed an independent
-systemd unit; stock sshd.service is not guaranteed to exist.
-"""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_jc11s_ssh_starts_independent_systemd_unit():
+def test_jc11s_ssh_starts_directly_without_systemd_unit():
     script = (ROOT / "bootstrap/jc11s/activate.sh").read_text()
-    assert "prime-sshd.service" in script
-    assert "systemctl start --no-block prime-sshd.service" in script
-    assert "systemctl restart sshd.service" not in script
+    assert 'exec /usr/sbin/sshd -D -e -f "$BASE/sshd_config"' in script
+    assert '/usr/sbin/sshd -t -f "$BASE/sshd_config"' in script
     assert 'activation.log' in script
-    assert "ExecStartPre=/usr/sbin/sshd -t" in script
+    assert "systemctl" not in script
+    assert "/run/systemd/system" not in script
+
+
+def test_jc11s_image_installs_both_alsa_hook_paths():
+    from core import jc11s_image
+
+    source = Path(jc11s_image.__file__).read_text()
+    assert '"system/var/overlay/lib/alsa/conf.d/99-prime-ssh.conf"' in source
+    assert '"system/var-lib/alsa/conf.d/99-prime-ssh.conf"' in source
 
 
 def test_jc11s_ssh_config_avoids_unsupported_pam_option():
