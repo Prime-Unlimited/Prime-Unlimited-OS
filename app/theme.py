@@ -63,7 +63,7 @@ QProgressBar {{ background: {CARD_BORDER}; border: 0; border-radius: 4px; height
 QProgressBar::chunk {{ background: {ORANGE}; border-radius: 4px; }}
 
 QListWidget {{ background: transparent; border: 0; font-family: "{MONO_FONT}", monospace; }}
-QListWidget::item {{ padding: 11px; color: {SLATE}; }}
+QListWidget::item {{ padding: 11px; color: {SLATE}; border-radius: 7px; }}
 QListWidget::item:selected {{ background: {CARD_BG}; color: {ORANGE}; border-radius: 7px; }}
 
 QCheckBox {{ spacing: 10px; }}

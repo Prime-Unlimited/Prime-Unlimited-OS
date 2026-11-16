@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.device_detection import DetectionState
+from core.device_discovery import DiscoveryError, DiscoveryResult, discover_device
 from core.diagnostic_service import DiagnosticReport, UsbDiagnosticService
 from core.diagnostics import redact
 from core.jp24_bootstrap import FlashError, FlashProgress, build_data_image
@@ -245,6 +246,43 @@ class SshVerifyWorker(QRunnable):
             self.signals.failed.emit(redact(str(exc)))
 
 
+class DiscoveryWorker(QRunnable):
+    """Best-effort device IP lookup (mDNS, then a local-network port scan).
+    Never a trust decision by itself - the caller still inspects and
+    confirms the host key before anything is pinned."""
+
+    def __init__(self, port: int) -> None:
+        super().__init__()
+        self.port = port
+        self.signals = SshWorkerSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.signals.finished.emit(discover_device(self.port))
+        except DiscoveryError as exc:
+            self.signals.failed.emit(redact(str(exc)))
+        except Exception as exc:  # GUI boundary: never crash the app on an unexpected discovery failure.
+            self.signals.failed.emit(redact(str(exc)))
+
+
+class StepsList(QListWidget):
+    """A progress indicator, not a navigation control: the current step is
+    highlighted via the normal :selected stylesheet rule (set only by
+    show_page(), i.e. by code), but mouse clicks are swallowed so it can't
+    be made to look like a clickable way to jump between steps - some of
+    which depend on earlier ones having actually succeeded first."""
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt override
+        event.accept()
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt override
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt override
+        event.accept()
+
+
 class WorkflowPage(QWidget):
     exit_requested = Signal()
 
@@ -275,7 +313,7 @@ class WorkflowPage(QWidget):
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(30, 30, 30, 30)
-        self.steps = QListWidget()
+        self.steps = StepsList()
         self.steps.setFixedWidth(280)
         self.steps.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.steps.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -459,11 +497,23 @@ class WorkflowPage(QWidget):
             )
         )
 
+        host_row = QHBoxLayout()
         self.ssh_host_input = QLineEdit()
         self.ssh_host_input.setPlaceholderText("Device IP address (see the device's Wi-Fi settings)")
         self.ssh_host_input.setAccessibleName("Device IP address")
         self.ssh_host_input.textChanged.connect(self._update_navigation)
-        layout.addWidget(self.ssh_host_input)
+        host_row.addWidget(self.ssh_host_input, 1)
+        self.discover_host_button = QPushButton("Find automatically")
+        self.discover_host_button.clicked.connect(self.discover_host)
+        host_row.addWidget(self.discover_host_button)
+        layout.addLayout(host_row)
+        layout.addWidget(
+            label(
+                "Tries mDNS first, then a local-network scan for the mod's SSH port. Either way, "
+                "you still confirm the host key below before anything is trusted.",
+                "muted",
+            )
+        )
 
         inspect_row = QHBoxLayout()
         self.inspect_key_button = QPushButton("Inspect host key")
@@ -498,6 +548,36 @@ class WorkflowPage(QWidget):
 
     def _ssh_host(self) -> str:
         return self.ssh_host_input.text().strip()
+
+    def discover_host(self) -> None:
+        if self.profile is None:
+            return
+        self.discover_host_button.setEnabled(False)
+        self.ssh_test_status.setText("Looking for the device via mDNS, then a local-network scan…")
+        self.ssh_test_status.setStyleSheet("")
+        worker = DiscoveryWorker(self.profile.ssh_port)
+        worker.signals.finished.connect(self.handle_host_discovered)
+        worker.signals.failed.connect(self.handle_discovery_failed)
+        self._ssh_worker = worker
+        self.thread_pool.start(worker)
+
+    @Slot(object)
+    def handle_host_discovered(self, result: DiscoveryResult) -> None:
+        self.discover_host_button.setEnabled(True)
+        self.ssh_host_input.setText(result.host)
+        method = "mDNS" if result.method == "mdns" else "local-network scan"
+        self.ssh_test_status.setText(
+            f"Found {result.host} via {method}. Inspect its host key to confirm it's the right device."
+        )
+        self.ssh_test_status.setStyleSheet("color:#ffd18a;")
+        self.ssh_test_log.appendPlainText(f"[discover] {result.host} via {method}")
+
+    @Slot(str)
+    def handle_discovery_failed(self, message: str) -> None:
+        self.discover_host_button.setEnabled(True)
+        self.ssh_test_status.setText("Could not find the device automatically. Enter its IP manually.")
+        self.ssh_test_status.setStyleSheet("color:#ff7b7b;")
+        self.ssh_test_log.appendPlainText(f"[discover] {message}")
 
     def inspect_host_key(self) -> None:
         if self.profile is None or not self._ssh_host():
@@ -670,6 +750,7 @@ class WorkflowPage(QWidget):
         self.inspect_key_button.setEnabled(True)
         self.trust_key_button.setEnabled(False)
         self.verify_login_button.setEnabled(False)
+        self.discover_host_button.setEnabled(True)
         self._pending_host_identity = None
         self.show_page(self.CONNECTION)
 
