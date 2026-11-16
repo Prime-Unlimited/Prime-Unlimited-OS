@@ -299,6 +299,8 @@ class WorkflowPage(QWidget):
     ) -> None:
         super().__init__()
         self.diagnostic_service = diagnostic_service or UsbDiagnosticService()
+        self._diagnostic_epoch = 0
+        self._diagnostic_busy = False
         self.thread_pool = thread_pool or QThreadPool.globalInstance()
         self.profile: DeviceProfile | None = None
         self.profile_id: ProfileId | None = None
@@ -661,7 +663,9 @@ class WorkflowPage(QWidget):
         self.ssh_test_log.appendPlainText(f"[error] {message}")
 
     def confirm_and_flash(self) -> None:
-        if self.key_pair is None or self.profile is None:
+        if (self.key_pair is None or self.profile_id != ProfileId.JP24
+                or self.diagnostic_report is None
+                or self.diagnostic_report.result.state != DetectionState.MATCH):
             return
         choice = QMessageBox.warning(
             self,
@@ -707,6 +711,7 @@ class WorkflowPage(QWidget):
         self._update_navigation()
 
     def set_profile(self, profile_id: ProfileId) -> None:
+        self._diagnostic_epoch += 1
         self.profile_id = profile_id
         self.profile = PROFILES[profile_id]
         self.diagnostic_report = None
@@ -770,11 +775,30 @@ class WorkflowPage(QWidget):
         self.continue_button.setEnabled(False)
         self.diagnostic_status.setText("Running read-only USB diagnostics…")
         self.diagnostic_log.setPlainText("Waiting for USB probes. No write command will run.")
+        self._diagnostic_epoch += 1
+        epoch = self._diagnostic_epoch
+        self._diagnostic_busy = True
         worker = DiagnosticWorker(self.diagnostic_service, self.profile_id)
-        worker.signals.finished.connect(self.handle_diagnostic_report)
-        worker.signals.failed.connect(self.handle_diagnostic_failure)
+        worker.signals.finished.connect(lambda report, token=epoch: self._accept_report(token, report))
+        worker.signals.failed.connect(lambda message, token=epoch: self._accept_failure(token, message))
         self._worker = worker
         self.thread_pool.start(worker)
+
+    def _accept_report(self, token: int, report: DiagnosticReport) -> None:
+        self._diagnostic_busy = False
+        if token == self._diagnostic_epoch:
+            self.handle_diagnostic_report(report)
+        elif getattr(self, "_return_pending", False):
+            self._return_pending = False
+            self.exit_requested.emit()
+
+    def _accept_failure(self, token: int, message: str) -> None:
+        self._diagnostic_busy = False
+        if token == self._diagnostic_epoch:
+            self.handle_diagnostic_failure(message)
+        elif getattr(self, "_return_pending", False):
+            self._return_pending = False
+            self.exit_requested.emit()
 
     @Slot(object)
     def handle_diagnostic_report(self, report: DiagnosticReport) -> None:
@@ -851,6 +875,8 @@ class WorkflowPage(QWidget):
     def go_back(self) -> None:
         page = self.page_stack.currentIndex()
         if page == self.CONNECTION:
+            self._diagnostic_epoch += 1
+            self.diagnostic_report = None
             self.exit_requested.emit()
         elif page in (self.BLOCKED, self.FLASH):
             self.show_page(self.SSH_KEY)
@@ -922,14 +948,12 @@ class MainWindow(QMainWindow):
         self.resize(settings.value("window/size", self.size()))
         self.stack = QStackedWidget()
         self.selection = SelectionPage()
-        self.workflow = WorkflowPage(diagnostic_service, thread_pool)
-        self.jc11s_workflow = Jc11sWorkflowPage(thread_pool=thread_pool)
+        self.workflow = None
+        self.jc11s_workflow = None
+        self._injected_diagnostic_service = diagnostic_service
+        self._thread_pool = thread_pool
         self.selection.selected.connect(self.open_workflow)
-        self.workflow.exit_requested.connect(lambda: self.stack.setCurrentWidget(self.selection))
-        self.jc11s_workflow.exit_requested.connect(lambda: self.stack.setCurrentWidget(self.selection))
         self.stack.addWidget(self.selection)
-        self.stack.addWidget(self.workflow)
-        self.stack.addWidget(self.jc11s_workflow)
         self.setCentralWidget(self.stack)
         QShortcut(
             QKeySequence("Alt+Left"),
@@ -937,26 +961,49 @@ class MainWindow(QMainWindow):
             activated=self._go_back,
         )
 
+    def _return_to_selection(self) -> None:
+        current = self.stack.currentWidget()
+        if current is self.selection:
+            return
+        current._diagnostic_epoch += 1
+        current.diagnostic_report = None
+        if getattr(current, "_diagnostic_busy", False):
+            current._return_pending = True
+            current.run_diagnostics_button.setEnabled(False)
+            current.diagnostic_status.setText("Waiting for the active USB probe to finish…")
+            return
+        self.stack.setCurrentWidget(self.selection)
+
     def open_workflow(self, profile_id: ProfileId) -> None:
+        if self.stack.currentWidget() is not self.selection:
+            return
         if profile_id == ProfileId.JC11S:
+            if self.jc11s_workflow is None:
+                self.jc11s_workflow = Jc11sWorkflowPage(thread_pool=self._thread_pool)
+                self.jc11s_workflow.exit_requested.connect(self._return_to_selection)
+                self.stack.addWidget(self.jc11s_workflow)
             self.jc11s_workflow.set_profile(profile_id)
             self.stack.setCurrentWidget(self.jc11s_workflow)
-        else:
+        elif profile_id == ProfileId.JP24:
+            if self.workflow is None:
+                self.workflow = WorkflowPage(self._injected_diagnostic_service, self._thread_pool)
+                self.workflow.exit_requested.connect(self._return_to_selection)
+                self.stack.addWidget(self.workflow)
             self.workflow.set_profile(profile_id)
             self.stack.setCurrentWidget(self.workflow)
 
     def _go_back(self) -> None:
-        if self.stack.currentWidget() is self.jc11s_workflow:
+        if self.jc11s_workflow is not None and self.stack.currentWidget() is self.jc11s_workflow:
             self.jc11s_workflow.go_back()
-        elif self.stack.currentWidget() is self.workflow:
+        elif self.workflow is not None and self.stack.currentWidget() is self.workflow:
             self.workflow.go_back()
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        if self.jc11s_workflow._critical_write_active:
+        if self.jc11s_workflow is not None and self.jc11s_workflow._critical_write_active:
             QMessageBox.critical(self, "Flash in progress", "USB NICHT TRENNEN – GERÄT NICHT AUSSCHALTEN")
             event.ignore()
             return
-        if self.jc11s_workflow.artifacts is not None:
+        if self.jc11s_workflow is not None and self.jc11s_workflow.artifacts is not None:
             self.jc11s_workflow.artifacts.cleanup()
             self.jc11s_workflow.artifacts = None
         self.settings.setValue("window/size", self.size())
