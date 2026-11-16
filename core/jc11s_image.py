@@ -99,6 +99,16 @@ def build(
         "system/var/overlay/lib/alsa/conf.d/99-prime-ssh.conf": ((SOURCE / "99-prime-ssh.conf").read_bytes(), 0o644),
         "system/var-lib/alsa/conf.d/99-prime-ssh.conf": ((SOURCE / "99-prime-ssh.conf").read_bytes(), 0o644),
     }
+    # Windows checkouts may convert tracked Linux payload files to CRLF.
+    # Normalize only text payloads; never alter SSH keys or the ARM ELF hook.
+    for name in (
+        "prime-ssh/activate.sh",
+        "prime-ssh/sshd_config",
+        "system/var/overlay/lib/alsa/conf.d/99-prime-ssh.conf",
+        "system/var-lib/alsa/conf.d/99-prime-ssh.conf",
+    ):
+        content, mode = files[name]
+        files[name] = (content.replace(b"\\r\\n", b"\\n"), mode)
     directories = {"prime-ssh/hostkeys"}
     for name in files:
         directories.update(str(p) for p in Path(name).parents if str(p) != ".")
