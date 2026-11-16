@@ -881,10 +881,7 @@ class WorkflowPage(QWidget):
     def _diagnostics_allow_key_setup(self) -> bool:
         if self.diagnostic_report is None:
             return False
-        return self.diagnostic_report.result.state in {
-            DetectionState.MATCH,
-            DetectionState.UNVERIFIED,
-        }
+        return self.diagnostic_report.result.state == DetectionState.MATCH
 
     def _update_navigation(self) -> None:
         page = self.page_stack.currentIndex()
