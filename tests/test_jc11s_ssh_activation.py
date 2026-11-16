@@ -28,3 +28,25 @@ def test_jc11s_ssh_config_avoids_unsupported_pam_option():
     assert "PubkeyAuthentication yes" in config
     assert "PasswordAuthentication no" in config
     assert "PermitRootLogin prohibit-password" in config
+
+
+def test_installer_guards_completed_steps_and_uses_validated_client_key():
+    source = (ROOT / "app/jc11s_window.py").read_text()
+    assert "and not self._flash_succeeded" in source
+    assert "if self._flash_succeeded or self._critical_write_active or self._write_status_unknown:" in source
+    assert "self.flash_button.setVisible(False)" in source
+    assert "self.prepare_button.setEnabled(False)" in source
+    assert "if self.artifacts is not None or not self.prepare_button.isEnabled():" in source
+    assert "self.generate_key_button.setEnabled(False)" in source
+    assert "self.validate_key_button.setEnabled(False)" in source
+    assert "self._validated_public_key = pair.public_key.read_bytes()" in source
+    assert "self._key_passphrase" in source
+    assert "validate_keypair(" in source
+
+
+def test_changed_host_key_requires_explicit_approval():
+    source = (ROOT / "app/jc11s_window.py").read_text()
+    assert "SSH host key changed" in source
+    assert "Verify the device and fingerprint independently" in source
+    assert "QMessageBox.StandardButton.No" in source
+    assert "enroll_host_key(host, 22, expected, known_hosts)" in source
