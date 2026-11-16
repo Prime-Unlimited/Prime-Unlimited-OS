@@ -39,12 +39,14 @@ class ServiceBoundaryTests(TestCase):
         self.wizard = SimpleNamespace(
             profile_id=ProfileId.JC11S, diagnostic_service=self.diagnostic,
             installer_service=None, key_pair=None, diagnostic_report=None,
+            artifacts=None, _validated_public_key=None,
             run_diagnostics_button=Mock(), diagnostic_log=Mock(), diagnostic_status=Mock(),
             reboot_button=Mock(), build_status=Mock(), build_progress=Mock(),
             prepare_button=Mock(), candidate_selector=Mock(), thread_pool=Mock(),
             _image_ready=Mock(), _image_failed=Mock(),
             _populate_candidates=Mock(), _update_navigation=Mock(),
         )
+        self.wizard.prepare_button.isEnabled.return_value = True
         self.wizard.candidate_selector.isVisible.return_value = False
         self.wizard.candidate_selector.currentData.return_value = None
 
@@ -87,7 +89,10 @@ class ServiceBoundaryTests(TestCase):
         self.wizard.thread_pool.start.assert_not_called()
         self.wizard.build_status.setText.assert_called_with(
             'JC11S installer service and a validated SSH key are required.')
-        self.wizard.key_pair = SimpleNamespace(public_key='safe-test-public-key')
+        public_key = Mock()
+        public_key.read_bytes.return_value = b'safe-test-public-key'
+        self.wizard.key_pair = SimpleNamespace(public_key=public_key)
+        self.wizard._validated_public_key = b'safe-test-public-key'
         self.prepare(self.wizard)
         self.wizard.thread_pool.start.assert_called_once()
         self.assertIsNotNone(self.wizard.installer_service)
