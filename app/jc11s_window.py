@@ -749,6 +749,16 @@ class WorkflowPage(QWidget):
         self.key_status.setStyleSheet("color:#ff7b7b;")
         self._update_navigation()
 
+    def _validate_active_ssh_key(self) -> None:
+        """Never build or verify using keys other than the validated installer pair."""
+        if self.key_pair is None:
+            raise KeyValidationError("Generate or import an SSH key pair first.")
+        private = Path(self.private_key_path.text().strip()).expanduser().resolve()
+        public = Path(self.public_key_path.text().strip()).expanduser().resolve()
+        if private != self.key_pair.private_key.resolve() or public != self.key_pair.public_key.resolve():
+            raise KeyValidationError("SSH key paths changed after validation. Validate the pair again.")
+        validate_keypair(private, public, self._key_passphrase)
+
     def prepare_image(self) -> None:
         if self.installer_service is None or self.key_pair is None:
             self.build_status.setText("JC11S installer service and a validated SSH key are required.")
@@ -757,6 +767,13 @@ class WorkflowPage(QWidget):
         self.build_progress.setRange(0, 0)
         self.build_status.setText("Re-reading device geometry and building the image natively…")
         identifier = self.candidate_selector.currentData() if self.candidate_selector.isVisible() else None
+        try:
+            self._validate_active_ssh_key()
+        except KeyValidationError as exc:
+            self.prepare_button.setEnabled(True)
+            self.build_progress.setRange(0, 100)
+            self.build_status.setText("SSH key validation failed: " + redact(str(exc)))
+            return
         worker = TaskWorker(lambda: self.installer_service.prepare(self.key_pair.public_key, identifier))
         worker.signals.finished.connect(self._image_ready)
         worker.signals.failed.connect(self._image_failed)
@@ -967,6 +984,11 @@ class WorkflowPage(QWidget):
         if not host:
             self.ssh_status.setText("Enter the device IP address.")
             return
+        try:
+            self._validate_active_ssh_key()
+        except KeyValidationError as exc:
+            self.ssh_status.setText("Installer SSH key mismatch: " + redact(str(exc)))
+            return
         self._pending_ssh_host = host
         self.ssh_test_button.setEnabled(False)
         self._set_flash_phase("ssh_verification", "SSH-Verifikation läuft")
@@ -988,21 +1010,17 @@ class WorkflowPage(QWidget):
         if self.installer_service.ssh.is_host_key_trusted(host, 22, identity, known_hosts):
             self._start_authenticated_ssh_test(host, known_hosts)
             return
-        if self.installer_service.ssh.has_pinned_host(host, 22, known_hosts):
-            self.ssh_test_button.setEnabled(True)
-            self.ssh_status.setText(
-                "SSH host key changed. Connection blocked; the stored trusted key was not replaced."
-            )
-            self._set_flash_phase("ssh_failed", "SSH-Hostschlüssel stimmt nicht mit gespeichertem Schlüssel überein")
-            return
+        changed = self.installer_service.ssh.has_pinned_host(host, 22, known_hosts)
         answer = QMessageBox.question(
             self,
             "Trust this device's SSH key?",
-            f"First SSH connection to {host}.\n\n"
-            f"Host-key type: {identity.algorithm}\n"
-            f"Fingerprint: {identity.fingerprint}\n\n"
-            "Confirm only if this is the Prime 4+ you just installed. The key will be saved and "
-            "strictly checked on future connections.",
+            (f"SSH HOST KEY CHANGED for {host}. The previously trusted key differs.\n"
+             "Only approve if you just reflashed this exact Prime 4+ and have independently "
+             "checked its new fingerprint. Otherwise choose No.\n\n"
+             if changed else f"First SSH connection to {host}.\n\n")
+            + f"Host-key type: {identity.algorithm}\n"
+            + f"New fingerprint: {identity.fingerprint}\n\n"
+            + "Confirm this device's identity to pin its key. Strict host-key checking stays enabled.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
