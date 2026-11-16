@@ -1,7 +1,7 @@
 # Build from the repository root: pyinstaller packaging/prime-unlimited-os.spec
 import os
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 project_root = os.path.abspath(os.path.join(SPECPATH, ".."))
 datas = collect_data_files("app")
@@ -17,7 +17,7 @@ a = Analysis(
     pathex=[project_root],
     binaries=[],
     datas=datas,
-    hiddenimports=["paramiko", "cryptography"],
+    hiddenimports=["paramiko", "cryptography"] + collect_submodules("core") + collect_submodules("app"),
     excludes=[],
     noarchive=False,
 )
@@ -35,3 +35,7 @@ exe = EXE(
     upx=True,
     console=False,
 )
+
+if os.name == "posix" and __import__("sys").platform == "darwin":
+    app = BUNDLE(exe, name="Prime-Unlimited-OS.app", bundle_identifier="org.primeunlimited.os")
+
