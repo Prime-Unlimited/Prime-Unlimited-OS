@@ -27,7 +27,7 @@ def test_selected_transport_is_reported_unverified_without_positive_identity():
     assert "se…23" in "\n".join(report.log_lines)
 
 
-def test_opposite_transport_reports_wrong_profile_even_if_selected_probe_is_missing():
+def test_opposite_transport_is_not_probed_when_selected_probe_is_missing():
     service = UsbDiagnosticService(
         fastboot=FakeProbe(error=TransportError("fastboot is not installed")),
         imbupd=FakeProbe([UsbDevice("imbupd", "15e4:d014")]),
@@ -35,5 +35,6 @@ def test_opposite_transport_reports_wrong_profile_even_if_selected_probe_is_miss
 
     report = service.probe(ProfileId.JC11S)
 
-    assert report.result.state == DetectionState.WRONG_PROFILE
+    assert report.result.state == DetectionState.NO_DEVICE
     assert "unavailable" in "\n".join(report.log_lines)
+    assert not any("imbupd:" in line for line in report.log_lines)
