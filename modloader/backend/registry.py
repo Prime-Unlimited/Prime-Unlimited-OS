@@ -9,6 +9,8 @@ import stat
 import tempfile
 import threading
 import zipfile
+import fcntl
+from contextlib import contextmanager
 from pathlib import Path
 
 IDENT = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -56,7 +58,7 @@ def safe_extract(archive, destination, max_bytes=128 * 1024 * 1024):
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     total = 0
-    seen = set()
+    seen = {}
     with zipfile.ZipFile(archive) as source:
         for member in source.infolist():
             name = member.filename
@@ -65,10 +67,17 @@ def safe_extract(archive, destination, max_bytes=128 * 1024 * 1024):
             kind = stat.S_IFMT(mode)
             if (not name or name.startswith("/") or "\\" in name or
                     any(p in ("", ".", "..") for p in parts) or
-                    ":" in parts[0] or name in seen or
+                    ":" in parts[0] or name.rstrip("/") in seen or
                     kind not in (0, stat.S_IFREG, stat.S_IFDIR)):
                 raise ModError("unsafe archive member")
-            seen.add(name)
+            canonical = name.rstrip("/")
+            # A file may not also be an ancestor of another entry and paths are
+            # compared after removing the ZIP directory marker.
+            if any((canonical.startswith(old + "/") and old_kind != stat.S_IFDIR) or
+                   old.startswith(canonical + "/")
+                   for old, old_kind in seen.items()):
+                raise ModError("conflicting archive paths")
+            seen[canonical] = stat.S_IFDIR if member.is_dir() else stat.S_IFREG
             total += member.file_size
             if total > max_bytes:
                 raise ModError("archive exceeds size limit")
@@ -92,6 +101,8 @@ class Registry:
         self.registry = self.root / "registry" / "state.json"
         self.journal = self.root / "registry" / "pending.json"
         self.startup = self.root / "registry" / "startup.json"
+        self.transactions = self.root / "registry" / "transactions"
+        self.lockfile = self.root / "registry" / "mutation.lock"
         self.root.mkdir(parents=True, exist_ok=True)
         self.recover()
 
@@ -102,31 +113,81 @@ class Registry:
         if not self.registry.exists():
             return self._empty()
         state = json.loads(self.registry.read_text(encoding="utf-8"))
-        if state.get("schemaVersion") != 1:
+        if (not isinstance(state, dict) or state.get("schemaVersion") != 1 or
+                not isinstance(state.get("mods"), dict) or
+                not isinstance(state.get("libraries"), dict)):
             raise ModError("unknown registry format")
+        for mid, mod in state["mods"].items():
+            _id(mid)
+            if not isinstance(mod, dict) or not isinstance(mod.get("version"), str):
+                raise ModError("invalid mod registry entry")
+        for key, lib in state["libraries"].items():
+            if not isinstance(key, str) or not isinstance(lib, dict):
+                raise ModError("invalid library registry entry")
         return state
+
+    @contextmanager
+    def mutation_lock(self, blocking=False):
+        """Cross-process lock; the in-process lock only protects threads."""
+        self.lockfile.parent.mkdir(parents=True, exist_ok=True)
+        with _LOCK, self.lockfile.open("a+") as stream:
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+            except BlockingIOError as exc:
+                raise ModError("another mutation is in progress") from exc
+            try:
+                yield
+            finally:
+                fcntl.flock(stream, fcntl.LOCK_UN)
 
     def recover(self):
         with _LOCK:
             if self.journal.exists():
                 pending = json.loads(self.journal.read_text(encoding="utf-8"))
-                # Roll forward after a crash; operations are idempotent snapshots.
-                _atomic(self.registry, pending["next"])
+                if pending.get("phase") == "committed" and "next" in pending:
+                    _atomic(self.registry, pending["next"])
+                elif "previous" in pending:
+                    _atomic(self.registry, pending["previous"])
+                elif "next" in pending:  # compatibility with baseline journals
+                    _atomic(self.registry, pending["next"])
                 self.journal.unlink()
             self._startup(self.read())
 
     def _startup(self, state):
         enabled = []
-        for mid, mod in sorted(state["mods"].items()):
-            if mod.get("enabled") and mod.get("entrypoint"):
+        visiting, visited = set(), set()
+
+        def add(mid):
+            if mid in visiting:
+                raise ModError("cyclic installed dependency graph")
+            if mid in visited:
+                return any(item["id"] == mid for item in enabled)
+            visiting.add(mid)
+            mod = state["mods"][mid]
+            dependencies_valid = True
+            for dep in sorted(mod.get("dependencies", []), key=lambda x: x["id"]):
+                dependency = state["mods"].get(dep["id"])
+                if not dependency or not dependency.get("enabled") or not add(dep["id"]):
+                    dependencies_valid = False
+            visiting.remove(mid)
+            visited.add(mid)
+            if mod.get("enabled") and mod.get("entrypoint") and dependencies_valid:
+                lib_paths = [state["libraries"][key]["path"] for key in mod.get("libraries", [])]
                 enabled.append({"id": mid, "version": mod["version"],
-                                "entrypoint": mod["entrypoint"],
-                                "libraries": list(mod.get("libraries", []))})
+                                "root": "mods/installed/%s/%s" % (mid, mod["version"]),
+                                "entrypoint": mod["entrypoint"], "libraries": lib_paths})
+                return True
+            return False
+
+        for mid in sorted(state["mods"]):
+            add(mid)
         _atomic(self.startup, {"schemaVersion": 1, "enabled": enabled})
 
     def _commit(self, state):
-        _atomic(self.journal, {"next": state})
+        previous = self.read()
+        _atomic(self.journal, {"phase": "prepared", "previous": previous, "next": state})
         _atomic(self.registry, state)
+        _atomic(self.journal, {"phase": "committed", "previous": previous, "next": state})
         self._startup(state)
         self.journal.unlink()
 
@@ -136,6 +197,21 @@ class Registry:
 
     def installed(self):
         return self.read()["mods"]
+
+    def dependents(self, mid):
+        mid = _id(mid)
+        return sorted(name for name, mod in self.read()["mods"].items()
+                      if any(d.get("id") == mid for d in mod.get("dependencies", [])))
+
+    def transaction_status(self, transaction_id=None):
+        if not self.transactions.exists():
+            return [] if transaction_id is None else None
+        records = []
+        for path in sorted(self.transactions.glob("*.json")):
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if transaction_id is None or data.get("id") == transaction_id:
+                records.append(data)
+        return records if transaction_id is None else (records[0] if records else None)
 
     @staticmethod
     def library_key(dep):
@@ -248,6 +324,18 @@ class Registry:
             if _id(mid) not in state["mods"]:
                 raise ModError("mod not installed")
             state["mods"][mid]["enabled"] = bool(enabled)
+            self._commit(state)
+
+    def rollback(self, mid):
+        with _LOCK:
+            state = copy.deepcopy(self.read())
+            mid = _id(mid)
+            current = state["mods"].get(mid)
+            if not current or not current.get("rollback"):
+                raise ModError("no rollback version available")
+            previous = current["rollback"]
+            state["mods"][mid] = {**previous, "rollback": {k: v for k, v in current.items() if k != "rollback"}}
+            self._rebuild_consumers(state)
             self._commit(state)
 
     def uninstall(self, mid):

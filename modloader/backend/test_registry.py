@@ -80,6 +80,14 @@ class RegistryTests(unittest.TestCase):
         with self.assertRaises(ModError):
             safe_extract(bad, self.root / "out")
 
+    def test_explicit_directory_archive_is_allowed(self):
+        good = self.root / "good.zip"
+        with zipfile.ZipFile(good, "w") as source:
+            source.writestr("bin/", "")
+            source.writestr("bin/start", "ok")
+        safe_extract(good, self.root / "good")
+        self.assertEqual((self.root / "good/bin/start").read_text(), "ok")
+
     def test_atomic_recovery(self):
         next_state = self.db.read()
         next_state["mods"]["recovered"] = {"version": "1", "enabled": False}
@@ -89,6 +97,13 @@ class RegistryTests(unittest.TestCase):
     def test_no_unverified_garbage_collection(self):
         with self.assertRaises(ModError):
             self.db.garbage_collect()
+
+    def test_concurrent_mutation_is_rejected(self):
+        other = Registry(self.root)
+        with self.db.mutation_lock():
+            with self.assertRaisesRegex(ModError, "another mutation"):
+                with other.mutation_lock():
+                    pass
 
 
 if __name__ == "__main__":
