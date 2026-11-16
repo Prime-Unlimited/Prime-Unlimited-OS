@@ -42,7 +42,7 @@ def test_unrecognized_jc11s_product_cannot_unlock_key_setup():
 def test_native_winusb_selected_by_default_on_windows(monkeypatch):
     from core import diagnostic_service, windows_fastboot
 
-    marker = object()
+    marker = FakeFastboot("rk3288-az01-jc11s")
     monkeypatch.setattr(diagnostic_service.platform, "system", lambda: "Windows")
     monkeypatch.setattr(windows_fastboot, "create_windows_fastboot_transport", lambda: marker)
     service = UsbDiagnosticService(imbupd=FakeImbupd())
