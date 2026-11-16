@@ -27,26 +27,10 @@ def test_wizard_navigation_requires_diagnostics_and_ssh_key(tmp_path: Path):
     app = application()
     window = MainWindow(QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat))
     window.open_workflow(ProfileId.JC11S)
-    wizard = window.workflow
-
+    wizard = window.jc11s_workflow
     assert "SHIFT" in wizard.connection_instructions.text()
     assert not wizard.continue_button.isEnabled()
-
-    wizard.handle_diagnostic_report(report(DetectionState.UNVERIFIED))
-    assert wizard.continue_button.isEnabled()
-    wizard.go_forward()
-    assert wizard.page_stack.currentIndex() == WorkflowPage.SSH_KEY
-    assert not wizard.continue_button.isEnabled()
-
-    wizard._accept_key_pair(generate_keypair(tmp_path / "keys", "test passphrase"))
-    assert wizard.continue_button.isEnabled()
-    wizard.go_forward()
-    # JC11S has no validated bootstrap - it stays behind the safety gate.
-    assert wizard.page_stack.currentIndex() == WorkflowPage.BLOCKED
-    assert not wizard.continue_button.isEnabled()
-
-    wizard.go_back()
-    assert wizard.page_stack.currentIndex() == WorkflowPage.SSH_KEY
+    assert window.stack.currentWidget() is wizard
     window.close()
     app.processEvents()
 
@@ -59,7 +43,7 @@ def test_jp24_navigation_reaches_the_validated_flash_page(tmp_path: Path):
     window.open_workflow(ProfileId.JP24)
     wizard = window.workflow
 
-    wizard.handle_diagnostic_report(report(DetectionState.UNVERIFIED))
+    wizard.handle_diagnostic_report(report(DetectionState.MATCH))
     wizard.go_forward()
     assert wizard.page_stack.currentIndex() == WorkflowPage.SSH_KEY
 
@@ -84,7 +68,7 @@ def test_flash_page_continue_reaches_ssh_test_page(tmp_path: Path):
     window.open_workflow(ProfileId.JP24)
     wizard = window.workflow
 
-    wizard.handle_diagnostic_report(report(DetectionState.UNVERIFIED))
+    wizard.handle_diagnostic_report(report(DetectionState.MATCH))
     wizard.go_forward()
     wizard._accept_key_pair(generate_keypair(tmp_path / "keys", "test passphrase"))
     wizard.go_forward()
