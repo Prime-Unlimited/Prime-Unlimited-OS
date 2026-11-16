@@ -1,0 +1,158 @@
+name: USB regression test installers
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/isolated-usb-backends-jc11s-jp24
+
+permissions:
+  contents: read
+
+concurrency:
+  group: usb-test-installers-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project and test tools
+        run: python -m pip install -e ".[dev]"
+      - name: Ruff lint
+        run: python -m ruff check .
+      - name: Python compile check
+        run: python -m compileall -q app core tests
+      - name: Run regression tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -v
+
+  jc11s-hook:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ARMv7 compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
+      - name: Build verified JC11S hook
+        run: |
+          sh tools/build-jc11s-hook.sh bootstrap/jc11s/libprime-ssh.so
+          sha256sum bootstrap/jc11s/libprime-ssh.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jc11s-build-input-${{ github.sha }}
+          path: bootstrap/jc11s/libprime-ssh.so
+          if-no-files-found: error
+
+  windows:
+    needs: [checks, jc11s-hook]
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: jc11s-build-input-${{ github.sha }}
+          path: bootstrap/jc11s
+      - uses: cygwin/cygwin-install-action@v7
+        with:
+          install-dir: C:\\cygwin
+          packages: |
+            e2fsprogs
+            binutils
+      - name: Bundle Windows filesystem dependencies
+        shell: pwsh
+        run: tools/collect-windows-e2fsprogs.ps1 -Source C:\\cygwin -Destination vendor\\windows\\e2fsprogs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Build windowed PyInstaller executable
+        run: python -m PyInstaller --noconfirm --clean packaging/prime-unlimited-os.spec
+      - name: Smoke test GUI process without hardware
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path 'dist/Prime-Unlimited-OS.exe').Path
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 8
+          if ($p.HasExited) { throw "GUI exited prematurely with code $($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+      - name: Package ZIP, checksum and provenance
+        shell: python
+        run: |
+          import hashlib, os, pathlib, zipfile
+          root = pathlib.Path("dist")
+          exe = root / "Prime-Unlimited-OS.exe"
+          assert exe.is_file() and exe.stat().st_size > 0
+          out = root / "Prime-Unlimited-OS-Windows-JC11S.zip"
+          with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as z:
+              z.write(exe, exe.name)
+          digest = hashlib.sha256(out.read_bytes()).hexdigest()
+          (root / "SHA256SUMS-Windows.txt").write_text(f"{digest}  {out.name}\n")
+          (root / "SOURCE-COMMIT-Windows.txt").write_text(os.environ["GITHUB_SHA"] + "\n")
+          print(f"Source: {os.environ['GITHUB_SHA']}\nSHA256: {digest}  {out.name}")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Prime-Unlimited-OS-Windows-JC11S
+          path: |
+            dist/Prime-Unlimited-OS-Windows-JC11S.zip
+            dist/SHA256SUMS-Windows.txt
+            dist/SOURCE-COMMIT-Windows.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  macos:
+    needs: [checks, jc11s-hook]
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: jc11s-build-input-${{ github.sha }}
+          path: bootstrap/jc11s
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Report build architecture
+        run: |
+          uname -m
+          python -c "import platform; print(platform.machine())"
+      - name: Build PyInstaller app
+        run: python -m PyInstaller --noconfirm --clean packaging/prime-unlimited-os.spec
+      - name: Verify bundle and noninteractive GUI startup
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          test -d dist/Prime-Unlimited-OS.app/Contents/MacOS
+          test -f dist/Prime-Unlimited-OS.app/Contents/Info.plist
+          test -x dist/Prime-Unlimited-OS.app/Contents/MacOS/Prime-Unlimited-OS
+          dist/Prime-Unlimited-OS.app/Contents/MacOS/Prime-Unlimited-OS > /tmp/prime-gui.log 2>&1 &
+          pid=$!
+          sleep 8
+          if ! kill -0 "$pid" 2>/dev/null; then cat /tmp/prime-gui.log; exit 1; fi
+          kill "$pid"
+          wait "$pid" || true
+      - name: Package app bundle with permissions and symlinks
+        run: |
+          cd dist
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent Prime-Unlimited-OS.app Prime-Unlimited-OS-macOS-JP24.zip
+          shasum -a 256 Prime-Unlimited-OS-macOS-JP24.zip > SHA256SUMS-macOS.txt
+          printf '%s\n' "$GITHUB_SHA" > SOURCE-COMMIT-macOS.txt
+          cat SHA256SUMS-macOS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Prime-Unlimited-OS-macOS-JP24
+          path: |
+            dist/Prime-Unlimited-OS-macOS-JP24.zip
+            dist/SHA256SUMS-macOS.txt
+            dist/SOURCE-COMMIT-macOS.txt
+          if-no-files-found: error
+          retention-days: 30
