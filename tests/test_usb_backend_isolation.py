@@ -12,6 +12,7 @@ def test_jp24_service_does_not_construct_backends_at_startup():
     with patch("core.diagnostic_service.ImbupdTransport") as jp, patch.object(
         Jp24Diagnostics, "_default_fastboot"
     ) as fastboot:
+        jp.return_value.probe.return_value = []
         service = Jp24Diagnostics()
         jp.assert_not_called()
         fastboot.assert_not_called()
