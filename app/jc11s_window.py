@@ -369,7 +369,7 @@ class WorkflowPage(QWidget):
         layout.addWidget(self.plan_summary)
         warning = label(
             "All settings and data on /data will be erased. "
-            "Die OFW-Partitionen sind nicht Ziel dieses Flashvorgangs."
+            "The original firmware partitions are not targeted by this flash operation."
         )
         warning.setStyleSheet("background:#3a1717; color:#ffb4b4; border-radius:9px; padding:14px;")
         layout.addWidget(warning)
