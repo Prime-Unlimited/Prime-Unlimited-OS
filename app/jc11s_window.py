@@ -180,6 +180,8 @@ class WorkflowPage(QWidget):
     ) -> None:
         super().__init__()
         self.diagnostic_service = diagnostic_service or UsbDiagnosticService()
+        self._diagnostic_epoch = 0
+        self._diagnostic_busy = False
         self.thread_pool = thread_pool or QThreadPool.globalInstance()
         self.installer_service = installer_service
         self.profile: DeviceProfile | None = None
@@ -431,6 +433,7 @@ class WorkflowPage(QWidget):
         return page
 
     def set_profile(self, profile_id: ProfileId) -> None:
+        self._diagnostic_epoch += 1
         self.profile_id = profile_id
         self.profile = PROFILES[profile_id]
         self.diagnostic_report = None
@@ -538,10 +541,29 @@ class WorkflowPage(QWidget):
         self.diagnostic_log.setPlainText("Waiting for USB probes. No write command will run.")
         selected_device = self.candidate_selector.currentData() if self.candidate_selector.isVisible() else None
         worker = DiagnosticWorker(self.diagnostic_service, self.profile_id, selected_device)
-        worker.signals.finished.connect(self.handle_diagnostic_report)
-        worker.signals.failed.connect(self.handle_diagnostic_failure)
+        self._diagnostic_epoch += 1
+        epoch = self._diagnostic_epoch
+        self._diagnostic_busy = True
+        worker.signals.finished.connect(lambda report, token=epoch: self._accept_report(token, report))
+        worker.signals.failed.connect(lambda message, token=epoch: self._accept_failure(token, message))
         self._worker = worker
         self.thread_pool.start(worker)
+
+    def _accept_report(self, token: int, report: DiagnosticReport) -> None:
+        self._diagnostic_busy = False
+        if token == self._diagnostic_epoch:
+            self.handle_diagnostic_report(report)
+        elif getattr(self, "_return_pending", False):
+            self._return_pending = False
+            self.exit_requested.emit()
+
+    def _accept_failure(self, token: int, message: str) -> None:
+        self._diagnostic_busy = False
+        if token == self._diagnostic_epoch:
+            self.handle_diagnostic_failure(message)
+        elif getattr(self, "_return_pending", False):
+            self._return_pending = False
+            self.exit_requested.emit()
 
     @Slot(object)
     def handle_diagnostic_report(self, report: DiagnosticReport) -> None:
@@ -1078,6 +1100,8 @@ class WorkflowPage(QWidget):
             return
         page = self.page_stack.currentIndex()
         if page == self.CONNECTION:
+            self._diagnostic_epoch += 1
+            self.diagnostic_report = None
             self.exit_requested.emit()
         else:
             self.show_page(page - 1)
