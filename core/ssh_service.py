@@ -27,6 +27,17 @@ def sha256_fingerprint(key: paramiko.PKey) -> str:
 
 
 class SshService:
+    @staticmethod
+    def _known_host_name(host: str, port: int) -> str:
+        return host if port == 22 else f"[{host}]:{port}"
+
+    def has_pinned_host(self, host: str, port: int, known_hosts: Path) -> bool:
+        if not known_hosts.exists():
+            return False
+        host_keys = paramiko.HostKeys()
+        host_keys.load(str(known_hosts))
+        return host_keys.lookup(self._known_host_name(host, port)) is not None
+
     def _remote_key(self, host: str, port: int, timeout: float) -> paramiko.PKey:
         sock = socket.create_connection((host, port), timeout=timeout)
         transport = paramiko.Transport(sock)
@@ -41,6 +52,20 @@ class SshService:
     def inspect_host_key(self, host: str, port: int, timeout: float = 8) -> HostIdentity:
         key = self._remote_key(host, port, timeout)
         return HostIdentity(key.get_name(), sha256_fingerprint(key))
+
+    def is_host_key_trusted(
+        self, host: str, port: int, identity: HostIdentity, known_hosts: Path
+    ) -> bool:
+        """Return whether the inspected identity is already pinned locally."""
+        if not known_hosts.exists():
+            return False
+        host_keys = paramiko.HostKeys()
+        host_keys.load(str(known_hosts))
+        hostname = self._known_host_name(host, port)
+        stored = host_keys.lookup(hostname)
+        if not stored or identity.algorithm not in stored:
+            return False
+        return sha256_fingerprint(stored[identity.algorithm]) == identity.fingerprint
 
     def enroll_host_key(
         self,
@@ -58,7 +83,7 @@ class SshService:
         host_keys = paramiko.HostKeys()
         if known_hosts.exists():
             host_keys.load(str(known_hosts))
-        hostname = host if port == 22 else f"[{host}]:{port}"
+        hostname = self._known_host_name(host, port)
         host_keys.add(hostname, identity.algorithm, key)
         known_hosts.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         host_keys.save(str(known_hosts))
