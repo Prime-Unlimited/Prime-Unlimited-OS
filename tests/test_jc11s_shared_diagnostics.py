@@ -40,8 +40,7 @@ def test_unrecognized_jc11s_product_cannot_unlock_key_setup():
 
 
 def test_native_winusb_selected_by_default_on_windows(monkeypatch):
-    from core import diagnostic_service
-    from core import windows_fastboot
+    from core import diagnostic_service, windows_fastboot
 
     marker = object()
     monkeypatch.setattr(diagnostic_service.platform, "system", lambda: "Windows")
