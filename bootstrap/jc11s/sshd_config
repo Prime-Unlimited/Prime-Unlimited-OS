@@ -5,11 +5,10 @@ AuthorizedKeysFile /data/prime-ssh/authorized_keys
 AuthenticationMethods publickey
 PubkeyAuthentication yes
 PasswordAuthentication no
-ChallengeResponseAuthentication no
+KbdInteractiveAuthentication no
 PermitEmptyPasswords no
 PermitRootLogin prohibit-password
 AllowUsers root
-UsePAM no
 StrictModes yes
 AllowAgentForwarding no
 AllowTcpForwarding no
