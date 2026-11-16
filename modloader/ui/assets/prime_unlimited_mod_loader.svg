@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="768" viewBox="0 0 1920 768" role="img" aria-label="Prime Unlimited Mod Loader banner">
+ <defs>
+  <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b0d0f"/><stop offset="1" stop-color="#080a0c"/></linearGradient>
+  <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#202429"/><stop offset="1" stop-color="#171a1e"/></linearGradient>
+  <linearGradient id="knob" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#191c20"/><stop offset="1" stop-color="#101214"/></linearGradient>
+  <pattern id="scan" width="4" height="4" patternUnits="userSpaceOnUse"><path d="M0 0H4" stroke="#fff" stroke-opacity=".018" stroke-width=".65"/></pattern>
+  <clipPath id="clip"><rect x="29" y="118" width="1862" height="533" rx="92"/></clipPath>
+ </defs>
+ <rect width="1920" height="768" fill="#000"/>
+ <rect x="29" y="118" width="1862" height="533" rx="92" fill="url(#panel)" stroke="#292d32" stroke-width="7"/>
+ <g clip-path="url(#clip)">
+  <rect x="29" y="118" width="1862" height="533" fill="url(#scan)"/>
+  <circle cx="1665" cy="388" r="232" fill="none" stroke="url(#ring)" stroke-width="47"/>
+  <circle cx="1665" cy="388" r="125" fill="url(#knob)" stroke="#292d32" stroke-width="3"/>
+  <rect x="1652" y="140" width="26" height="65" rx="13" fill="#ff541c"/>
+ </g>
+ <circle cx="270" cy="383" r="111" fill="none" stroke="#f5f3ee" stroke-width="23"/>
+ <rect x="257" y="298" width="26" height="80" rx="13" fill="#ff541c"/>
+ <circle cx="270" cy="375" r="28" fill="#f5f3ee"/>
+ <path d="M451 264V492" stroke="#f2f0ea" stroke-width="3"/>
+ <g font-family="DejaVu Sans, Arial, sans-serif" font-weight="900" letter-spacing="-3" fill="#f5f3ee">
+  <text x="499" y="349" font-size="99" textLength="903" lengthAdjust="spacingAndGlyphs">PRIME UNLIMITED</text>
+  <text x="499" y="474" font-size="131" textLength="310" lengthAdjust="spacingAndGlyphs">MOD</text>
+  <text x="837" y="474" font-size="131" textLength="525" lengthAdjust="spacingAndGlyphs" fill="#ff541c">LOADER</text>
+ </g>
+</svg>
