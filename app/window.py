@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.jc11s_window import WorkflowPage as Jc11sWorkflowPage
 from core.device_detection import DetectionState
 from core.device_discovery import DiscoveryError, DiscoveryResult, discover_device
 from core.diagnostic_service import DiagnosticReport, UsbDiagnosticService
