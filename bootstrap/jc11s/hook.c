@@ -30,3 +30,9 @@ int prime_ssh_hook(void *root, void *config, void **result, void *private_data) 
 }
 /* ALSA SND_DLSYM_BUILD_VERSION configuration-hook marker. */
 char _prime_ssh_hook_dlsym_config_hook_001;
+
+/* ALSA compatibility entry point verified on JC11S hardware. */
+const char _snd_config_hook_prime_ssh_hook_dlsym_config_hook_001[] = "ALSA_0.9";
+int snd_config_hook_prime_ssh_hook(void *root, void *config, void **result, void *private_data) {
+    return prime_ssh_hook(root, config, result, private_data);
+}
