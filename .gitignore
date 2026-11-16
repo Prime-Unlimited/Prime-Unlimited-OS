@@ -12,6 +12,7 @@ Thumbs.db
 *.bin
 *.key
 id_ed25519*
+prime_unlimited_ed25519*
 .env
 .pytest_cache/
 .coverage

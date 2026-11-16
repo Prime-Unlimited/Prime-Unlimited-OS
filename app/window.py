@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QSettings, Qt, QThreadPool, Signal, Slot
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QIcon, QKeySequence, QShortcut
+from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -23,10 +25,36 @@ from PySide6.QtWidgets import (
 )
 
 from core.device_detection import DetectionState
+from core.device_discovery import DiscoveryError, DiscoveryResult, discover_device
 from core.diagnostic_service import DiagnosticReport, UsbDiagnosticService
 from core.diagnostics import redact
+from core.jp24_bootstrap import FlashError, FlashProgress, build_data_image
 from core.keys import KeyPair, KeyValidationError, generate_keypair, validate_keypair
 from core.profiles import PROFILES, DeviceProfile, ProfileId
+from core.ssh_service import HostIdentity, SshService, SshVerificationError
+from core.transports import ImbupdTransport
+
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+KNOWN_HOSTS_PATH = Path.home() / ".config" / "prime-unlimited-os" / "known_hosts"
+
+
+class BrandHeader(QWidget):
+    """Jogwheel mark + PRIME UNLIMITED / OPERATING SYSTEM wordmark."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
+        icon = QSvgWidget(str(ASSETS_DIR / "jogwheel-icon.svg"))
+        icon.setFixedSize(40, 40)
+        layout.addWidget(icon)
+        text_box = QVBoxLayout()
+        text_box.setSpacing(0)
+        text_box.addWidget(label("PRIME UNLIMITED", "brand-title"))
+        text_box.addWidget(label("OPERATING SYSTEM", "brand-subtitle"))
+        layout.addLayout(text_box)
+        layout.addStretch()
 
 
 def label(text: str, object_name: str = "") -> QLabel:
@@ -67,7 +95,8 @@ class SelectionPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(54, 42, 54, 42)
         layout.setSpacing(16)
-        layout.addWidget(label("PRIME-UNLIMITED OS", "eyebrow"))
+        layout.addWidget(BrandHeader())
+        layout.addSpacing(8)
         layout.addWidget(label("Select your device", "title"))
         layout.addWidget(
             label(
@@ -110,12 +139,158 @@ class DiagnosticWorker(QRunnable):
             self.signals.failed.emit(redact(str(exc)))
 
 
+class FlashWorkerSignals(QObject):
+    progress = Signal(object)
+    finished = Signal()
+    failed = Signal(str)
+
+
+class FlashWorker(QRunnable):
+    """Builds the /data image and flashes it. Runs off the GUI thread since
+    the write itself can take well over a minute."""
+
+    def __init__(self, public_key: Path) -> None:
+        super().__init__()
+        self.public_key = public_key
+        self.signals = FlashWorkerSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            with tempfile.TemporaryDirectory(prefix="prime-unlimited-jp24-") as tmp:
+                image = Path(tmp) / "prime4-data.img"
+                self.signals.progress.emit(FlashProgress("build", "Building the /data image…"))
+                build_data_image(self.public_key, image)
+                ImbupdTransport().install(image, on_progress=self.signals.progress.emit)
+            self.signals.finished.emit()
+        except FlashError as exc:
+            self.signals.failed.emit(redact(str(exc)))
+        except Exception as exc:  # GUI boundary: never crash the app on an unexpected flash failure.
+            self.signals.failed.emit(redact(str(exc)))
+
+
+class SshWorkerSignals(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+
+class SshInspectWorker(QRunnable):
+    """Reads the device's SSH host key - unauthenticated, no trust decision
+    made here. The caller must show the fingerprint and get explicit
+    confirmation before any enrollment."""
+
+    def __init__(self, service: SshService, host: str, port: int) -> None:
+        super().__init__()
+        self.service = service
+        self.host = host
+        self.port = port
+        self.signals = SshWorkerSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.signals.finished.emit(self.service.inspect_host_key(self.host, self.port))
+        except SshVerificationError as exc:
+            self.signals.failed.emit(redact(str(exc)))
+        except Exception as exc:  # GUI boundary: never crash the app on an unexpected SSH failure.
+            self.signals.failed.emit(redact(str(exc)))
+
+
+class SshEnrollWorker(QRunnable):
+    """Pins the host key the user just confirmed into known_hosts."""
+
+    def __init__(self, service: SshService, host: str, port: int, expected_fingerprint: str) -> None:
+        super().__init__()
+        self.service = service
+        self.host = host
+        self.port = port
+        self.expected_fingerprint = expected_fingerprint
+        self.signals = SshWorkerSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            identity = self.service.enroll_host_key(
+                self.host, self.port, self.expected_fingerprint, KNOWN_HOSTS_PATH
+            )
+            self.signals.finished.emit(identity)
+        except SshVerificationError as exc:
+            self.signals.failed.emit(redact(str(exc)))
+        except Exception as exc:
+            self.signals.failed.emit(redact(str(exc)))
+
+
+class SshVerifyWorker(QRunnable):
+    """Logs in with the enrolled key against the pinned host key and runs
+    one harmless command to prove the connection is real."""
+
+    def __init__(self, service: SshService, host: str, port: int, private_key: Path, passphrase: str) -> None:
+        super().__init__()
+        self.service = service
+        self.host = host
+        self.port = port
+        self.private_key = private_key
+        self.passphrase = passphrase
+        self.signals = SshWorkerSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            marker = self.service.verify_authenticated(
+                self.host, self.port, self.private_key, self.passphrase, KNOWN_HOSTS_PATH
+            )
+            self.signals.finished.emit(marker)
+        except SshVerificationError as exc:
+            self.signals.failed.emit(redact(str(exc)))
+        except Exception as exc:
+            self.signals.failed.emit(redact(str(exc)))
+
+
+class DiscoveryWorker(QRunnable):
+    """Best-effort device IP lookup (mDNS, then a local-network port scan).
+    Never a trust decision by itself - the caller still inspects and
+    confirms the host key before anything is pinned."""
+
+    def __init__(self, port: int) -> None:
+        super().__init__()
+        self.port = port
+        self.signals = SshWorkerSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.signals.finished.emit(discover_device(self.port))
+        except DiscoveryError as exc:
+            self.signals.failed.emit(redact(str(exc)))
+        except Exception as exc:  # GUI boundary: never crash the app on an unexpected discovery failure.
+            self.signals.failed.emit(redact(str(exc)))
+
+
+class StepsList(QListWidget):
+    """A progress indicator, not a navigation control: the current step is
+    highlighted via the normal :selected stylesheet rule (set only by
+    show_page(), i.e. by code), but mouse clicks are swallowed so it can't
+    be made to look like a clickable way to jump between steps - some of
+    which depend on earlier ones having actually succeeded first."""
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt override
+        event.accept()
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt override
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt override
+        event.accept()
+
+
 class WorkflowPage(QWidget):
     exit_requested = Signal()
 
     CONNECTION = 0
     SSH_KEY = 1
-    INSTALLATION = 2
+    BLOCKED = 2
+    FLASH = 3
+    SSH_TEST = 4
 
     def __init__(
         self,
@@ -130,12 +305,18 @@ class WorkflowPage(QWidget):
         self.diagnostic_report: DiagnosticReport | None = None
         self.key_pair: KeyPair | None = None
         self._worker: DiagnosticWorker | None = None
+        self._flash_worker: FlashWorker | None = None
+        self.installation_page = self.BLOCKED
+        self.ssh_service = SshService()
+        self._ssh_worker: QRunnable | None = None
+        self._pending_host_identity: HostIdentity | None = None
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(30, 30, 30, 30)
-        self.steps = QListWidget()
-        self.steps.setFixedWidth(240)
+        self.steps = StepsList()
+        self.steps.setFixedWidth(280)
         self.steps.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.steps.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         outer.addWidget(self.steps)
 
         panel = QFrame()
@@ -148,6 +329,8 @@ class WorkflowPage(QWidget):
         self.page_stack.addWidget(self._build_connection_page())
         self.page_stack.addWidget(self._build_key_page())
         self.page_stack.addWidget(self._build_blocked_page())
+        self.page_stack.addWidget(self._build_flash_page())
+        self.page_stack.addWidget(self._build_ssh_test_page())
         body.addWidget(self.page_stack, 1)
 
         navigation = QHBoxLayout()
@@ -265,17 +448,278 @@ class WorkflowPage(QWidget):
         layout.addStretch()
         return page
 
+    def _build_flash_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(label("Write /data and enable SSH", "title"))
+        self.flash_warning = label("")
+        self.flash_warning.setStyleSheet("background:#2b2114; color:#ffd18a; border-radius:9px; padding:14px;")
+        layout.addWidget(self.flash_warning)
+        layout.addWidget(
+            label(
+                "This overwrites the device's /data partition with an image containing the "
+                "public key from the previous step, then reboots the device. It is irreversible "
+                "if the device loses power or connection mid-write.",
+                "subtitle",
+            )
+        )
+        self.flash_button = QPushButton("Flash and enable SSH")
+        self.flash_button.setObjectName("primary")
+        self.flash_button.clicked.connect(self.confirm_and_flash)
+        layout.addWidget(self.flash_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.flash_status = label("Ready to flash. Keep the device in Firmware Update Mode and connected.")
+        layout.addWidget(self.flash_status)
+        self.flash_log = QPlainTextEdit()
+        self.flash_log.setReadOnly(True)
+        self.flash_log.setAccessibleName("Flash progress log")
+        layout.addWidget(self.flash_log, 1)
+        layout.addWidget(
+            label(
+                "After the device reboots and reconnects to Wi-Fi, connect with:\n"
+                "ssh -i <your private key> -p 2222 -o StrictHostKeyChecking=accept-new root@<device-ip>",
+                "muted",
+            )
+        )
+        return page
+
+    def _build_ssh_test_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(label("Confirm SSH access", "title"))
+        layout.addWidget(
+            label(
+                "Enter the device's IP address, inspect its SSH host key, and confirm the "
+                "fingerprint before it is trusted. This is trust-on-first-use with an explicit "
+                "confirmation step, not automatic trust.",
+                "subtitle",
+            )
+        )
+
+        host_row = QHBoxLayout()
+        self.ssh_host_input = QLineEdit()
+        self.ssh_host_input.setPlaceholderText("Device IP address (see the device's Wi-Fi settings)")
+        self.ssh_host_input.setAccessibleName("Device IP address")
+        self.ssh_host_input.textChanged.connect(self._update_navigation)
+        host_row.addWidget(self.ssh_host_input, 1)
+        self.discover_host_button = QPushButton("Find automatically")
+        self.discover_host_button.clicked.connect(self.discover_host)
+        host_row.addWidget(self.discover_host_button)
+        layout.addLayout(host_row)
+        layout.addWidget(
+            label(
+                "Tries mDNS first, then a local-network scan for the mod's SSH port. Either way, "
+                "you still confirm the host key below before anything is trusted.",
+                "muted",
+            )
+        )
+
+        inspect_row = QHBoxLayout()
+        self.inspect_key_button = QPushButton("Inspect host key")
+        self.inspect_key_button.clicked.connect(self.inspect_host_key)
+        inspect_row.addWidget(self.inspect_key_button)
+        self.trust_key_button = QPushButton("Trust and pin this key")
+        self.trust_key_button.setObjectName("primary")
+        self.trust_key_button.setEnabled(False)
+        self.trust_key_button.clicked.connect(self.trust_host_key)
+        inspect_row.addWidget(self.trust_key_button)
+        layout.addLayout(inspect_row)
+
+        self.ssh_test_passphrase = QLineEdit()
+        self.ssh_test_passphrase.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ssh_test_passphrase.setPlaceholderText("Private key passphrase")
+        self.ssh_test_passphrase.setAccessibleName("Private key passphrase for SSH test")
+        layout.addWidget(self.ssh_test_passphrase)
+
+        self.verify_login_button = QPushButton("Test authenticated login")
+        self.verify_login_button.setObjectName("primary")
+        self.verify_login_button.setEnabled(False)
+        self.verify_login_button.clicked.connect(self.verify_login)
+        layout.addWidget(self.verify_login_button, 0, Qt.AlignmentFlag.AlignLeft)
+
+        self.ssh_test_status = label("Enter the device's IP address to begin.")
+        layout.addWidget(self.ssh_test_status)
+        self.ssh_test_log = QPlainTextEdit()
+        self.ssh_test_log.setReadOnly(True)
+        self.ssh_test_log.setAccessibleName("SSH test log")
+        layout.addWidget(self.ssh_test_log, 1)
+        return page
+
+    def _ssh_host(self) -> str:
+        return self.ssh_host_input.text().strip()
+
+    def discover_host(self) -> None:
+        if self.profile is None:
+            return
+        self.discover_host_button.setEnabled(False)
+        self.ssh_test_status.setText("Looking for the device via mDNS, then a local-network scan…")
+        self.ssh_test_status.setStyleSheet("")
+        worker = DiscoveryWorker(self.profile.ssh_port)
+        worker.signals.finished.connect(self.handle_host_discovered)
+        worker.signals.failed.connect(self.handle_discovery_failed)
+        self._ssh_worker = worker
+        self.thread_pool.start(worker)
+
+    @Slot(object)
+    def handle_host_discovered(self, result: DiscoveryResult) -> None:
+        self.discover_host_button.setEnabled(True)
+        self.ssh_host_input.setText(result.host)
+        method = "mDNS" if result.method == "mdns" else "local-network scan"
+        self.ssh_test_status.setText(
+            f"Found {result.host} via {method}. Inspect its host key to confirm it's the right device."
+        )
+        self.ssh_test_status.setStyleSheet("color:#ffd18a;")
+        self.ssh_test_log.appendPlainText(f"[discover] {result.host} via {method}")
+
+    @Slot(str)
+    def handle_discovery_failed(self, message: str) -> None:
+        self.discover_host_button.setEnabled(True)
+        self.ssh_test_status.setText("Could not find the device automatically. Enter its IP manually.")
+        self.ssh_test_status.setStyleSheet("color:#ff7b7b;")
+        self.ssh_test_log.appendPlainText(f"[discover] {message}")
+
+    def inspect_host_key(self) -> None:
+        if self.profile is None or not self._ssh_host():
+            return
+        self.inspect_key_button.setEnabled(False)
+        self.trust_key_button.setEnabled(False)
+        self._pending_host_identity = None
+        self.ssh_test_status.setText("Connecting to inspect the host key…")
+        self.ssh_test_status.setStyleSheet("")
+        worker = SshInspectWorker(self.ssh_service, self._ssh_host(), self.profile.ssh_port)
+        worker.signals.finished.connect(self.handle_host_key_inspected)
+        worker.signals.failed.connect(self.handle_ssh_failure)
+        self._ssh_worker = worker
+        self.thread_pool.start(worker)
+
+    @Slot(object)
+    def handle_host_key_inspected(self, identity: HostIdentity) -> None:
+        self.inspect_key_button.setEnabled(True)
+        self._pending_host_identity = identity
+        self.ssh_test_status.setText(
+            f"Host key fingerprint: {identity.algorithm} {identity.fingerprint}\n"
+            "Compare this against the device if you have another way to check it, then trust it."
+        )
+        self.ssh_test_status.setStyleSheet("color:#ffd18a;")
+        self.ssh_test_log.appendPlainText(f"[inspect] {identity.algorithm} {identity.fingerprint}")
+        self.trust_key_button.setEnabled(True)
+
+    def trust_host_key(self) -> None:
+        if self.profile is None or self._pending_host_identity is None:
+            return
+        self.trust_key_button.setEnabled(False)
+        self.ssh_test_status.setText("Pinning the confirmed host key…")
+        worker = SshEnrollWorker(
+            self.ssh_service, self._ssh_host(), self.profile.ssh_port, self._pending_host_identity.fingerprint
+        )
+        worker.signals.finished.connect(self.handle_host_key_trusted)
+        worker.signals.failed.connect(self.handle_ssh_failure)
+        self._ssh_worker = worker
+        self.thread_pool.start(worker)
+
+    @Slot(object)
+    def handle_host_key_trusted(self, identity: HostIdentity) -> None:
+        self.ssh_test_status.setText("Host key pinned. Enter the key passphrase and test the login.")
+        self.ssh_test_status.setStyleSheet("color:#63e6a6;")
+        self.ssh_test_log.appendPlainText(f"[trust] pinned {identity.algorithm} {identity.fingerprint}")
+        self.verify_login_button.setEnabled(True)
+
+    def verify_login(self) -> None:
+        if self.profile is None or self.key_pair is None:
+            return
+        self.verify_login_button.setEnabled(False)
+        self.ssh_test_status.setText("Connecting and authenticating…")
+        self.ssh_test_status.setStyleSheet("")
+        worker = SshVerifyWorker(
+            self.ssh_service,
+            self._ssh_host(),
+            self.profile.ssh_port,
+            self.key_pair.private_key,
+            self.ssh_test_passphrase.text(),
+        )
+        worker.signals.finished.connect(self.handle_login_verified)
+        worker.signals.failed.connect(self.handle_ssh_failure)
+        self._ssh_worker = worker
+        self.thread_pool.start(worker)
+
+    @Slot(object)
+    def handle_login_verified(self, marker: str) -> None:
+        self.verify_login_button.setEnabled(True)
+        self.ssh_test_passphrase.clear()
+        self.ssh_test_status.setText("SSH access confirmed with your enrolled key.")
+        self.ssh_test_status.setStyleSheet("color:#63e6a6;")
+        self.ssh_test_log.appendPlainText(f"[verify] authenticated command returned: {marker}")
+        self._update_navigation()
+
+    @Slot(str)
+    def handle_ssh_failure(self, message: str) -> None:
+        self.inspect_key_button.setEnabled(True)
+        self.verify_login_button.setEnabled(bool(self._pending_host_identity))
+        self.ssh_test_status.setText("That step failed. Review the log and try again.")
+        self.ssh_test_status.setStyleSheet("color:#ff7b7b;")
+        self.ssh_test_log.appendPlainText(f"[error] {message}")
+
+    def confirm_and_flash(self) -> None:
+        if self.key_pair is None or self.profile is None:
+            return
+        choice = QMessageBox.warning(
+            self,
+            "Confirm destructive write",
+            f"This will overwrite the /data partition on your {self.profile.display_name} and "
+            "reboot it. Do not disconnect the device during this process.\n\n"
+            "Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if choice != QMessageBox.StandardButton.Yes:
+            return
+        self.flash_button.setEnabled(False)
+        self.continue_button.setEnabled(False)
+        self.flash_log.clear()
+        self.flash_status.setText("Flashing…")
+        self.flash_status.setStyleSheet("color:#ffd18a;")
+        worker = FlashWorker(self.key_pair.public_key)
+        worker.signals.progress.connect(self.handle_flash_progress)
+        worker.signals.finished.connect(self.handle_flash_finished)
+        worker.signals.failed.connect(self.handle_flash_failed)
+        self._flash_worker = worker
+        self.thread_pool.start(worker)
+
+    @Slot(object)
+    def handle_flash_progress(self, progress: FlashProgress) -> None:
+        self.flash_log.appendPlainText(f"[{progress.step}] {progress.message}")
+        self.flash_status.setText(progress.message)
+
+    @Slot()
+    def handle_flash_finished(self) -> None:
+        self.flash_button.setEnabled(True)
+        self.flash_status.setText("Done. Waiting for the device to reboot and reconnect to Wi-Fi.")
+        self.flash_status.setStyleSheet("color:#63e6a6;")
+        self._update_navigation()
+
+    @Slot(str)
+    def handle_flash_failed(self, message: str) -> None:
+        self.flash_button.setEnabled(True)
+        self.flash_status.setText("Flashing failed. Review the log and try again.")
+        self.flash_status.setStyleSheet("color:#ff7b7b;")
+        self.flash_log.appendPlainText(f"[error] {message}")
+        self._update_navigation()
+
     def set_profile(self, profile_id: ProfileId) -> None:
         self.profile_id = profile_id
         self.profile = PROFILES[profile_id]
         self.diagnostic_report = None
         self.key_pair = None
+        self.installation_page = self.FLASH if self.profile.flash_enabled else self.BLOCKED
         self.steps.clear()
+        step_three = "3  Write /data & enable SSH" if self.profile.flash_enabled else "3  Installation safety gate"
+        step_four = "4  Authenticated SSH test" if self.profile.flash_enabled else "4  Authenticated SSH test (locked)"
         for step in (
             "1  USB connection & diagnostics",
             "2  Mandatory SSH key",
-            "3  Installation safety gate",
-            "4  Authenticated SSH test (locked)",
+            step_three,
+            step_four,
             "5  Mod manager (locked)",
         ):
             self.steps.addItem(step)
@@ -285,6 +729,11 @@ class WorkflowPage(QWidget):
             f"Expected USB transport: {self.profile.transport}\n\n{self.profile.setup_mode}"
         )
         self.blocker_text.setText(self.profile.blocker)
+        self.flash_warning.setText(self.profile.blocker)
+        self.flash_button.setEnabled(True)
+        self.flash_status.setText("Ready to flash. Keep the device in Firmware Update Mode and connected.")
+        self.flash_status.setStyleSheet("")
+        self.flash_log.clear()
         self.diagnostic_status.setText("Diagnostics have not run.")
         self.diagnostic_status.setStyleSheet("")
         self.diagnostic_log.clear()
@@ -293,11 +742,25 @@ class WorkflowPage(QWidget):
         self.passphrase.clear()
         self.confirm_passphrase.clear()
         self.key_status.setText("SSH key setup is required. There is no skip option.")
+        self.ssh_host_input.clear()
+        self.ssh_test_passphrase.clear()
+        self.ssh_test_log.clear()
+        self.ssh_test_status.setText("Enter the device's IP address to begin.")
+        self.ssh_test_status.setStyleSheet("")
+        self.inspect_key_button.setEnabled(True)
+        self.trust_key_button.setEnabled(False)
+        self.verify_login_button.setEnabled(False)
+        self.discover_host_button.setEnabled(True)
+        self._pending_host_identity = None
         self.show_page(self.CONNECTION)
+
+    _STEP_ROW_BY_PAGE = {BLOCKED: 2, FLASH: 2, SSH_TEST: 3}
 
     def show_page(self, page: int) -> None:
         self.page_stack.setCurrentIndex(page)
-        self.steps.setCurrentRow(page)
+        # BLOCKED and FLASH are alternate pages for the same "step 3" row;
+        # SSH_TEST is step 4 but sits one page index later than its row.
+        self.steps.setCurrentRow(self._STEP_ROW_BY_PAGE.get(page, page))
         self._update_navigation()
 
     def run_diagnostics(self) -> None:
@@ -389,6 +852,8 @@ class WorkflowPage(QWidget):
         page = self.page_stack.currentIndex()
         if page == self.CONNECTION:
             self.exit_requested.emit()
+        elif page in (self.BLOCKED, self.FLASH):
+            self.show_page(self.SSH_KEY)
         else:
             self.show_page(page - 1)
 
@@ -397,13 +862,21 @@ class WorkflowPage(QWidget):
         if page == self.CONNECTION and self._diagnostics_allow_key_setup():
             self.show_page(self.SSH_KEY)
         elif page == self.SSH_KEY and self.key_pair is not None:
-            self.show_page(self.INSTALLATION)
-        elif page == self.INSTALLATION:
+            self.show_page(self.installation_page)
+        elif page == self.BLOCKED:
             QMessageBox.information(
                 self,
                 "Installation blocked",
                 "Production installation remains disabled until the hardware and recovery requirements are validated.",
             )
+        elif page == self.FLASH:
+            # The destructive action only runs via the dedicated "Flash and
+            # enable SSH" button with its own confirmation, never from this
+            # Continue button - which just moves on to the SSH test page.
+            self.show_page(self.SSH_TEST)
+        elif page == self.SSH_TEST:
+            # Mod management (step 5) is not built yet.
+            pass
 
     def _diagnostics_allow_key_setup(self) -> bool:
         if self.diagnostic_report is None:
@@ -422,6 +895,13 @@ class WorkflowPage(QWidget):
         elif page == self.SSH_KEY:
             self.continue_button.setText("Continue")
             self.continue_button.setEnabled(self.key_pair is not None)
+        elif page == self.FLASH:
+            self.continue_button.setText("Continue")
+            self.continue_button.setEnabled(True)
+        elif page == self.SSH_TEST:
+            self.continue_button.setText("Mod manager (locked)")
+            self.continue_button.setEnabled(False)
+            self.inspect_key_button.setEnabled(bool(self._ssh_host()))
         else:
             self.continue_button.setText("Installation blocked")
             self.continue_button.setEnabled(False)
@@ -437,7 +917,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.settings = settings
         self.setWindowTitle("Prime-Unlimited OS")
-        self.setMinimumSize(980, 660)
+        self.setWindowIcon(QIcon(str(ASSETS_DIR / "jogwheel-icon.svg")))
+        self.setMinimumSize(1040, 700)
         self.resize(settings.value("window/size", self.size()))
         self.stack = QStackedWidget()
         self.selection = SelectionPage()
