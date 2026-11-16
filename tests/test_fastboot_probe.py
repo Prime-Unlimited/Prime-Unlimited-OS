@@ -10,6 +10,7 @@ from core.fastboot_probe import (
 class FastbootProbeTests(unittest.TestCase):
     def test_parse_historical_jc11s_values(self):
         output = """
+(bootloader) product: rk3288-az01-jc11s
 (bootloader) current-slot: a
 (bootloader) is-userspace: no
 (bootloader) partition-size:data: 0x8fd7be00
