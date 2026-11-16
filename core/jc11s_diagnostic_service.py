@@ -29,7 +29,7 @@ class DiagnosticReport:
 
 
 class UsbDiagnosticService:
-    """Runs both read-only probes so a wrong selected transport is reported safely."""
+    """Only runs the selected JC11S native Windows Fastboot path."""
 
     def __init__(
         self,
@@ -37,12 +37,18 @@ class UsbDiagnosticService:
         imbupd: Probe | None = None,
         discovery: UsbDiscovery | None = None,
     ) -> None:
-        self.discovery = discovery or create_usb_discovery()
-        self.fastboot = fastboot or self._default_fastboot()
-        self.imbupd = imbupd or ImbupdTransport()
+        self.discovery = discovery
+        self.fastboot = fastboot
+        self.imbupd = imbupd
         self._selected_device: str | None = None
 
     def probe(self, selected: ProfileId, selected_device: str | None = None) -> DiagnosticReport:
+        if selected != ProfileId.JC11S:
+            raise ValueError("JC11S diagnostics require explicit JC11S selection.")
+        if self.discovery is None:
+            self.discovery = create_usb_discovery()
+        if self.fastboot is None:
+            self.fastboot = self._default_fastboot()
         self._selected_device = selected_device
         evidence: list[ProbeEvidence] = []
         log: list[str] = ["Starting read-only USB diagnostics."]
@@ -64,7 +70,7 @@ class UsbDiagnosticService:
                 f"candidate: {candidate.display_name}; VID/PID {candidate.vid_pid}; "
                 f"source {candidate.source}; model/revision unverified"
             )
-        for name, transport in (("fastboot", self.fastboot), ("imbupd", self.imbupd)):
+        for name, transport in (("fastboot", self.fastboot),):
             try:
                 identifier = (
                     selected_device if name == ("fastboot" if selected == ProfileId.JC11S else "imbupd") else None
