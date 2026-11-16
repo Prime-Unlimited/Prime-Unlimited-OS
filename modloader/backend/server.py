@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 from manager import PackageManager
 from registry import ModError
+from resolver import satisfies
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 SHA_RE = re.compile(r"^[a-fA-F0-9]{64}$")
@@ -47,7 +48,14 @@ def load_catalog(path):
 def compatible(mod, model, firmware, architecture=None, abi=None):
     if model not in mod["models"]:
         return False
-    if firmware not in mod.get("firmware", []) and not mod.get("firmwareConstraint"):
+    constraint = mod.get("firmwareConstraint")
+    if constraint:
+        try:
+            if not satisfies(firmware, constraint):
+                return False
+        except ModError:
+            return False
+    elif firmware not in mod.get("firmware", []):
         return False
     return (architecture is None or mod.get("architecture") in (None, architecture)) and \
            (abi is None or mod.get("abi") in (None, abi)) and not mod.get("revoked", False)

@@ -32,6 +32,9 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(compatible(self.entry, "JC11S", "5.0.0"))
         self.assertFalse(compatible(self.entry, "JC11S", "5.0.1"))
         self.assertFalse(compatible(self.entry, "UNKNOWN", "5.0.0"))
+        constrained = {**self.entry, "firmware": [], "firmwareConstraint": ">=5.0,<6.0"}
+        self.assertTrue(compatible(constrained, "JC11S", "5.2.0"))
+        self.assertFalse(compatible(constrained, "JC11S", "6.0.0"))
 
     def test_duplicate_ids_rejected(self):
         with self.assertRaises(ValueError):
