@@ -931,8 +931,6 @@ class WorkflowPage(QWidget):
             self.continue_button.setEnabled(False)
 
 
-from app.jc11s_window import WorkflowPage as Jc11sWorkflowPage
-
 
 class MainWindow(QMainWindow):
     def __init__(
