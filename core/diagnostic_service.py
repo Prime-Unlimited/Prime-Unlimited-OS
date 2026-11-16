@@ -22,16 +22,26 @@ class DiagnosticReport:
 
 
 class UsbDiagnosticService:
-    """Runs both read-only probes so a wrong selected transport is reported safely."""
+    """Only probes the explicitly selected device transport."""
 
     def __init__(self, fastboot: Probe | None = None, imbupd: Probe | None = None) -> None:
-        self.fastboot = fastboot if fastboot is not None else self._default_fastboot()
-        self.imbupd = imbupd or ImbupdTransport()
+        self.fastboot = fastboot
+        self.imbupd = imbupd
 
     def probe(self, selected: ProfileId) -> DiagnosticReport:
         evidence: list[ProbeEvidence] = []
         log: list[str] = ["Starting read-only USB diagnostics."]
-        for name, transport in (("fastboot", self.fastboot), ("imbupd", self.imbupd)):
+        if selected == ProfileId.JC11S:
+            if self.fastboot is None:
+                self.fastboot = self._default_fastboot()
+            name, transport = "fastboot", self.fastboot
+        elif selected == ProfileId.JP24:
+            if self.imbupd is None:
+                self.imbupd = ImbupdTransport()
+            name, transport = "imbupd", self.imbupd
+        else:
+            raise ValueError("Select a supported device first.")
+        for name, transport in ((name, transport),):
             try:
                 devices = transport.probe()
             except TransportError as exc:
