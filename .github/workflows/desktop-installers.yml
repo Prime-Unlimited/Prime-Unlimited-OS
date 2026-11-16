@@ -1,0 +1,86 @@
+name: Desktop installers (Windows and macOS)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/desktop-installer-foundation
+      - feat/integrate-jc11s-jp24
+  pull_request:
+    branches:
+      - feat/desktop-installer-foundation
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            artifact: Prime-Unlimited-OS-Windows
+            binary: dist/Prime-Unlimited-OS.exe
+          - os: macos-latest
+            label: macOS-Apple-Silicon
+            artifact: Prime-Unlimited-OS-macOS-arm64
+            binary: dist/Prime-Unlimited-OS
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip
+      - name: Install project and packaging tools
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Build windowed executable
+        run: python -m PyInstaller --noconfirm --clean packaging/prime-unlimited-os.spec
+
+      - name: Check executable exists
+        shell: python
+        env:
+          BINARY_PATH: ${{ matrix.binary }}
+        run: |
+          import os
+          from pathlib import Path
+          p = Path(os.environ["BINARY_PATH"])
+          assert p.is_file() and p.stat().st_size > 0, f"Missing executable: {p}"
+          print(f"Built {p}: {p.stat().st_size} bytes")
+
+      - name: Generate SHA256
+        shell: python
+        env:
+          BINARY_PATH: ${{ matrix.binary }}
+        run: |
+          import hashlib
+          import os
+          from pathlib import Path
+          p = Path(os.environ["BINARY_PATH"])
+          digest = hashlib.sha256(p.read_bytes()).hexdigest()
+          Path("dist/SHA256SUMS.txt").write_text(f"{digest}  {p.name}\n")
+          print(f"{digest}  {p.name}")
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ github.sha }}
+          path: |
+            ${{ matrix.binary }}
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
