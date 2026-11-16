@@ -98,6 +98,9 @@ class ServiceBoundaryTests(TestCase):
         self.assertIsNotNone(self.wizard.installer_service)
 
     def test_missing_service_blocks_even_with_key(self):
-        self.wizard.key_pair = SimpleNamespace(public_key='safe-test-public-key')
+        public_key = Mock()
+        public_key.read_bytes.return_value = b'safe-test-public-key'
+        self.wizard.key_pair = SimpleNamespace(public_key=public_key)
+        self.wizard._validated_public_key = b'safe-test-public-key'
         self.prepare(self.wizard)
         self.wizard.thread_pool.start.assert_not_called()
