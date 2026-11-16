@@ -10,6 +10,7 @@ on:
   pull_request:
     branches:
       - feat/desktop-installer-foundation
+      - feat/integrate-jc11s-jp24
 
 permissions:
   contents: read
