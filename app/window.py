@@ -276,8 +276,9 @@ class WorkflowPage(QWidget):
         outer = QHBoxLayout(self)
         outer.setContentsMargins(30, 30, 30, 30)
         self.steps = QListWidget()
-        self.steps.setFixedWidth(240)
+        self.steps.setFixedWidth(280)
         self.steps.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.steps.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         outer.addWidget(self.steps)
 
         panel = QFrame()
@@ -836,7 +837,7 @@ class MainWindow(QMainWindow):
         self.settings = settings
         self.setWindowTitle("Prime-Unlimited OS")
         self.setWindowIcon(QIcon(str(ASSETS_DIR / "jogwheel-icon.svg")))
-        self.setMinimumSize(980, 660)
+        self.setMinimumSize(1040, 700)
         self.resize(settings.value("window/size", self.size()))
         self.stack = QStackedWidget()
         self.selection = SelectionPage()
