@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from core.jc11s_flash import FlashPlan, ProbeEvidence, build_for_device, validate_geometry
-from core.jc11s_image import validate_hook
+from core.jc11s_personalize import personalize, build_sparse
 from core.ssh_service import SshService
 from core.windows_fastboot import (
     ExperimentalFirstFlashAuthorization,
@@ -44,7 +44,7 @@ class HardwareReleasePolicy:
         if not self.partition_mapping_verified:
             result.append("Bootloader data → Linux mmcblk0p11 mapping is not independently verified")
         if not self.firmware_compatible:
-            result.append("Fresh-data boot and ALSA bootstrap are not validated on this firmware")
+            result.append("Reference-image boot and authenticated SSH are not yet validated through this installer")
         if not self.recovery_tested:
             result.append("No tested recovery path has been demonstrated")
         return tuple(result)
@@ -95,60 +95,61 @@ class InstallerArtifacts:
 
 
 class NativeWindowsImageBuilder:
-    """Build with bundled Win32 e2fsprogs and a reproducibly built ARMv7 hook."""
+    """Personalize the complete, known-bootable JC11S base image.
 
-    REQUIRED_TOOLS = ("mke2fs.exe", "debugfs.exe", "e2fsck.exe")
+    The application must ship a verified reference image; an empty ext4
+    filesystem or an experimental activation hook is never substituted.
+    """
+
+    REQUIRED_TOOLS = ("debugfs.exe", "e2fsck.exe")
 
     def __init__(self, source_root: Path | None = None) -> None:
         self.source_root = source_root or Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
         self.tool_directory = self.source_root / "vendor" / "windows" / "e2fsprogs" / "bin"
-        self.mke2fs_config = self.source_root / "vendor" / "windows" / "e2fsprogs" / "etc" / "mke2fs.conf"
-        self.hook = self.source_root / "bootstrap" / "jc11s" / "libprime-ssh.so"
-        self.hook_digest = self.hook.with_suffix(self.hook.suffix + ".sha256")
+        self.base_image = self.source_root / "bootstrap" / "jc11s" / "prime-unlimited-jc11s-base.img"
 
     def prerequisites(self) -> BuildPrerequisites:
         required = [
             *(self.tool_directory / name for name in self.REQUIRED_TOOLS),
-            self.mke2fs_config,
-            self.hook,
-            self.hook_digest,
+            self.base_image,
+            self.base_image.with_suffix(self.base_image.suffix + ".sha256"),
         ]
-        missing = tuple(path.relative_to(self.source_root).as_posix() for path in required if not path.is_file())
-        if missing:
-            return BuildPrerequisites(False, missing)
-        try:
-            validate_hook(self.hook)
-            expected = self.hook_digest.read_text(encoding="ascii").split()[0].lower()
-            actual = hashlib.sha256(self.hook.read_bytes()).hexdigest()
-            if expected != actual:
-                return BuildPrerequisites(False, ("ARMv7 hook SHA-256 mismatch",))
-        except (OSError, ValueError, IndexError) as exc:
-            return BuildPrerequisites(False, (f"invalid ARMv7 hook: {exc}",))
-        return BuildPrerequisites(True, ())
+        missing = tuple(
+            path.relative_to(self.source_root).as_posix()
+            for path in required if not path.is_file()
+        )
+        return BuildPrerequisites(not missing, missing)
 
     def build(self, evidence: ProbeEvidence, public_key: Path, progress=None) -> InstallerArtifacts:
         prerequisites = self.prerequisites()
         if not prerequisites.ready:
-            raise InstallerError("Missing bundled build prerequisites: " + ", ".join(prerequisites.missing))
+            raise InstallerError("Missing verified JC11S build prerequisites: " + ", ".join(prerequisites.missing))
         geometry = validate_geometry(evidence)
         root = Path(tempfile.mkdtemp(prefix="prime-unlimited-jc11s-"))
         image = root / "data.ext4"
         sparse = root / "sparse"
         try:
             if progress:
-                progress(10, "Validated bundled ARMv7 hook and native filesystem tools.")
-                progress(25, f"Building exact {geometry.partition_size}-byte ext4 image natively…")
-            plan = build_for_device(
-                evidence,
-                image,
-                public_key,
-                self.hook,
-                sparse,
+                progress(10, "Validating the complete JC11S reference image and client public key.")
+            result = personalize(
+                self.base_image, image, public_key,
+                expected_size=geometry.partition_size,
                 tool_directory=self.tool_directory,
-                mke2fs_config=self.mke2fs_config,
             )
             if progress:
-                progress(100, "Native ext4 image and sparse transfer set fully verified.")
+                progress(60, "Public key injected and verified; preparing sparse transfer.")
+            transfers = build_sparse(image, sparse, geometry.max_download_size)
+            plan = FlashPlan(
+                partition=geometry.partition,
+                image=image,
+                size=geometry.partition_size,
+                sha256=result["sha256"],
+                max_download=geometry.max_download_size,
+                sparse_directory=sparse,
+                transfers=transfers,
+            )
+            if progress:
+                progress(100, "Complete JC11S image and SSH public key verified.")
             return InstallerArtifacts(root, image, sparse, plan)
         except Exception:
             shutil.rmtree(root, ignore_errors=True)
