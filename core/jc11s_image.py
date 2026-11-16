@@ -97,6 +97,7 @@ def build(
         "prime-ssh/activate.sh": ((SOURCE / "activate.sh").read_bytes(), 0o700),
         "prime-ssh/sshd_config": ((SOURCE / "sshd_config").read_bytes(), 0o600),
         "system/var/overlay/lib/alsa/conf.d/99-prime-ssh.conf": ((SOURCE / "99-prime-ssh.conf").read_bytes(), 0o644),
+        "system/var-lib/alsa/conf.d/99-prime-ssh.conf": ((SOURCE / "99-prime-ssh.conf").read_bytes(), 0o644),
     }
     directories = {"prime-ssh/hostkeys"}
     for name in files:
