@@ -9,12 +9,14 @@ import (
 )
 
 type launchRun struct {
-	ID          string         `json:"id"`
-	RootModID   string         `json:"rootModId"`
-	State       string         `json:"state"`
-	StartedAt   int64          `json:"startedAt"`
-	CompletedAt int64          `json:"completedAt"`
-	Steps       []launchStatus `json:"steps"`
+	ID           string         `json:"id"`
+	RootModID    string         `json:"rootModId"`
+	State        string         `json:"state"`
+	StartedAt    int64          `json:"startedAt"`
+	CompletedAt  int64          `json:"completedAt"`
+	Steps        []launchStatus `json:"steps"`
+	FailureCount int            `json:"failureCount"`
+	Quarantined  bool           `json:"quarantined"`
 }
 
 func resolveInstalledLaunchOrder(state registryState, id string) ([]string, error) {
@@ -89,6 +91,24 @@ func launchEnabledSet(id, root string) (launchRun, error) {
 		return run, err
 	}
 	run.ID = txid
+	safety, err := loadSafetyState(root)
+	if err != nil {
+		return run, err
+	}
+	if safety.SafeMode {
+		run.State, run.CompletedAt = "blocked-safe-mode", time.Now().Unix()
+		if writeErr := writeAtomicJSON(filepath.Join(root, "runtime", "runs", txid+".json"), run); writeErr != nil {
+			return run, writeErr
+		}
+		return run, errors.New("launch blocked by safe mode")
+	}
+	if modState := safety.Mods[id]; modState.Quarantined {
+		run.State, run.CompletedAt, run.FailureCount, run.Quarantined = "blocked-quarantine", time.Now().Unix(), modState.FailureCount, true
+		if writeErr := writeAtomicJSON(filepath.Join(root, "runtime", "runs", txid+".json"), run); writeErr != nil {
+			return run, writeErr
+		}
+		return run, errors.New("launch blocked by quarantine")
+	}
 	state, err := loadRegistry(filepath.Join(root, "registry", "state.json"))
 	if err != nil {
 		return run, err
@@ -107,6 +127,17 @@ func launchEnabledSet(id, root string) (launchRun, error) {
 	run.CompletedAt = time.Now().Unix()
 	if err == nil {
 		run.State = "completed"
+	}
+	modState, safetyErr := recordRunOutcome(root, id, err == nil)
+	if safetyErr != nil {
+		return run, safetyErr
+	}
+	run.FailureCount, run.Quarantined = modState.FailureCount, modState.Quarantined
+	if modState.Quarantined {
+		if _, disableErr := setModEnabled(id, false, root); disableErr != nil {
+			_, _ = setSafeMode(root, true)
+			err = errors.New("quarantine deactivation failed; safe mode entered")
+		}
 	}
 	if writeErr := writeAtomicJSON(filepath.Join(root, "runtime", "runs", txid+".json"), run); writeErr != nil {
 		return run, writeErr

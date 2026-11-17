@@ -97,6 +97,16 @@ func ensureTraverseDirectory(path string) error {
 
 func launchEnabledMod(id, root string) (launchStatus, error) {
 	status := launchStatus{ID: id, State: "failed", ExitCode: -1, StartedAt: time.Now().Unix()}
+	safety, err := loadSafetyState(root)
+	if err != nil {
+		return status, err
+	}
+	if safety.SafeMode {
+		return status, errors.New("launch blocked by safe mode")
+	}
+	if safety.Mods[id].Quarantined {
+		return status, errors.New("launch blocked by quarantine")
+	}
 	state, err := loadRegistry(filepath.Join(root, "registry", "state.json"))
 	if err != nil {
 		return status, err

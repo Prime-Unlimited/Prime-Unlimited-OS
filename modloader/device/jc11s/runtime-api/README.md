@@ -235,3 +235,24 @@ Every attempt receives a random 128-bit run ID and atomically persists its
 ordered step statuses under `runtime/runs`. `GET /api/v1/runs/<id>` retrieves
 that record. Successful earlier one-shot steps are not rolled back; persistent
 process supervision and compensating stop actions remain a later milestone.
+
+## Safe mode and failure quarantine
+
+`POST /api/v1/safe-mode/enable` and `POST /api/v1/safe-mode/disable` control a
+global, persistent launch interlock. While safe mode is enabled, both direct
+launches and dependency-ordered launch runs fail closed before package content
+starts. `GET /api/v1/safety` reports the global state and per-root-mod failure
+counters without exposing authorization material.
+
+A failed dependency-ordered launch increments the root mod's persistent
+counter. The third consecutive failed run quarantines and atomically disables
+that root mod. Later launches remain blocked even if the registry is changed
+independently. `POST /api/v1/recover` explicitly clears one quarantine, but
+does not re-enable the mod; a separate enable request is required. A successful
+run clears its failure counter.
+
+Safety state is stored atomically under `/data/prime-unlimited/safety` and is
+validated strictly at startup and before each launch. If automatic disable
+cannot be committed, the runtime enables global safe mode instead. This is
+still a manual, one-shot launcher: no mod starts at boot and persistent process
+supervision remains a later milestone.

@@ -178,7 +178,7 @@ func (s *server) authorizationStatus() string {
 
 func isMutationPath(path string) bool {
 	switch path {
-	case "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve", "/api/v1/launch", "/api/v1/launch-set":
+	case "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve", "/api/v1/launch", "/api/v1/launch-set", "/api/v1/safe-mode/enable", "/api/v1/safe-mode/disable", "/api/v1/recover":
 		return true
 	default:
 		return false
@@ -461,6 +461,46 @@ func (s *server) handleLaunchSet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, run)
 }
 
+func (s *server) handleSafeMode(w http.ResponseWriter, r *http.Request, enabled bool) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1))
+	if err != nil || len(body) != 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "safe-mode request body must be empty"})
+		return
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	state, err := setSafeMode(s.root, enabled)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "safety state unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
+}
+
+func (s *server) handleRecover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	request, err := decodeCacheRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	state, err := recoverQuarantinedMod(s.root, request.ID)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "safety recovery failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
+}
+
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" || r.URL.Fragment != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query parameters are not supported"})
@@ -514,6 +554,18 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if r.URL.Path == "/api/v1/launch-set" {
 			s.handleLaunchSet(w, r)
+			return
+		}
+		if r.URL.Path == "/api/v1/safe-mode/enable" {
+			s.handleSafeMode(w, r, true)
+			return
+		}
+		if r.URL.Path == "/api/v1/safe-mode/disable" {
+			s.handleSafeMode(w, r, false)
+			return
+		}
+		if r.URL.Path == "/api/v1/recover" {
+			s.handleRecover(w, r)
 			return
 		}
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "mutation engine unavailable"})
@@ -620,6 +672,13 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"transactions": records})
+	case "/api/v1/safety":
+		state, err := loadSafetyState(s.root)
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "safety state unavailable"})
+			return
+		}
+		writeJSON(w, http.StatusOK, state)
 	case "/api/v1/libraries":
 		writeJSON(w, http.StatusOK, map[string]any{"libraries": []any{}})
 	default:
