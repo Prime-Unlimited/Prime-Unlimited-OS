@@ -1020,7 +1020,13 @@ class WorkflowPage(QWidget):
     def _diagnostics_allow_key_setup(self) -> bool:
         if self.diagnostic_report is None:
             return False
-        return self.diagnostic_report.result.state == DetectionState.MATCH
+        # imbupd (JP24's transport) has no positive-identity query, unlike
+        # fastboot's getvar for JC11S - UNVERIFIED is the best this transport
+        # can ever report, not a failure, so it must still allow continuing.
+        return self.diagnostic_report.result.state in {
+            DetectionState.MATCH,
+            DetectionState.UNVERIFIED,
+        }
 
     def _update_navigation(self) -> None:
         page = self.page_stack.currentIndex()
