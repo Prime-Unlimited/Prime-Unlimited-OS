@@ -1,26 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="768" viewBox="0 110 1920 560" role="img" aria-label="Prime Unlimited Mod Loader banner">
- <defs>
-  <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b0d0f"/><stop offset="1" stop-color="#080a0c"/></linearGradient>
-  <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#202429"/><stop offset="1" stop-color="#171a1e"/></linearGradient>
-  <linearGradient id="knob" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#191c20"/><stop offset="1" stop-color="#101214"/></linearGradient>
-  <pattern id="scan" width="4" height="4" patternUnits="userSpaceOnUse"><path d="M0 0H4" stroke="#fff" stroke-opacity=".018" stroke-width=".65"/></pattern>
-  <clipPath id="clip"><rect x="29" y="118" width="1862" height="533" rx="92"/></clipPath>
- </defs>
- <rect width="1920" height="768" fill="#000"/>
- <rect x="29" y="118" width="1862" height="533" rx="92" fill="url(#panel)" stroke="#292d32" stroke-width="7"/>
- <g clip-path="url(#clip)">
-  <rect x="29" y="118" width="1862" height="533" fill="url(#scan)"/>
-  <circle cx="1665" cy="388" r="232" fill="none" stroke="url(#ring)" stroke-width="47"/>
-  <circle cx="1665" cy="388" r="125" fill="url(#knob)" stroke="#292d32" stroke-width="3"/>
-  <rect x="1652" y="140" width="26" height="65" rx="13" fill="#ff541c"/>
- </g>
- <circle cx="270" cy="383" r="111" fill="none" stroke="#f5f3ee" stroke-width="23"/>
- <rect x="257" y="298" width="26" height="80" rx="13" fill="#ff541c"/>
- <circle cx="270" cy="375" r="28" fill="#f5f3ee"/>
- <path d="M451 264V492" stroke="#f2f0ea" stroke-width="3"/>
- <g font-family="DejaVu Sans, Arial, sans-serif" font-weight="900" letter-spacing="-3" fill="#f5f3ee">
-  <text x="499" y="349" font-size="99" textLength="903" lengthAdjust="spacingAndGlyphs">PRIME UNLIMITED</text>
-  <text x="499" y="474" font-size="131" textLength="310" lengthAdjust="spacingAndGlyphs">MOD</text>
-  <text x="837" y="474" font-size="131" textLength="525" lengthAdjust="spacingAndGlyphs" fill="#ff541c">LOADER</text>
- </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="104" viewBox="0 0 256 104">
+  <defs>
+    <clipPath id="r"><rect width="256" height="104" rx="16"></rect></clipPath>
+    <pattern id="scan" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="1" fill="#fff" fill-opacity=".018"></rect></pattern>
+  </defs>
+  <g clip-path="url(#r)">
+    <rect width="256" height="104" fill="#0E0F11"></rect>
+    <rect width="256" height="104" fill="url(#scan)"></rect>
+    <circle cx="232" cy="52" r="63" fill="none" stroke="#2C2F35" stroke-width="14"></circle>
+    <circle cx="232" cy="52" r="32" fill="#1E2024" stroke="#34373D" stroke-width="2"></circle>
+    <rect x="228" y="-17" width="8" height="22" rx="4" fill="#FF5A1F" fill-opacity=".55"></rect>
+  </g>
+  <circle cx="38" cy="52" r="19.5" fill="none" stroke="#F2F0EA" stroke-width="5"></circle>
+  <circle cx="38" cy="52" r="6" fill="#F2F0EA"></circle>
+  <rect x="36" y="37" width="4" height="11" rx="2" fill="#FF5A1F"></rect>
+  <rect x="70" y="30" width="2" height="44" fill="#3A3D43"></rect>
+  <text x="82" y="47" textLength="127" lengthAdjust="spacingAndGlyphs" font-family="Archivo, 'Archivo Narrow', 'Arial Narrow', sans-serif" font-stretch="75%" font-weight="850" font-size="17" fill="#F2F0EA">PRIME UNLIMITED</text>
+  <text x="82" y="68.5" textLength="102.5" lengthAdjust="spacingAndGlyphs" font-family="'Space Mono', 'Courier New', monospace" font-weight="700" font-size="16" fill="#FF5A1F"><tspan fill="#F2F0EA">MOD</tspan> LOADER</text>
+  <rect x="190" y="56" width="7" height="15" fill="#FF5A1F"></rect>
 </svg>
