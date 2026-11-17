@@ -348,6 +348,31 @@ func (s *server) handleInstall(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, result)
 }
 
+func (s *server) handleUninstall(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	request, err := decodeCacheRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	result, err := uninstallDisabledMod(request.ID, s.root)
+	if errors.Is(err, errNotInstalled) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		log.Printf("disabled uninstall failed for %s", request.ID)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "disabled mod uninstallation failed"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, result)
+}
+
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" || r.URL.Fragment != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query parameters are not supported"})
@@ -379,6 +404,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.handleInstall(w, r)
 			return
 		}
+		if r.URL.Path == "/api/v1/uninstall" {
+			s.handleUninstall(w, r)
+			return
+		}
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "mutation engine unavailable"})
 		return
 	}
@@ -406,7 +435,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/api/v1/health":
 		writeJSON(w, http.StatusOK, map[string]any{
-			"service": "prime-unlimited-mod-loader", "mode": "authenticated-disabled-install",
+			"service": "prime-unlimited-mod-loader", "mode": "authenticated-disabled-lifecycle",
 			"catalogStatus": s.catalog.Status, "catalogError": s.catalog.Error,
 			"catalogTrust": map[bool]string{true: "verified", false: "unverified"}[s.catalog.Trusted],
 			"catalogKeyId": s.catalog.KeyID, "catalogKeyFingerprint": s.catalog.KeyFingerprint,

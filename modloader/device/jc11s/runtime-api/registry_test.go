@@ -114,7 +114,7 @@ func TestInstallJournalRecoveryPreparedAndCommitted(t *testing.T) {
 			if err := writeAtomicJSON(filepath.Join(registryRoot, "state.json"), initial); err != nil {
 				t.Fatal(err)
 			}
-			journal := installJournal{SchemaVersion: 1, Phase: phase, TransactionID: "abcdef0123456789abcdef0123456789", Target: item.Root, Previous: previous, Next: next}
+			journal := installJournal{SchemaVersion: 1, Operation: "install", Phase: phase, TransactionID: "abcdef0123456789abcdef0123456789", Target: item.Root, Previous: previous, Next: next}
 			if err := writeAtomicJSON(filepath.Join(registryRoot, "pending.json"), journal); err != nil {
 				t.Fatal(err)
 			}
@@ -138,6 +138,102 @@ func TestInstallJournalRecoveryPreparedAndCommitted(t *testing.T) {
 			}
 			if _, err := os.Lstat(filepath.Join(registryRoot, "pending.json")); !os.IsNotExist(err) {
 				t.Fatal("journal not cleared")
+			}
+		})
+	}
+}
+
+func TestUninstallDisabledModCommitsRemovalAndTransaction(t *testing.T) {
+	item, cacheRoot, stagingRoot, root := stagedInstallFixture(t)
+	if _, err := installDisabledMod(item, "trusted-test", cacheRoot, stagingRoot, root); err != nil {
+		t.Fatal(err)
+	}
+	result, err := uninstallDisabledMod(item.ID, root)
+	if err != nil || !result.Uninstalled || result.Version != item.Version || len(result.TransactionID) != 32 {
+		t.Fatalf("uninstall failed: %#v %v", result, err)
+	}
+	state, err := loadRegistry(filepath.Join(root, "registry", "state.json"))
+	if err != nil || len(state.Mods) != 0 {
+		t.Fatalf("registry not cleared: %#v %v", state, err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "mods", "installed", item.ID, item.Version)); !os.IsNotExist(err) {
+		t.Fatal("uninstalled payload remains")
+	}
+	records, err := listTransactions(root)
+	foundUninstall := false
+	for _, record := range records {
+		foundUninstall = foundUninstall || (record.Operation == "uninstall" && record.Status == "completed")
+	}
+	if err != nil || len(records) != 2 || !foundUninstall {
+		t.Fatalf("bad transactions: %#v %v", records, err)
+	}
+	if _, err := uninstallDisabledMod(item.ID, root); !errors.Is(err, errNotInstalled) {
+		t.Fatalf("missing uninstall not rejected: %v", err)
+	}
+}
+
+func TestUninstallAPIIsAuthenticatedAndCatalogIndependent(t *testing.T) {
+	item, cacheRoot, stagingRoot, root := stagedInstallFixture(t)
+	if _, err := installDisabledMod(item, "trusted-test", cacheRoot, stagingRoot, root); err != nil {
+		t.Fatal(err)
+	}
+	token := strings.Repeat("a", 64)
+	handler := &server{authToken: token, root: root}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/uninstall", strings.NewReader(`{"id":"catalog-smoke-test"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"uninstalled":true`) {
+		t.Fatalf("uninstall response: %d %s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/uninstall", strings.NewReader(`{"id":"catalog-smoke-test"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("missing uninstall response: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestUninstallFailureCheckpointsRecoverDeterministically(t *testing.T) {
+	for _, checkpoint := range []string{"journal-prepared", "payload-quarantined", "registry-committed", "journal-committed"} {
+		t.Run(checkpoint, func(t *testing.T) {
+			item, cacheRoot, stagingRoot, root := stagedInstallFixture(t)
+			if _, err := installDisabledMod(item, "trusted-test", cacheRoot, stagingRoot, root); err != nil {
+				t.Fatal(err)
+			}
+			uninstallCheckpoint = func(stage string) error {
+				if stage == checkpoint {
+					return errors.New("injected failure")
+				}
+				return nil
+			}
+			_, err := uninstallDisabledMod(item.ID, root)
+			uninstallCheckpoint = func(string) error { return nil }
+			if err == nil {
+				t.Fatal("injected uninstall failure did not fire")
+			}
+			if err := recoverInstall(root); err != nil {
+				t.Fatal(err)
+			}
+			state, err := loadRegistry(filepath.Join(root, "registry", "state.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, installed := state.Mods[item.ID]
+			wantInstalled := checkpoint != "journal-committed"
+			if installed != wantInstalled {
+				t.Fatalf("installed=%v want=%v", installed, wantInstalled)
+			}
+			target := filepath.Join(root, "mods", "installed", item.ID, item.Version)
+			_, statErr := os.Lstat(target)
+			if wantInstalled && statErr != nil {
+				t.Fatal("rolled-back payload missing")
+			}
+			if !wantInstalled && !os.IsNotExist(statErr) {
+				t.Fatal("committed payload remains")
 			}
 		})
 	}

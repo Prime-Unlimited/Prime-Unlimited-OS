@@ -4,8 +4,8 @@ This is the small, dependency-free ARMv7 service used to make the Mod Loader
 QML operational on firmware without Python or Node. It binds only to
 `127.0.0.1:8098`, reads at most 1 MiB of catalog JSON, and initially exposes
 read-only health, catalog, installed-state, library and transaction endpoints,
-plus authenticated verified-package caching and isolated ZIP staging.
-Installation and activation remain unavailable.
+plus authenticated verified-package caching, isolated ZIP staging, disabled
+installation and disabled uninstallation. Activation remains unavailable.
 
 Build from Termux:
 
@@ -76,10 +76,8 @@ device restarts.
 
 Mutation requests require exactly one `Authorization: Bearer <token>` header.
 Comparison is constant-time. Missing, duplicated, or incorrect credentials
-return HTTP 401. Correct credentials permit only the package-cache and staging
-endpoints; installation and all other mutations return HTTP 501 `mutation
-engine unavailable`. Health output reports only `authorizationStatus: ready`
-and never returns the token or a token-derived value.
+return HTTP 401. Health output reports only `authorizationStatus: ready` and
+never returns the token or a token-derived value.
 
 ## Verified package cache
 
@@ -159,3 +157,18 @@ the target remains safe. Completed or recovered operations are exposed through
 This milestone does not make files executable, generate startup state, enable
 mods or invoke an entrypoint. Dependency-bearing, library-bearing and
 conflicting records remain ineligible.
+
+## Atomic disabled uninstallation
+
+`POST /api/v1/uninstall` accepts only an installed mod ID and does not depend
+on the current catalog, so an unlisted or revoked mod remains removable. Only
+a disabled registry entry with a safe private payload directory is eligible.
+The payload is atomically renamed to a transaction-specific quarantine path
+before the registry commit and is deleted only after the committed journal is
+durable.
+
+Recovery of a prepared uninstall restores both the payload and previous
+registry. Recovery of a committed uninstall completes removal of the payload
+and quarantine and retains the next registry. Completed and recovered
+uninstalls are recorded through the same transaction API as installations.
+The operation never runs package content and cannot uninstall an enabled mod.

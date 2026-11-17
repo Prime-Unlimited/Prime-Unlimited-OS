@@ -50,8 +50,9 @@ restored; `/api/v1/installed` again returned an empty map. API and Engine
 remained active and the device was not rebooted.
 
 This milestone never enables or executes a mod and does not generate startup
-configuration. Enable/disable, activation, uninstall and user-facing rollback
-remain unavailable.
+configuration. Atomic disabled uninstall was added and verified in the next
+milestone; enable/disable, activation and user-facing rollback remain
+unavailable.
 
 ## Rollback
 

@@ -35,9 +35,11 @@ type registryState struct {
 
 type installJournal struct {
 	SchemaVersion int           `json:"schemaVersion"`
+	Operation     string        `json:"operation"`
 	Phase         string        `json:"phase"`
 	TransactionID string        `json:"transactionId"`
 	Target        string        `json:"target"`
+	Quarantine    string        `json:"quarantine,omitempty"`
 	Previous      registryState `json:"previous"`
 	Next          registryState `json:"next"`
 }
@@ -61,8 +63,17 @@ type installResult struct {
 	Enabled       bool   `json:"enabled"`
 }
 
+type uninstallResult struct {
+	TransactionID string `json:"transactionId"`
+	ID            string `json:"id"`
+	Version       string `json:"version"`
+	Uninstalled   bool   `json:"uninstalled"`
+}
+
 var errAlreadyInstalled = errors.New("mod is already installed")
+var errNotInstalled = errors.New("mod is not installed")
 var installCheckpoint = func(string) error { return nil }
+var uninstallCheckpoint = func(string) error { return nil }
 
 func ensurePrivateDirectory(path string) error {
 	if err := os.MkdirAll(path, 0o700); err != nil {
@@ -302,7 +313,7 @@ func installDisabledMod(item mod, catalogID, cacheRoot, stagingRoot, root string
 	relativeTarget := filepath.ToSlash(filepath.Join("mods", "installed", item.ID, item.Version))
 	next.Mods[item.ID] = installedMod{ID: item.ID, Version: item.Version, PackageSHA256: item.SHA256, CatalogID: catalogID,
 		Architecture: item.Architecture, ABI: item.ABI, Entrypoint: item.Entrypoint, Root: relativeTarget, Enabled: false, InstalledAt: time.Now().Unix()}
-	journal := installJournal{SchemaVersion: 1, Phase: "prepared", TransactionID: txid, Target: relativeTarget, Previous: state, Next: next}
+	journal := installJournal{SchemaVersion: 1, Operation: "install", Phase: "prepared", TransactionID: txid, Target: relativeTarget, Previous: state, Next: next}
 	if err := writeAtomicJSON(journalPath, journal); err != nil {
 		return result, err
 	}
@@ -345,6 +356,110 @@ func installDisabledMod(item mod, catalogID, cacheRoot, stagingRoot, root string
 	return result, nil
 }
 
+func uninstallDisabledMod(id, root string) (uninstallResult, error) {
+	result := uninstallResult{ID: id}
+	if !modIDPattern.MatchString(id) {
+		return result, errors.New("invalid mod id")
+	}
+	if err := recoverInstall(root); err != nil {
+		return result, err
+	}
+	registryRoot := filepath.Join(root, "registry")
+	transactionsRoot := filepath.Join(registryRoot, "transactions")
+	for _, directory := range []string{registryRoot, transactionsRoot} {
+		if err := ensurePrivateDirectory(directory); err != nil {
+			return result, err
+		}
+	}
+	registryPath := filepath.Join(registryRoot, "state.json")
+	journalPath := filepath.Join(registryRoot, "pending.json")
+	state, err := loadRegistry(registryPath)
+	if err != nil {
+		return result, err
+	}
+	installed, exists := state.Mods[id]
+	if !exists {
+		return result, errNotInstalled
+	}
+	if installed.Enabled {
+		return result, errors.New("enabled mod cannot be uninstalled")
+	}
+	result.Version = installed.Version
+	target := filepath.Join(root, filepath.FromSlash(installed.Root))
+	info, err := os.Lstat(target)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o700 {
+		return result, errors.New("installed mod payload is missing or unsafe")
+	}
+	txid, err := randomTransactionID()
+	if err != nil {
+		return result, err
+	}
+	result.TransactionID = txid
+	versionRoot := filepath.Dir(target)
+	quarantine := filepath.Join(versionRoot, ".uninstall-"+txid)
+	relativeQuarantine, err := filepath.Rel(root, quarantine)
+	if err != nil {
+		return result, err
+	}
+	next := registryState{SchemaVersion: 1, Mods: make(map[string]installedMod, len(state.Mods)-1)}
+	for modID, item := range state.Mods {
+		if modID != id {
+			next.Mods[modID] = item
+		}
+	}
+	journal := installJournal{SchemaVersion: 1, Operation: "uninstall", Phase: "prepared", TransactionID: txid,
+		Target: installed.Root, Quarantine: filepath.ToSlash(relativeQuarantine), Previous: state, Next: next}
+	if err := writeAtomicJSON(journalPath, journal); err != nil {
+		return result, err
+	}
+	if err := uninstallCheckpoint("journal-prepared"); err != nil {
+		return result, err
+	}
+	if err := os.Rename(target, quarantine); err != nil {
+		return result, err
+	}
+	if err := syncDirectory(versionRoot); err != nil {
+		return result, err
+	}
+	if err := uninstallCheckpoint("payload-quarantined"); err != nil {
+		return result, err
+	}
+	if err := writeAtomicJSON(registryPath, next); err != nil {
+		return result, err
+	}
+	if err := uninstallCheckpoint("registry-committed"); err != nil {
+		return result, err
+	}
+	journal.Phase = "committed"
+	if err := writeAtomicJSON(journalPath, journal); err != nil {
+		return result, err
+	}
+	if err := uninstallCheckpoint("journal-committed"); err != nil {
+		return result, err
+	}
+	if err := os.RemoveAll(quarantine); err != nil {
+		return result, err
+	}
+	if err := syncDirectory(versionRoot); err != nil {
+		return result, err
+	}
+	now := time.Now().Unix()
+	record := transactionRecord{ID: txid, Operation: "uninstall", ModID: id, Version: installed.Version, Status: "completed",
+		Stage: "registry-committed", CreatedAt: now, CompletedAt: now}
+	if err := writeAtomicJSON(filepath.Join(transactionsRoot, txid+".json"), record); err != nil {
+		return result, err
+	}
+	if err := os.Remove(journalPath); err != nil {
+		return result, err
+	}
+	if err := syncDirectory(registryRoot); err != nil {
+		return result, err
+	}
+	_ = os.Remove(versionRoot)
+	result.Uninstalled = true
+	return result, nil
+}
+
 func recoverInstall(root string) error {
 	registryRoot := filepath.Join(root, "registry")
 	journalPath := filepath.Join(registryRoot, "pending.json")
@@ -356,7 +471,7 @@ func recoverInstall(root string) error {
 		return err
 	}
 	var journal installJournal
-	if decodeStrictJSON(data, &journal) != nil || journal.SchemaVersion != 1 || (journal.Phase != "prepared" && journal.Phase != "committed") || !strings.HasPrefix(journal.Target, "mods/installed/") {
+	if decodeStrictJSON(data, &journal) != nil || journal.SchemaVersion != 1 || (journal.Operation != "install" && journal.Operation != "uninstall") || (journal.Phase != "prepared" && journal.Phase != "committed") || !strings.HasPrefix(journal.Target, "mods/installed/") {
 		return errors.New("invalid install journal")
 	}
 	parts := strings.Split(journal.Target, "/")
@@ -367,13 +482,56 @@ func recoverInstall(root string) error {
 		return errors.New("invalid install journal state")
 	}
 	nextItem, nextExists := journal.Next.Mods[parts[2]]
-	_, previousExists := journal.Previous.Mods[parts[2]]
-	if previousExists || !nextExists || nextItem.Version != parts[3] || nextItem.Root != journal.Target {
-		return errors.New("install journal transition mismatch")
-	}
+	previousItem, previousExists := journal.Previous.Mods[parts[2]]
 	target := filepath.Join(root, filepath.FromSlash(journal.Target))
 	recoveredStage := journal.Phase
-	if journal.Phase == "prepared" {
+	if journal.Operation == "install" {
+		if previousExists || !nextExists || len(journal.Next.Mods) != len(journal.Previous.Mods)+1 || nextItem.Version != parts[3] || nextItem.Root != journal.Target || journal.Quarantine != "" {
+			return errors.New("install journal transition mismatch")
+		}
+	} else {
+		expectedQuarantine := filepath.ToSlash(filepath.Join("mods", "installed", parts[2], ".uninstall-"+journal.TransactionID))
+		if !previousExists || nextExists || len(journal.Previous.Mods) != len(journal.Next.Mods)+1 || previousItem.Version != parts[3] || previousItem.Root != journal.Target || journal.Quarantine != expectedQuarantine {
+			return errors.New("uninstall journal transition mismatch")
+		}
+	}
+	for id, item := range journal.Previous.Mods {
+		if id != parts[2] && journal.Next.Mods[id] != item {
+			return errors.New("journal changed unrelated registry entry")
+		}
+	}
+	quarantine := filepath.Join(root, filepath.FromSlash(journal.Quarantine))
+	if journal.Operation == "uninstall" && journal.Phase == "prepared" {
+		if _, err := os.Lstat(quarantine); err == nil {
+			if _, targetErr := os.Lstat(target); !os.IsNotExist(targetErr) {
+				return errors.New("unsafe uninstall recovery collision")
+			}
+			if err := os.Rename(quarantine, target); err != nil {
+				return err
+			}
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if err := writeAtomicJSON(filepath.Join(registryRoot, "state.json"), journal.Previous); err != nil {
+			return err
+		}
+		if err := syncDirectory(filepath.Dir(target)); err != nil {
+			return err
+		}
+	} else if journal.Operation == "uninstall" {
+		if err := writeAtomicJSON(filepath.Join(registryRoot, "state.json"), journal.Next); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(quarantine); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(target); err != nil {
+			return err
+		}
+		if err := syncDirectory(filepath.Dir(target)); err != nil {
+			return err
+		}
+	} else if journal.Phase == "prepared" {
 		if err := writeAtomicJSON(filepath.Join(registryRoot, "state.json"), journal.Previous); err != nil {
 			return err
 		}
@@ -394,7 +552,7 @@ func recoverInstall(root string) error {
 			return err
 		}
 	}
-	record := transactionRecord{ID: journal.TransactionID, Operation: "install", ModID: parts[2], Version: parts[3], Status: "recovered", Stage: recoveredStage, CompletedAt: time.Now().Unix()}
+	record := transactionRecord{ID: journal.TransactionID, Operation: journal.Operation, ModID: parts[2], Version: parts[3], Status: "recovered", Stage: recoveredStage, CompletedAt: time.Now().Unix()}
 	if err := writeAtomicJSON(filepath.Join(registryRoot, "transactions", journal.TransactionID+".json"), record); err != nil {
 		return err
 	}
