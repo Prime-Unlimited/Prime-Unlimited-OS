@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -57,6 +59,71 @@ def _run(
 
 def _shell_quote(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
+
+
+_WRITE_PROGRESS_RE = re.compile(r"(\d+)\s*/\s*(\d+)\s*bytes\s*\((\d+)%\)")
+
+
+def _write_with_live_progress(
+    command: list[str], *, timeout: float, report: "object | None"
+) -> subprocess.CompletedProcess[str] | None:
+    """Stream imbupd's own `written / total bytes (pct%)` write-progress
+    line back through ``report`` as the write proceeds, instead of a single
+    frozen status line for however long a multi-gigabyte write takes.
+
+    Only works under a non-interactive sudo (a cached ticket, same as
+    query_device's first attempt) - returns None, signalling the caller to
+    fall back to the buffered GUI admin-prompt path, when sudo needs a
+    password up front (no progress output is possible there either, since
+    osascript's `do shell script` only returns output once the command
+    finishes)."""
+    try:
+        proc = subprocess.Popen(
+            ["sudo", "-n", *command],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+    except FileNotFoundError as exc:
+        raise FlashError(f"Command failed: {exc}") from exc
+
+    start = time.monotonic()
+    output_lines: list[str] = []
+    buf = ""
+    saw_progress = False
+    while True:
+        char = proc.stdout.read(1)
+        if char == "":
+            if proc.poll() is not None:
+                break
+            continue
+        if char in "\r\n":
+            if buf:
+                output_lines.append(buf)
+                match = _WRITE_PROGRESS_RE.search(buf)
+                if match and report is not None:
+                    written, total, pct = (int(match.group(i)) for i in (1, 2, 3))
+                    saw_progress = True
+                    elapsed = time.monotonic() - start
+                    rate = written / elapsed if elapsed > 0 else 0
+                    eta = f", ~{int((total - written) / rate)}s left" if rate > 0 else ""
+                    report(f"Writing the /data partition: {pct}%{eta} (do not disconnect the device)…")
+                buf = ""
+        else:
+            buf += char
+        if time.monotonic() - start > timeout:
+            proc.kill()
+            raise FlashError("Writing the /data partition timed out.")
+    if buf:
+        output_lines.append(buf)
+    returncode = proc.wait()
+    if returncode != 0 and not saw_progress:
+        # sudo -n failed before the write ever started (no cached ticket) -
+        # fall back to the admin-prompt path rather than treat this as a
+        # failed flash.
+        return None
+    return subprocess.CompletedProcess(command, returncode, stdout="\n".join(output_lines), stderr="")
 
 
 def ensure_flash_tool(build_dir: Path) -> Path:
@@ -140,11 +207,18 @@ def flash_bootstrap(
     query_device(tool)
 
     report("write", "Writing the /data partition (do not disconnect the device)…")
-    result = _run(
-        [str(tool), "write", "data", str(image), "--confirm", _CONFIRM_PHRASE],
-        timeout=180,
-        use_admin=True,
+    write_command = [str(tool), "write", "data", str(image), "--confirm", _CONFIRM_PHRASE]
+    # A multi-gigabyte image needs much longer than the original 256 MiB
+    # default did; scale generously (a conservative 2 MiB/s worst case)
+    # rather than risk killing a genuinely slow but still-progressing write.
+    write_timeout = max(180.0, image.stat().st_size / (2 * 1024 * 1024))
+    result = _write_with_live_progress(
+        write_command,
+        timeout=write_timeout,
+        report=lambda message: report("write", message),
     )
+    if result is None:
+        result = _run(write_command, timeout=write_timeout, use_admin=True)
     if result.returncode != 0:
         raise FlashError(f"Flashing failed: {result.stderr.strip() or result.stdout.strip()}")
 
