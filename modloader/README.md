@@ -8,11 +8,12 @@ The platform-independent v1 manager is implemented: persistent registry,
 deterministic dependency solving, verified ZIP installation, shared libraries,
 update/rollback, recovery journals, generated startup configuration, isolated
 activation, authenticated loopback mutations and an extended QML client. A
-JC11S-specific, `/data`-only QML resource preload hook and Control Center tile
-have additionally been verified on Prime 4+ hardware running Engine OS 5.3.0.
+JC11S-specific, `/data`-only QML resource preload hook, Control Center tile and
+native lifecycle service have additionally been verified on Prime 4+ hardware
+running Engine OS 5.3.0.
 The complete source, bootstrap, build, deployment and verification record is in
 [`device/jc11s/ui-hook/`](device/jc11s/ui-hook/README.md). The backend service
-is not yet activated by that UI integration.
+is connected to the touch UI through its loopback API.
 
 ## Runtime layout
 
@@ -51,11 +52,20 @@ verified against a trust root shipped outside the catalog. SHA-256 binds
 downloaded bytes to the signed catalog record; it does not independently
 authenticate a publisher.
 
-Mutation endpoints are disabled unless all of `--root`, `--auth-token-file`,
-and `--trusted-catalog` are supplied. Tokens must be at least 32 characters and
-are compared in constant time. The eventual trusted QML launcher must inject
-the token without exposing it to other local processes. Read-only API use needs
-no token.
+The native device service owns a random 32-byte token in a root-only `0600`
+file and compares authorization headers in constant time. The JC11S QML runs
+inside the root-owned Engine process and reads that file directly through a
+local `file:` request; the token is never returned by HTTP, rendered, logged or
+stored in the catalog. Read-only API use needs no token.
+
+## JC11S touch UI
+
+The device UI exposes catalog, installed and activity views. Installation is a
+strict ordered client workflow of cache, stage, signed inspection and disabled
+installation; a failed step stops the chain. Enable, disable and uninstall use
+the atomic registry transactions. Manual dependency-ordered launch, quarantine
+recovery and global safe-mode control are also wired to authenticated endpoints.
+The activity view shows persisted transaction operation, stage and status.
 
 ## Catalog
 

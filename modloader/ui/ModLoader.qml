@@ -10,12 +10,25 @@ Rectangle {
     property var mods: []
     property var installed: ({})
     property var transactions: []
-    property string authToken: "" // injected by the trusted local launcher
+    property var safety: ({"safeMode": false, "mods": ({})})
+    property string authToken: ""
+    property bool busy: false
     property int selectedTab: 0
     property string pendingUninstall: ""
     property string statusText: "Connecting..."
     property string deviceText: "Device not detected"
     signal closeRequested()
+
+    function loadAuthorization() {
+        var request = new XMLHttpRequest()
+        request.onreadystatechange = function() {
+            if (request.readyState !== XMLHttpRequest.DONE) return
+            var token = (request.responseText || "").replace(/[\r\n]/g, "")
+            if (request.status === 0 && /^[0-9a-f]{64}$/.test(token)) authToken = token
+        }
+        request.open("GET", "file:///data/prime-unlimited/auth/mutation.token")
+        request.send()
+    }
 
     function refresh() {
         var request = new XMLHttpRequest()
@@ -31,7 +44,7 @@ Rectangle {
                 mods = payload.mods || []
                 deviceText = payload.model + " / " + payload.firmware
                 statusText = mods.length + " mods in catalog"
-                refreshInstalled()
+                refreshState()
             } catch (e) {
                 statusText = "Invalid catalog response"
             }
@@ -42,44 +55,72 @@ Rectangle {
         request.send()
     }
 
-    function getJson(path, done) {
+    function getJson(path, done, quiet) {
         var request = new XMLHttpRequest()
         request.timeout = 4000
         request.onreadystatechange = function() {
             if (request.readyState !== XMLHttpRequest.DONE) return
-            if (request.status === 200) done(JSON.parse(request.responseText))
-            else statusText = "Offline: showing cached installed state"
+            if (request.status === 200) {
+                try { done(JSON.parse(request.responseText)) }
+                catch (e) { if (!quiet) statusText = "Invalid service response" }
+            } else if (!quiet) statusText = "Offline: showing cached installed state"
         }
-        request.onerror = function() { statusText = "Offline: installed mods remain available" }
+        request.onerror = function() { if (!quiet) statusText = "Offline: installed mods remain available" }
         request.open("GET", apiBase + path); request.send()
     }
 
-    function refreshInstalled() {
+    function refreshState() {
         getJson("/api/v1/installed", function(payload) { installed = payload.mods || ({}) })
         getJson("/api/v1/transactions", function(payload) { transactions = payload.transactions || [] })
+        getJson("/api/v1/safety", function(payload) { safety = payload }, true)
     }
 
-    function mutate(action, id, version) {
+    function mutation(action, id, version, done) {
         if (!authToken) { statusText = "Changes disabled: local authorization unavailable"; return }
         var request = new XMLHttpRequest(); request.timeout = 30000
         request.onreadystatechange = function() {
             if (request.readyState !== XMLHttpRequest.DONE) return
             try {
                 var payload = JSON.parse(request.responseText)
-                statusText = request.status >= 200 && request.status < 300 ?
-                    (payload.transactionId ? "Transaction " + payload.transactionId + " started" : "Change completed") :
-                    (payload.error || "Change failed")
-            } catch (e) { statusText = "Invalid service response" }
-            refreshInstalled()
+                var ok = request.status >= 200 && request.status < 300
+                statusText = ok ? (payload.transactionId ? "Transaction " + payload.transactionId + " completed" : "Change completed") : (payload.error || "Change failed")
+                busy = false; refreshState(); if (done) done(ok, payload)
+            } catch (e) { busy = false; statusText = "Invalid service response"; if (done) done(false, ({})) }
         }
+        request.onerror = function() { busy = false; statusText = "Connection failed"; if (done) done(false, ({})) }
+        busy = true
         request.open("POST", apiBase + "/api/v1/" + action)
         request.setRequestHeader("Content-Type", "application/json")
         request.setRequestHeader("Authorization", "Bearer " + authToken)
-        var data = {"id": id}; if (version) data.version = "=" + version
-        request.send(JSON.stringify(data))
+        if (action === "safe-mode/enable" || action === "safe-mode/disable") request.send()
+        else request.send(JSON.stringify({"id": id}))
     }
 
-    Component.onCompleted: refresh()
+    function installVerified(id) {
+        var steps = ["cache", "stage", "inspect", "install"]
+        function next(index) {
+            if (index >= steps.length) { statusText = "Verified installation completed"; refreshState(); return }
+            statusText = "Installation: " + steps[index]
+            mutation(steps[index], id, "", function(ok) { if (ok) next(index + 1) })
+        }
+        next(0)
+    }
+
+    function visibleMods() {
+        if (selectedTab === 0) return mods
+        var result = []
+        var seen = ({})
+        for (var i = 0; i < mods.length; ++i) {
+            if (installed[mods[i].id] !== undefined) { result.push(mods[i]); seen[mods[i].id] = true }
+        }
+        var ids = Object.keys(installed).sort()
+        for (var j = 0; j < ids.length; ++j) {
+            if (!seen[ids[j]]) result.push({"id": ids[j], "name": ids[j] + " (not in catalog)", "version": installed[ids[j]].version, "compatible": true, "dependencies": [], "libraries": []})
+        }
+        return result
+    }
+
+    Component.onCompleted: { loadAuthorization(); refresh() }
 
     Rectangle {
         id: header
@@ -115,7 +156,7 @@ Rectangle {
     Row {
         x: 330; y: 101; spacing: 8
         Repeater {
-            model: ["AVAILABLE", "INSTALLED", "UPDATES"]
+            model: ["AVAILABLE", "INSTALLED", "ACTIVITY"]
             delegate: Rectangle {
                 width: 116; height: 40; radius: 9
                 color: selectedTab === index ? "#ff541c" : "#33373c"
@@ -131,7 +172,14 @@ Rectangle {
         color: "#ff541c"
         font.pixelSize: 16
     }
+    Rectangle {
+        x: 600; y: 140; width: 180; height: 28; radius: 8
+        color: safety.safeMode ? "#8d2d21" : "#264536"
+        Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: safety.safeMode ? "SAFE MODE ON" : "SAFE MODE OFF" }
+        MouseArea { anchors.fill: parent; enabled: !busy; onClicked: mutation(safety.safeMode ? "safe-mode/disable" : "safe-mode/enable", "", "", null) }
+    }
     Flickable {
+        visible: selectedTab !== 2
         x: 20; y: 174
         width: parent.width - 40
         height: parent.height - 190
@@ -142,14 +190,10 @@ Rectangle {
             width: parent.width
             spacing: 10
             Repeater {
-                model: modLoader.mods.filter(function(item) {
-                    if (selectedTab === 1) return installed[item.id] !== undefined
-                    if (selectedTab === 2) return installed[item.id] !== undefined && installed[item.id].version !== item.version
-                    return true
-                })
+                model: visibleMods()
                 delegate: Rectangle {
                     width: entries.width
-                    height: 86
+                    height: 116
                     radius: 12
                     color: "#22262b"
                     Text {
@@ -161,8 +205,8 @@ Rectangle {
                     }
                     Text {
                         x: 16; y: 48
-                        text: modelData.compatible ? "Compatible" : "Not compatible with this device"
-                        color: modelData.compatible ? "#73d6a3" : "#ff9b78"
+                        text: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined ? "Quarantined after " + safety.mods[modelData.id].failureCount + " failures" : (modelData.compatible ? "Compatible" : "Not compatible with this device")
+                        color: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined ? "#ff9b78" : (modelData.compatible ? "#73d6a3" : "#ff9b78")
                         font.pixelSize: 16
                     }
                     Text {
@@ -176,9 +220,9 @@ Rectangle {
                         property bool present: installed[modelData.id] !== undefined
                         Text { anchors.centerIn: parent; color: "white"; font.bold: true
                             text: parent.present ? (installed[modelData.id].enabled ? "DISABLE" : "ENABLE") : "INSTALL" }
-                        MouseArea { anchors.fill: parent; onClicked: {
-                            if (!parent.present) mutate("install", modelData.id, modelData.version)
-                            else mutate(installed[modelData.id].enabled ? "disable" : "enable", modelData.id, "")
+                        MouseArea { anchors.fill: parent; enabled: !busy; onClicked: {
+                            if (!parent.present) installVerified(modelData.id)
+                            else mutation(installed[modelData.id].enabled ? "disable" : "enable", modelData.id, "", null)
                         }}
                     }
                     Rectangle {
@@ -186,7 +230,22 @@ Rectangle {
                         width: 104; height: 48; radius: 9; x: parent.width - 110; y: 19
                         color: "#4a2a2a"
                         Text { anchors.centerIn: parent; text: "REMOVE"; color: "#ffb29a"; font.bold: true }
-                        MouseArea { anchors.fill: parent; onClicked: pendingUninstall = modelData.id }
+                        MouseArea { anchors.fill: parent; enabled: !busy; onClicked: pendingUninstall = modelData.id }
+                    }
+                    Row {
+                        visible: installed[modelData.id] !== undefined
+                        x: 330; y: 78; spacing: 8
+                        Rectangle {
+                            width: 104; height: 28; radius: 7; color: "#34516b"
+                            Text { anchors.centerIn: parent; text: "LAUNCH"; color: "white"; font.bold: true }
+                            MouseArea { anchors.fill: parent; enabled: installed[modelData.id] && installed[modelData.id].enabled && !busy; onClicked: mutation("launch-set", modelData.id, "", null) }
+                        }
+                        Rectangle {
+                            visible: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined
+                            width: 104; height: 28; radius: 7; color: "#6d512c"
+                            Text { anchors.centerIn: parent; text: "RECOVER"; color: "white"; font.bold: true }
+                            MouseArea { anchors.fill: parent; enabled: !busy; onClicked: mutation("recover", modelData.id, "", null) }
+                        }
                     }
                 }
             }
@@ -207,10 +266,27 @@ Rectangle {
                 Rectangle { width: 160; height: 52; radius: 10; color: "#b43b22"
                     Text { anchors.centerIn: parent; text: "UNINSTALL"; color: "white"; font.bold: true }
                     MouseArea { anchors.fill: parent; onClicked: {
-                        var target = pendingUninstall; pendingUninstall = ""; mutate("uninstall", target, "")
+                        var target = pendingUninstall; pendingUninstall = ""; mutation("uninstall", target, "", null)
                     }}
                 }
             }
+        }
+    }
+    Flickable {
+        visible: selectedTab === 2
+        x: 20; y: 174; width: parent.width - 40; height: parent.height - 190
+        clip: true; contentHeight: activityEntries.height
+        Column {
+            id: activityEntries; width: parent.width; spacing: 8
+            Repeater {
+                model: transactions
+                delegate: Rectangle {
+                    width: activityEntries.width; height: 58; radius: 9; color: "#22262b"
+                    Text { x: 14; y: 8; color: "white"; font.pixelSize: 16; text: modelData.operation.toUpperCase() + "  " + modelData.modId + "  v" + modelData.version }
+                    Text { x: 14; y: 33; color: modelData.status === "completed" ? "#73d6a3" : "#ff9b78"; font.pixelSize: 13; text: modelData.status + " / " + modelData.stage + " / " + modelData.id }
+                }
+            }
+            Text { visible: transactions.length === 0; color: "#aab0b8"; font.pixelSize: 18; text: "No lifecycle transactions yet" }
         }
     }
 }

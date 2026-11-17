@@ -56,3 +56,6 @@ state. No Engine restart or device reboot is required.
 Trusted delivery of the token to a privileged UI action path is deliberately
 not part of this milestone. `ModLoader.qml` continues to keep mutations
 disabled because its `authToken` property is empty.
+
+This historical limitation was superseded by the later manager-UI milestone;
+see `VERIFIED_MANAGER_UI_STATUS.md`.
