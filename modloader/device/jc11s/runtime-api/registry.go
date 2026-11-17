@@ -70,10 +70,30 @@ type uninstallResult struct {
 	Uninstalled   bool   `json:"uninstalled"`
 }
 
+type activationResult struct {
+	TransactionID string `json:"transactionId"`
+	ID            string `json:"id"`
+	Version       string `json:"version"`
+	Enabled       bool   `json:"enabled"`
+}
+
+type activationEntry struct {
+	ID         string `json:"id"`
+	Version    string `json:"version"`
+	Root       string `json:"root"`
+	Entrypoint string `json:"entrypoint"`
+}
+
+type activationManifest struct {
+	SchemaVersion int               `json:"schemaVersion"`
+	Mods          []activationEntry `json:"mods"`
+}
+
 var errAlreadyInstalled = errors.New("mod is already installed")
 var errNotInstalled = errors.New("mod is not installed")
 var installCheckpoint = func(string) error { return nil }
 var uninstallCheckpoint = func(string) error { return nil }
+var activationCheckpoint = func(string) error { return nil }
 
 func ensurePrivateDirectory(path string) error {
 	if err := os.MkdirAll(path, 0o700); err != nil {
@@ -165,7 +185,7 @@ func validateRegistryState(state registryState) error {
 		return errors.New("invalid installed registry")
 	}
 	for id, item := range state.Mods {
-		if id != item.ID || !modIDPattern.MatchString(id) || !versionPattern.MatchString(item.Version) || len(item.PackageSHA256) != 64 || item.Enabled {
+		if id != item.ID || !modIDPattern.MatchString(id) || !versionPattern.MatchString(item.Version) || len(item.PackageSHA256) != 64 {
 			return errors.New("invalid installed registry entry")
 		}
 		expectedRoot := filepath.ToSlash(filepath.Join("mods", "installed", item.ID, item.Version))
@@ -174,6 +194,114 @@ func validateRegistryState(state registryState) error {
 		}
 	}
 	return nil
+}
+
+func writeActivationManifest(root string, state registryState) error {
+	manifest := activationManifest{SchemaVersion: 1, Mods: []activationEntry{}}
+	ids := make([]string, 0, len(state.Mods))
+	for id, item := range state.Mods {
+		if item.Enabled {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		item := state.Mods[id]
+		manifest.Mods = append(manifest.Mods, activationEntry{ID: id, Version: item.Version, Root: item.Root, Entrypoint: item.Entrypoint})
+	}
+	return writeAtomicJSON(filepath.Join(root, "activation", "manifest.json"), manifest)
+}
+
+func setModEnabled(id string, enabled bool, root string) (activationResult, error) {
+	result := activationResult{ID: id, Enabled: enabled}
+	if !modIDPattern.MatchString(id) {
+		return result, errors.New("invalid mod id")
+	}
+	if err := recoverInstall(root); err != nil {
+		return result, err
+	}
+	registryRoot := filepath.Join(root, "registry")
+	transactionsRoot := filepath.Join(registryRoot, "transactions")
+	for _, directory := range []string{registryRoot, transactionsRoot} {
+		if err := ensurePrivateDirectory(directory); err != nil {
+			return result, err
+		}
+	}
+	registryPath := filepath.Join(registryRoot, "state.json")
+	journalPath := filepath.Join(registryRoot, "pending.json")
+	state, err := loadRegistry(registryPath)
+	if err != nil {
+		return result, err
+	}
+	installed, exists := state.Mods[id]
+	if !exists {
+		return result, errNotInstalled
+	}
+	result.Version = installed.Version
+	if installed.Enabled == enabled {
+		return result, errors.New("mod already has requested activation state")
+	}
+	target := filepath.Join(root, filepath.FromSlash(installed.Root))
+	entrypoint := filepath.Join(target, filepath.FromSlash(installed.Entrypoint))
+	info, err := os.Lstat(entrypoint)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o600 {
+		return result, errors.New("installed entrypoint is missing or unsafe")
+	}
+	txid, err := randomTransactionID()
+	if err != nil {
+		return result, err
+	}
+	result.TransactionID = txid
+	next := registryState{SchemaVersion: 1, Mods: make(map[string]installedMod, len(state.Mods))}
+	for modID, item := range state.Mods {
+		next.Mods[modID] = item
+	}
+	installed.Enabled = enabled
+	next.Mods[id] = installed
+	operation := "disable"
+	if enabled {
+		operation = "enable"
+	}
+	journal := installJournal{SchemaVersion: 1, Operation: operation, Phase: "prepared", TransactionID: txid,
+		Target: installed.Root, Previous: state, Next: next}
+	if err := writeAtomicJSON(journalPath, journal); err != nil {
+		return result, err
+	}
+	if err := activationCheckpoint("journal-prepared"); err != nil {
+		return result, err
+	}
+	if err := writeAtomicJSON(registryPath, next); err != nil {
+		return result, err
+	}
+	if err := activationCheckpoint("registry-committed"); err != nil {
+		return result, err
+	}
+	if err := writeActivationManifest(root, next); err != nil {
+		return result, err
+	}
+	if err := activationCheckpoint("manifest-committed"); err != nil {
+		return result, err
+	}
+	journal.Phase = "committed"
+	if err := writeAtomicJSON(journalPath, journal); err != nil {
+		return result, err
+	}
+	if err := activationCheckpoint("journal-committed"); err != nil {
+		return result, err
+	}
+	now := time.Now().Unix()
+	record := transactionRecord{ID: txid, Operation: operation, ModID: id, Version: installed.Version, Status: "completed",
+		Stage: "manifest-committed", CreatedAt: now, CompletedAt: now}
+	if err := writeAtomicJSON(filepath.Join(transactionsRoot, txid+".json"), record); err != nil {
+		return result, err
+	}
+	if err := os.Remove(journalPath); err != nil {
+		return result, err
+	}
+	if err := syncDirectory(registryRoot); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func randomTransactionID() (string, error) {
@@ -471,7 +599,7 @@ func recoverInstall(root string) error {
 		return err
 	}
 	var journal installJournal
-	if decodeStrictJSON(data, &journal) != nil || journal.SchemaVersion != 1 || (journal.Operation != "install" && journal.Operation != "uninstall") || (journal.Phase != "prepared" && journal.Phase != "committed") || !strings.HasPrefix(journal.Target, "mods/installed/") {
+	if decodeStrictJSON(data, &journal) != nil || journal.SchemaVersion != 1 || (journal.Operation != "install" && journal.Operation != "uninstall" && journal.Operation != "enable" && journal.Operation != "disable") || (journal.Phase != "prepared" && journal.Phase != "committed") || !strings.HasPrefix(journal.Target, "mods/installed/") {
 		return errors.New("invalid install journal")
 	}
 	parts := strings.Split(journal.Target, "/")
@@ -489,10 +617,14 @@ func recoverInstall(root string) error {
 		if previousExists || !nextExists || len(journal.Next.Mods) != len(journal.Previous.Mods)+1 || nextItem.Version != parts[3] || nextItem.Root != journal.Target || journal.Quarantine != "" {
 			return errors.New("install journal transition mismatch")
 		}
-	} else {
+	} else if journal.Operation == "uninstall" {
 		expectedQuarantine := filepath.ToSlash(filepath.Join("mods", "installed", parts[2], ".uninstall-"+journal.TransactionID))
 		if !previousExists || nextExists || len(journal.Previous.Mods) != len(journal.Next.Mods)+1 || previousItem.Version != parts[3] || previousItem.Root != journal.Target || journal.Quarantine != expectedQuarantine {
 			return errors.New("uninstall journal transition mismatch")
+		}
+	} else {
+		if !previousExists || !nextExists || len(journal.Previous.Mods) != len(journal.Next.Mods) || previousItem.Root != journal.Target || nextItem.Root != journal.Target || previousItem.Version != parts[3] || nextItem.Version != parts[3] || journal.Quarantine != "" || previousItem.Enabled == nextItem.Enabled || nextItem.Enabled != (journal.Operation == "enable") {
+			return errors.New("activation journal transition mismatch")
 		}
 	}
 	for id, item := range journal.Previous.Mods {
@@ -501,7 +633,21 @@ func recoverInstall(root string) error {
 		}
 	}
 	quarantine := filepath.Join(root, filepath.FromSlash(journal.Quarantine))
-	if journal.Operation == "uninstall" && journal.Phase == "prepared" {
+	if (journal.Operation == "enable" || journal.Operation == "disable") && journal.Phase == "prepared" {
+		if err := writeAtomicJSON(filepath.Join(registryRoot, "state.json"), journal.Previous); err != nil {
+			return err
+		}
+		if err := writeActivationManifest(root, journal.Previous); err != nil {
+			return err
+		}
+	} else if journal.Operation == "enable" || journal.Operation == "disable" {
+		if err := writeAtomicJSON(filepath.Join(registryRoot, "state.json"), journal.Next); err != nil {
+			return err
+		}
+		if err := writeActivationManifest(root, journal.Next); err != nil {
+			return err
+		}
+	} else if journal.Operation == "uninstall" && journal.Phase == "prepared" {
 		if _, err := os.Lstat(quarantine); err == nil {
 			if _, targetErr := os.Lstat(target); !os.IsNotExist(targetErr) {
 				return errors.New("unsafe uninstall recovery collision")

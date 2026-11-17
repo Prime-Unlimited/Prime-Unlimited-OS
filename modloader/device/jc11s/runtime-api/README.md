@@ -154,9 +154,9 @@ the target remains safe. Completed or recovered operations are exposed through
 `GET /api/v1/transactions` and the installed state through
 `GET /api/v1/installed`.
 
-This milestone does not make files executable, generate startup state, enable
-mods or invoke an entrypoint. Dependency-bearing, library-bearing and
-conflicting records remain ineligible.
+This milestone does not make files executable or invoke an entrypoint.
+Dependency-bearing, library-bearing and conflicting records remain
+ineligible.
 
 ## Atomic disabled uninstallation
 
@@ -172,3 +172,17 @@ registry. Recovery of a committed uninstall completes removal of the payload
 and quarantine and retains the next registry. Completed and recovered
 uninstalls are recorded through the same transaction API as installations.
 The operation never runs package content and cannot uninstall an enabled mod.
+
+## Atomic enable/disable manifest
+
+`POST /api/v1/enable` and `POST /api/v1/disable` change only an installed
+mod's registry flag and `/data/prime-unlimited/activation/manifest.json`.
+The manifest contains a sorted projection of enabled IDs, versions, roots and
+signed entrypoints. It is regenerated from the registry at every API start.
+
+Registry and manifest updates share the durable transaction journal. Recovery
+before the committed-journal boundary restores both previous files; recovery
+after that boundary completes both next files. Enable validates that the
+installed entrypoint remains a mode `0600` regular file. It is deliberately
+not made executable, loaded, sourced or invoked. No boot or Engine hook reads
+the manifest in this milestone.

@@ -86,12 +86,13 @@ func TestMutationAuthorizationFailsClosed(t *testing.T) {
 		{"wrong", "/api/v1/install", []string{"Bearer " + strings.Repeat("b", 64)}, http.StatusUnauthorized},
 		{"wrong scheme", "/api/v1/install", []string{token}, http.StatusUnauthorized},
 		{"duplicate", "/api/v1/install", []string{"Bearer " + token, "Bearer " + token}, http.StatusUnauthorized},
-		{"valid but unavailable", "/api/v1/enable", []string{"Bearer " + token}, http.StatusNotImplemented},
+		{"valid but missing", "/api/v1/enable", []string{"Bearer " + token}, http.StatusNotFound},
 		{"unknown mutation", "/api/v1/unknown", []string{"Bearer " + token}, http.StatusNotFound},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(`{"id":"catalog-smoke-test"}`))
+			request.Header.Set("Content-Type", "application/json")
 			for _, value := range test.headers {
 				request.Header.Add("Authorization", value)
 			}

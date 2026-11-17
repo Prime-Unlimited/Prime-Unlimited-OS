@@ -373,6 +373,30 @@ func (s *server) handleUninstall(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, result)
 }
 
+func (s *server) handleActivation(w http.ResponseWriter, r *http.Request, enabled bool) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	request, err := decodeCacheRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	result, err := setModEnabled(request.ID, enabled, s.root)
+	if errors.Is(err, errNotInstalled) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "activation state change failed"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, result)
+}
+
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" || r.URL.Fragment != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query parameters are not supported"})
@@ -408,6 +432,14 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.handleUninstall(w, r)
 			return
 		}
+		if r.URL.Path == "/api/v1/enable" {
+			s.handleActivation(w, r, true)
+			return
+		}
+		if r.URL.Path == "/api/v1/disable" {
+			s.handleActivation(w, r, false)
+			return
+		}
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "mutation engine unavailable"})
 		return
 	}
@@ -435,7 +467,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/api/v1/health":
 		writeJSON(w, http.StatusOK, map[string]any{
-			"service": "prime-unlimited-mod-loader", "mode": "authenticated-disabled-lifecycle",
+			"service": "prime-unlimited-mod-loader", "mode": "authenticated-nonexecuting-lifecycle",
 			"catalogStatus": s.catalog.Status, "catalogError": s.catalog.Error,
 			"catalogTrust": map[bool]string{true: "verified", false: "unverified"}[s.catalog.Trusted],
 			"catalogKeyId": s.catalog.KeyID, "catalogKeyFingerprint": s.catalog.KeyFingerprint,
@@ -1093,6 +1125,10 @@ func main() {
 	}
 	if err := recoverInstall(*root); err != nil {
 		log.Fatalf("install recovery failed: %v", err)
+	}
+	registry, err := loadRegistry(filepath.Join(*root, "registry", "state.json"))
+	if err != nil || writeActivationManifest(*root, registry) != nil {
+		log.Fatal("activation manifest reconciliation failed")
 	}
 	state := loadVerifiedCatalog(*catalogPath, *catalogSignaturePath, *catalogTrustKeyPath)
 	if state.Status == "invalid" {

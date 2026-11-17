@@ -278,15 +278,15 @@ func TestInstallFailureCheckpointsRecoverDeterministically(t *testing.T) {
 	}
 }
 
-func TestRegistryRejectsEnabledOrUnsafeState(t *testing.T) {
+func TestRegistryAcceptsEnabledStateAndRejectsUnsafeFile(t *testing.T) {
 	root := t.TempDir()
 	item := installedMod{ID: "unsafe", Version: "1.0.0", PackageSHA256: strings.Repeat("a", 64), CatalogID: "test", Architecture: "armv7l", ABI: "gnueabihf", Entrypoint: "mod/start", Root: "mods/installed/unsafe/1.0.0", Enabled: true}
 	path := filepath.Join(root, "registry", "state.json")
 	if err := writeAtomicJSON(path, recoveryState(item)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadRegistry(path); err == nil {
-		t.Fatal("enabled state was accepted before activation support")
+	if _, err := loadRegistry(path); err != nil {
+		t.Fatalf("enabled state rejected: %v", err)
 	}
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
@@ -300,5 +300,72 @@ func TestRegistryRejectsEnabledOrUnsafeState(t *testing.T) {
 	}
 	if _, err := loadRegistry(path); err == nil {
 		t.Fatal("registry symlink was accepted")
+	}
+}
+
+func TestEnableDisableWritesManifestWithoutExecuting(t *testing.T) {
+	item, cacheRoot, stagingRoot, root := stagedInstallFixture(t)
+	if _, err := installDisabledMod(item, "trusted-test", cacheRoot, stagingRoot, root); err != nil {
+		t.Fatal(err)
+	}
+	enabled, err := setModEnabled(item.ID, true, root)
+	if err != nil || !enabled.Enabled {
+		t.Fatalf("enable failed: %#v %v", enabled, err)
+	}
+	manifestData, err := readOwnedFile(filepath.Join(root, "activation", "manifest.json"), 1024*1024, "activation manifest")
+	if err != nil || !strings.Contains(string(manifestData), `"id":"catalog-smoke-test"`) {
+		t.Fatalf("enabled manifest missing: %s %v", manifestData, err)
+	}
+	entrypoint := filepath.Join(root, "mods", "installed", item.ID, item.Version, filepath.FromSlash(item.Entrypoint))
+	if info, err := os.Lstat(entrypoint); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("entrypoint became executable: %#v %v", info, err)
+	}
+	if _, err := uninstallDisabledMod(item.ID, root); err == nil {
+		t.Fatal("enabled mod was uninstalled")
+	}
+	disabled, err := setModEnabled(item.ID, false, root)
+	if err != nil || disabled.Enabled {
+		t.Fatalf("disable failed: %#v %v", disabled, err)
+	}
+	manifestData, err = readOwnedFile(filepath.Join(root, "activation", "manifest.json"), 1024*1024, "activation manifest")
+	if err != nil || string(manifestData) != "{\"schemaVersion\":1,\"mods\":[]}\n" {
+		t.Fatalf("disabled manifest not empty: %s %v", manifestData, err)
+	}
+}
+
+func TestEnableFailureCheckpointsRecoverDeterministically(t *testing.T) {
+	for _, checkpoint := range []string{"journal-prepared", "registry-committed", "manifest-committed", "journal-committed"} {
+		t.Run(checkpoint, func(t *testing.T) {
+			item, cacheRoot, stagingRoot, root := stagedInstallFixture(t)
+			if _, err := installDisabledMod(item, "trusted-test", cacheRoot, stagingRoot, root); err != nil {
+				t.Fatal(err)
+			}
+			activationCheckpoint = func(stage string) error {
+				if stage == checkpoint {
+					return errors.New("injected failure")
+				}
+				return nil
+			}
+			_, err := setModEnabled(item.ID, true, root)
+			activationCheckpoint = func(string) error { return nil }
+			if err == nil {
+				t.Fatal("injected activation failure did not fire")
+			}
+			if err := recoverInstall(root); err != nil {
+				t.Fatal(err)
+			}
+			state, err := loadRegistry(filepath.Join(root, "registry", "state.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantEnabled := checkpoint == "journal-committed"
+			if state.Mods[item.ID].Enabled != wantEnabled {
+				t.Fatalf("enabled=%v want=%v", state.Mods[item.ID].Enabled, wantEnabled)
+			}
+			manifest, err := readOwnedFile(filepath.Join(root, "activation", "manifest.json"), 1024*1024, "activation manifest")
+			if err != nil || strings.Contains(string(manifest), item.ID) != wantEnabled {
+				t.Fatalf("manifest mismatch: %s %v", manifest, err)
+			}
+		})
 	}
 }
