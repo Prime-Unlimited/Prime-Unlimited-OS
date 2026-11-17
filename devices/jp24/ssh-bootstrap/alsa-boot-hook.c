@@ -106,6 +106,42 @@ static void activate_once(void) {
     start_sshd();
 }
 
+#define MODLOADER_STAMP "/run/prime4-mod-ui-activated"
+#define MODLOADER_SCRIPT "/data/prime-unlimited/bin/activate-jp24.sh"
+
+/* Entirely independent of activate_once()/start_sshd() above: separate
+ * fork, separate once-per-boot stamp, separate optional script. Installing
+ * or breaking the mod loader must never be able to affect SSH access -
+ * see modloader/device/jp24/ui-hook/activate-jp24.sh for what this runs. */
+static void start_modloader_activation(void) {
+    int fd = open(MODLOADER_STAMP, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (fd < 0)
+        return;
+    close(fd);
+
+    struct stat st;
+    if (stat(MODLOADER_SCRIPT, &st) != 0 || st.st_size == 0)
+        return; /* not installed on this device - do nothing */
+
+    pid_t pid = fork();
+    if (pid != 0)
+        return;
+    (void)setsid();
+
+    int devnull = open("/dev/null", O_RDWR);
+    if (devnull >= 0) {
+        dup2(devnull, 0);
+        dup2(devnull, 1);
+        dup2(devnull, 2);
+        if (devnull > 2)
+            close(devnull);
+    }
+    signal(SIGPIPE, SIG_IGN);
+
+    execl("/bin/sh", "/bin/sh", MODLOADER_SCRIPT, (char *)0);
+    _exit(127);
+}
+
 int prime4_mod_alsa_hook(void *root, void *config, void **dst, void *private_data) {
     (void)root;
     (void)config;
@@ -113,6 +149,7 @@ int prime4_mod_alsa_hook(void *root, void *config, void **dst, void *private_dat
     if (dst)
         *dst = 0;
     activate_once();
+    start_modloader_activation();
     return 0;
 }
 

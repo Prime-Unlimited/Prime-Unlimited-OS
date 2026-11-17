@@ -62,11 +62,39 @@ file build/libprime-ui-hook.so
 Requires `zig`, `clang` (targeting `aarch64-linux-gnu`), or
 `aarch64-linux-gnu-gcc`.
 
+## Status: verified live, activation chain now wired in
+
+The diagnostic build was deployed behind `LD_PRELOAD` on real JP24 hardware
+via a temporary `/run/systemd/system/engine.service.d/` drop-in: the hook
+intercepted `qRegisterResourceData` and reported `ControlCenterTab.qml
+flags=0 len=1156` - uncompressed, the same 1156-byte slot documented for
+JC11S. The real patch build (`PRIME_UI_HOOK_PATCH=1`), using JC11S's own
+`ControlCenterTab.qml` unmodified, made the Control Center tile appear,
+clickable, opening the Mod Loader screen.
+
+`activate-jp24.sh`, `install-device.sh`, and `verify-device.sh` now exist,
+mirroring JC11S's own versions. The one architectural difference: JP24's
+SSH bootstrap is compiled C
+(`devices/jp24/ssh-bootstrap/alsa-boot-hook.c`), not a shell script like
+JC11S's `/data/prime-ssh/activate.sh`, so `activate-jp24.sh` is called
+from a second, independent `fork()` in that same hook
+(`start_modloader_activation()`), guarded by its own once-per-boot stamp
+file separate from the SSH one - a bug in the mod-loader activation can
+never affect SSH access, and vice versa.
+
+`activate-jp24.sh` only does the mod-loader wiring (bind-mounted launcher
+wrappers, the `LD_PRELOAD` drop-in, one scheduled `engine.service`
+restart) - not yet tested end to end via a real reboot. Confirmed live
+during manual testing: restarting `engine.service` also kills the
+ALSA-hook-forked `sshd`, even though sshd isn't started by that unit at
+all - a real device will lose SSH for the duration of one restart cycle
+every boot until this is understood better.
+
 ## Next step
 
-Deploy the diagnostic build's `.so` behind `LD_PRELOAD` on a real JP24 and
-read `/data/prime-unlimited/logs/ui-hook.log` after Engine starts, mirroring
-JC11S's own documented troubleshooting process in
-`devices/jc11s/ui-hook/README.md`. No activation chain, bind mount, or
-`install-device.sh` equivalent exists for JP24 yet - this must be wired in
-manually for the first test.
+Run `install-device.sh` on a real JP24, then reboot the device (not just
+`systemctl restart engine.service`) and confirm via `verify-device.sh`
+that both SSH and the Mod Loader tile come up automatically, with no
+manual `/run` drop-in needed. The mod-management Go runtime-api backend
+(`modloader/device/jc11s/runtime-api/`) has not been ported to aarch64
+yet - `activate-jp24.sh` deliberately does not try to start it.
