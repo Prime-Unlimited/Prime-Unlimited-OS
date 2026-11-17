@@ -89,6 +89,30 @@ class SshService:
         host_keys.save(str(known_hosts))
         return identity
 
+    def _connect(
+        self,
+        host: str,
+        port: int,
+        private_key: Path,
+        passphrase: str,
+        known_hosts: Path,
+        timeout: float = 10,
+    ) -> paramiko.SSHClient:
+        client = paramiko.SSHClient()
+        client.load_host_keys(str(known_hosts))
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        client.connect(
+            host,
+            port=port,
+            username="root",
+            key_filename=str(private_key),
+            passphrase=passphrase,
+            allow_agent=False,
+            look_for_keys=False,
+            timeout=timeout,
+        )
+        return client
+
     def verify_authenticated(
         self,
         host: str,
@@ -97,20 +121,9 @@ class SshService:
         passphrase: str,
         known_hosts: Path,
     ) -> str:
-        client = paramiko.SSHClient()
-        client.load_host_keys(str(known_hosts))
-        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        client = None
         try:
-            client.connect(
-                host,
-                port=port,
-                username="root",
-                key_filename=str(private_key),
-                passphrase=passphrase,
-                allow_agent=False,
-                look_for_keys=False,
-                timeout=10,
-            )
+            client = self._connect(host, port, private_key, passphrase, known_hosts)
             _, stdout, _ = client.exec_command("printf PRIME_UNLIMITED_SSH_OK", timeout=10)
             marker = stdout.read().decode("utf-8", "replace")
             if marker != "PRIME_UNLIMITED_SSH_OK":
@@ -121,4 +134,52 @@ class SshService:
                 raise
             raise SshVerificationError(f"Authenticated SSH verification failed: {exc}") from exc
         finally:
-            client.close()
+            if client is not None:
+                client.close()
+
+    def query_data_partition_size(
+        self,
+        host: str,
+        port: int,
+        private_key: Path,
+        passphrase: str,
+        known_hosts: Path,
+    ) -> int:
+        """Returns the real size, in bytes, of the block device backing
+        /data - read from /proc/partitions rather than assumed, so this
+        works unchanged across hardware revisions with a differently
+        named or differently sized /data partition.
+
+        resize2fs (which would let the existing filesystem grow in place
+        without a reflash) is not present on this device's minimal
+        e2fsprogs build - confirmed live (`which resize2fs` found
+        nothing, only mke2fs/e2label exist). The caller is expected to use
+        this size to build a right-sized image and reflash via imbupd
+        instead, the same proven mechanism as the first bootstrap flash."""
+        client = None
+        try:
+            client = self._connect(host, port, private_key, passphrase, known_hosts)
+            command = (
+                "DEVICE=$(grep ' /data ' /proc/mounts | awk '{print $1}'); "
+                "if [ -z \"$DEVICE\" ]; then echo NO_DATA_MOUNT; exit 1; fi; "
+                'NAME=$(basename "$DEVICE"); '
+                'SIZE_KB=$(grep -E "[[:space:]]${NAME}\\$" /proc/partitions | awk \'{print $3}\'); '
+                'echo "SIZE_KB=$SIZE_KB"'
+            )
+            _, stdout, _ = client.exec_command(command, timeout=15)
+            output = stdout.read().decode("utf-8", "replace")
+            if "NO_DATA_MOUNT" in output:
+                raise SshVerificationError("Could not find the block device backing /data.")
+            for line in output.splitlines():
+                if line.startswith("SIZE_KB="):
+                    size_kb = line.removeprefix("SIZE_KB=").strip()
+                    if size_kb.isdigit():
+                        return int(size_kb) * 1024
+            raise SshVerificationError(f"Could not parse the partition size from: {output!r}")
+        except Exception as exc:
+            if isinstance(exc, SshVerificationError):
+                raise
+            raise SshVerificationError(f"Querying the /data partition size failed: {exc}") from exc
+        finally:
+            if client is not None:
+                client.close()

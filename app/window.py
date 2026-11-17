@@ -147,11 +147,17 @@ class FlashWorkerSignals(QObject):
 
 class FlashWorker(QRunnable):
     """Builds the /data image and flashes it. Runs off the GUI thread since
-    the write itself can take well over a minute."""
+    the write itself can take well over a minute.
 
-    def __init__(self, public_key: Path) -> None:
+    size_mb overrides the default image size - used for the "rebuild
+    sized to the real partition" step after querying it live over SSH,
+    rather than for the first bootstrap flash (which has no SSH yet to
+    query anything with, and so stays at the script's safe default)."""
+
+    def __init__(self, public_key: Path, size_mb: int | None = None) -> None:
         super().__init__()
         self.public_key = public_key
+        self.size_mb = size_mb
         self.signals = FlashWorkerSignals()
 
     @Slot()
@@ -160,7 +166,7 @@ class FlashWorker(QRunnable):
             with tempfile.TemporaryDirectory(prefix="prime-unlimited-jp24-") as tmp:
                 image = Path(tmp) / "prime4-data.img"
                 self.signals.progress.emit(FlashProgress("build", "Building the /data image…"))
-                build_data_image(self.public_key, image)
+                build_data_image(self.public_key, image, size_mb=self.size_mb)
                 ImbupdTransport().install(image, on_progress=self.signals.progress.emit)
             self.signals.finished.emit()
         except FlashError as exc:
@@ -246,6 +252,36 @@ class SshVerifyWorker(QRunnable):
             self.signals.failed.emit(redact(str(exc)))
 
 
+class SshQueryPartitionSizeWorker(QRunnable):
+    """Reads the real size of the block device backing /data, live over
+    SSH, so a bigger replacement image can be sized to it exactly rather
+    than guessed - safe across hardware revisions with a differently
+    sized /data partition. resize2fs (which would let the existing
+    filesystem grow in place without a reflash) was confirmed absent on
+    this device's minimal e2fsprogs build."""
+
+    def __init__(self, service: SshService, host: str, port: int, private_key: Path, passphrase: str) -> None:
+        super().__init__()
+        self.service = service
+        self.host = host
+        self.port = port
+        self.private_key = private_key
+        self.passphrase = passphrase
+        self.signals = SshWorkerSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            size_bytes = self.service.query_data_partition_size(
+                self.host, self.port, self.private_key, self.passphrase, KNOWN_HOSTS_PATH
+            )
+            self.signals.finished.emit(size_bytes)
+        except SshVerificationError as exc:
+            self.signals.failed.emit(redact(str(exc)))
+        except Exception as exc:
+            self.signals.failed.emit(redact(str(exc)))
+
+
 class DiscoveryWorker(QRunnable):
     """Best-effort device IP lookup (mDNS, then a local-network port scan).
     Never a trust decision by itself - the caller still inspects and
@@ -310,6 +346,7 @@ class WorkflowPage(QWidget):
         self.ssh_service = SshService()
         self._ssh_worker: QRunnable | None = None
         self._pending_host_identity: HostIdentity | None = None
+        self._data_partition_bytes: int | None = None
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(30, 30, 30, 30)
@@ -532,11 +569,22 @@ class WorkflowPage(QWidget):
         self.ssh_test_passphrase.setAccessibleName("Private key passphrase for SSH test")
         layout.addWidget(self.ssh_test_passphrase)
 
+        login_row = QHBoxLayout()
         self.verify_login_button = QPushButton("Test authenticated login")
         self.verify_login_button.setObjectName("primary")
         self.verify_login_button.setEnabled(False)
         self.verify_login_button.clicked.connect(self.verify_login)
-        layout.addWidget(self.verify_login_button, 0, Qt.AlignmentFlag.AlignLeft)
+        login_row.addWidget(self.verify_login_button)
+        self.check_data_size_button = QPushButton("Check real /data size")
+        self.check_data_size_button.setEnabled(False)
+        self.check_data_size_button.clicked.connect(self.check_data_partition_size)
+        login_row.addWidget(self.check_data_size_button)
+        layout.addLayout(login_row)
+
+        self.rebuild_data_button = QPushButton("Rebuild image to fill /data & reflash")
+        self.rebuild_data_button.setEnabled(False)
+        self.rebuild_data_button.clicked.connect(self.rebuild_and_reflash_data)
+        layout.addWidget(self.rebuild_data_button, 0, Qt.AlignmentFlag.AlignLeft)
 
         self.ssh_test_status = label("Enter the device's IP address to begin.")
         layout.addWidget(self.ssh_test_status)
@@ -647,15 +695,103 @@ class WorkflowPage(QWidget):
     def handle_login_verified(self, marker: str) -> None:
         self.verify_login_button.setEnabled(True)
         self.ssh_test_passphrase.clear()
-        self.ssh_test_status.setText("SSH access confirmed with your enrolled key.")
+        self.ssh_test_status.setText(
+            "SSH access confirmed with your enrolled key. You can check the real /data size below "
+            "if you want more room for mods - re-enter the passphrase first."
+        )
         self.ssh_test_status.setStyleSheet("color:#63e6a6;")
         self.ssh_test_log.appendPlainText(f"[verify] authenticated command returned: {marker}")
+        self.check_data_size_button.setEnabled(True)
         self._update_navigation()
+
+    def check_data_partition_size(self) -> None:
+        if self.profile is None or self.key_pair is None:
+            return
+        self.check_data_size_button.setEnabled(False)
+        self.ssh_test_status.setText("Querying the real /data partition size…")
+        self.ssh_test_status.setStyleSheet("")
+        worker = SshQueryPartitionSizeWorker(
+            self.ssh_service,
+            self._ssh_host(),
+            self.profile.ssh_port,
+            self.key_pair.private_key,
+            self.ssh_test_passphrase.text(),
+        )
+        worker.signals.finished.connect(self.handle_data_size_checked)
+        worker.signals.failed.connect(self.handle_ssh_failure)
+        self._ssh_worker = worker
+        self.thread_pool.start(worker)
+
+    @Slot(object)
+    def handle_data_size_checked(self, size_bytes: int) -> None:
+        self.check_data_size_button.setEnabled(True)
+        self.ssh_test_passphrase.clear()
+        self._data_partition_bytes = size_bytes
+        gib = size_bytes / (1024**3)
+        self.ssh_test_status.setText(
+            f"Real /data partition: {gib:.1f} GiB. You can rebuild a bigger image sized to it and "
+            "reflash it - the device must be back in Firmware Update Mode for that."
+        )
+        self.ssh_test_status.setStyleSheet("color:#ffd18a;")
+        self.ssh_test_log.appendPlainText(f"[size] /data partition is {size_bytes:,} bytes ({gib:.1f} GiB)")
+        self.rebuild_data_button.setEnabled(True)
+
+    def rebuild_and_reflash_data(self) -> None:
+        if self.profile is None or self.key_pair is None or self._data_partition_bytes is None:
+            return
+        # A safety margin below the exact partition size: imbupd/the
+        # underlying eMMC write path isn't guaranteed to be byte-exact,
+        # and leaving a little headroom costs nothing meaningful out of
+        # a multi-gigabyte partition.
+        size_mb = int(self._data_partition_bytes / (1024 * 1024) * 0.5)
+        gib = self._data_partition_bytes / (1024**3)
+        choice = QMessageBox.warning(
+            self,
+            "Confirm destructive write",
+            f"This builds a new ~{size_mb:,} MiB /data image (sized to the real {gib:.1f} GiB "
+            "partition, with a safety margin), overwrites the device's /data partition with it, "
+            "and reboots it. Put the device back into Firmware Update Mode first.\n\n"
+            "Do not disconnect the device during this process. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if choice != QMessageBox.StandardButton.Yes:
+            return
+        self.rebuild_data_button.setEnabled(False)
+        self.ssh_test_log.clear()
+        self.ssh_test_status.setText("Rebuilding the image and reflashing…")
+        self.ssh_test_status.setStyleSheet("color:#ffd18a;")
+        worker = FlashWorker(self.key_pair.public_key, size_mb=size_mb)
+        worker.signals.progress.connect(self.handle_rebuild_progress)
+        worker.signals.finished.connect(self.handle_rebuild_finished)
+        worker.signals.failed.connect(self.handle_rebuild_failed)
+        self._flash_worker = worker
+        self.thread_pool.start(worker)
+
+    @Slot(object)
+    def handle_rebuild_progress(self, progress: FlashProgress) -> None:
+        self.ssh_test_log.appendPlainText(f"[{progress.step}] {progress.message}")
+        self.ssh_test_status.setText(progress.message)
+
+    @Slot()
+    def handle_rebuild_finished(self) -> None:
+        self.rebuild_data_button.setEnabled(True)
+        self.ssh_test_status.setText("Done. The device is rebooting with the larger /data partition.")
+        self.ssh_test_status.setStyleSheet("color:#63e6a6;")
+
+    @Slot(str)
+    def handle_rebuild_failed(self, message: str) -> None:
+        self.rebuild_data_button.setEnabled(True)
+        self.ssh_test_status.setText("Rebuilding /data failed. Review the log and try again.")
+        self.ssh_test_status.setStyleSheet("color:#ff7b7b;")
+        self.ssh_test_log.appendPlainText(f"[error] {message}")
 
     @Slot(str)
     def handle_ssh_failure(self, message: str) -> None:
         self.inspect_key_button.setEnabled(True)
         self.verify_login_button.setEnabled(bool(self._pending_host_identity))
+        self.check_data_size_button.setEnabled(bool(self._pending_host_identity))
+        self.rebuild_data_button.setEnabled(self._data_partition_bytes is not None)
         self.ssh_test_status.setText("That step failed. Review the log and try again.")
         self.ssh_test_status.setStyleSheet("color:#ff7b7b;")
         self.ssh_test_log.appendPlainText(f"[error] {message}")
@@ -750,8 +886,11 @@ class WorkflowPage(QWidget):
         self.inspect_key_button.setEnabled(True)
         self.trust_key_button.setEnabled(False)
         self.verify_login_button.setEnabled(False)
+        self.check_data_size_button.setEnabled(False)
+        self.rebuild_data_button.setEnabled(False)
         self.discover_host_button.setEnabled(True)
         self._pending_host_identity = None
+        self._data_partition_bytes = None
         self.show_page(self.CONNECTION)
 
     _STEP_ROW_BY_PAGE = {BLOCKED: 2, FLASH: 2, SSH_TEST: 3}
@@ -881,7 +1020,13 @@ class WorkflowPage(QWidget):
     def _diagnostics_allow_key_setup(self) -> bool:
         if self.diagnostic_report is None:
             return False
-        return self.diagnostic_report.result.state == DetectionState.MATCH
+        # imbupd (JP24's transport) has no positive-identity query, unlike
+        # fastboot's getvar for JC11S - UNVERIFIED is the best this transport
+        # can ever report, not a failure, so it must still allow continuing.
+        return self.diagnostic_report.result.state in {
+            DetectionState.MATCH,
+            DetectionState.UNVERIFIED,
+        }
 
     def _update_navigation(self) -> None:
         page = self.page_stack.currentIndex()
