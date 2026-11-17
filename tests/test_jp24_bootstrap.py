@@ -11,6 +11,31 @@ class FakeResult:
         self.stdout = stdout
 
 
+class FakeStdout:
+    """Feeds `_write_with_live_progress` one character at a time, as its
+    real-time `proc.stdout.read(1)` loop expects, then signals EOF."""
+
+    def __init__(self, text: str) -> None:
+        self._chars = list(text)
+
+    def read(self, _n: int = 1) -> str:
+        if self._chars:
+            return self._chars.pop(0)
+        return ""
+
+
+class FakePopen:
+    def __init__(self, output: str, returncode: int) -> None:
+        self.stdout = FakeStdout(output)
+        self._returncode = returncode
+
+    def poll(self):
+        return None if self.stdout._chars else self._returncode
+
+    def wait(self) -> int:
+        return self._returncode
+
+
 def test_build_data_image_passes_size_override_via_env(monkeypatch, tmp_path: Path):
     """size_mb must reach the build script as DATA_SIZE_MB, and the
     timeout must scale with it - a multi-gigabyte image genuinely takes
@@ -45,3 +70,36 @@ def test_build_data_image_uses_script_default_without_size_mb(monkeypatch, tmp_p
 
     assert captured["env"] is None
     assert captured["timeout"] == 60.0
+
+
+def test_write_with_live_progress_reports_percent_and_eta(monkeypatch):
+    """The imbupd tool's own `written / total bytes (pct%)` line must reach
+    the caller as it's written, not only once the whole write finishes -
+    the whole point of streaming instead of a single buffered subprocess
+    call for a write that can take minutes on a multi-gigabyte image."""
+    output = "5000000 / 10000000 bytes (50%)\n10000000 / 10000000 bytes (100%)\nWrite complete.\n"
+    monkeypatch.setattr(jp24_bootstrap.subprocess, "Popen", lambda *a, **k: FakePopen(output, 0))
+
+    reported: list[str] = []
+    result = jp24_bootstrap._write_with_live_progress(
+        ["imbupd_write_mac", "write", "data", "img.bin"], timeout=30, report=reported.append
+    )
+
+    assert result is not None
+    assert result.returncode == 0
+    assert any("50%" in message for message in reported)
+    assert any("100%" in message for message in reported)
+
+
+def test_write_with_live_progress_falls_back_when_sudo_needs_a_password(monkeypatch):
+    """sudo -n fails immediately (no cached ticket) before any progress is
+    ever seen - this must signal the caller to use the buffered GUI
+    admin-prompt path instead of raising, since nothing failed yet."""
+    output = "sudo: a password is required\n"
+    monkeypatch.setattr(jp24_bootstrap.subprocess, "Popen", lambda *a, **k: FakePopen(output, 1))
+
+    result = jp24_bootstrap._write_with_live_progress(
+        ["imbupd_write_mac", "write", "data", "img.bin"], timeout=30, report=None
+    )
+
+    assert result is None
