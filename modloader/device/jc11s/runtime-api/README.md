@@ -186,3 +186,18 @@ after that boundary completes both next files. Enable validates that the
 installed entrypoint remains a mode `0600` regular file. It is deliberately
 not made executable, loaded, sourced or invoked. No boot or Engine hook reads
 the manifest in this milestone.
+
+## Dependency and conflict preflight
+
+`POST /api/v1/resolve` accepts a signed-v2 catalog mod ID and returns a
+deterministic dependency-first order without changing device state. The
+resolver supports exact and comparison ranges, comma intersections, caret,
+tilde and wildcard constraints. It checks transitive mod and library
+dependencies, device, firmware, architecture and ABI compatibility, cycles,
+conflicting combined constraints, catalog conflicts and conflicts with
+currently enabled installed mods.
+
+Resolution is currently a preflight boundary. Dependency-bearing packages
+remain ineligible for inspection and installation, and the enable endpoint
+does not yet apply a multi-mod plan. This keeps activation fail-closed until
+atomic dependency-set installation and activation are implemented.

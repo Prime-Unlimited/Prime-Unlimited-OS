@@ -178,7 +178,7 @@ func (s *server) authorizationStatus() string {
 
 func isMutationPath(path string) bool {
 	switch path {
-	case "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback":
+	case "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve":
 		return true
 	default:
 		return false
@@ -397,6 +397,26 @@ func (s *server) handleActivation(w http.ResponseWriter, r *http.Request, enable
 	writeJSON(w, http.StatusAccepted, result)
 }
 
+func (s *server) handleResolve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	request, err := decodeCacheRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	result, err := s.resolveCatalogMod(request.ID)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "dependency resolution failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" || r.URL.Fragment != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query parameters are not supported"})
@@ -438,6 +458,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if r.URL.Path == "/api/v1/disable" {
 			s.handleActivation(w, r, false)
+			return
+		}
+		if r.URL.Path == "/api/v1/resolve" {
+			s.handleResolve(w, r)
 			return
 		}
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "mutation engine unavailable"})
