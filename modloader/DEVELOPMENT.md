@@ -18,7 +18,10 @@ installed. Mutation mode additionally requires a private root, a verified
 catalog decision and a local bearer-token file; without all three the server
 intentionally remains read-only.
 
-`ui/ModLoader.qml` is an unmounted QML component; it requires an appropriate QtQuick host for preview. It is **not** wired into the device's menu or startup process.
+`ui/ModLoader.qml` is mounted on the verified JC11S path by the preload hook in
+`device/jc11s/ui-hook/`. Other models still require their own validated adapter.
+The screen opens independently of the backend; mutation remains disabled until
+the authenticated loopback service and token are provisioned.
 
 Before deployment, require a target-verified runtime, a validated /data-only startup path, an authenticated mutation API, strict package extraction safeguards, and an atomic rollback mechanism. No other partition may be written.
 

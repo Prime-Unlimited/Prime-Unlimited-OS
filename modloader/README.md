@@ -7,9 +7,12 @@ Independent, /data-only mod management for Prime Unlimited OS.
 The platform-independent v1 manager is implemented: persistent registry,
 deterministic dependency solving, verified ZIP installation, shared libraries,
 update/rollback, recovery journals, generated startup configuration, isolated
-activation, authenticated loopback mutations and an extended QML client. No
-device hook, firmware modification, service activation or hardware write is
-included.
+activation, authenticated loopback mutations and an extended QML client. A
+JC11S-specific, `/data`-only QML resource preload hook and Control Center tile
+have additionally been verified on Prime 4+ hardware running Engine OS 5.3.0.
+The complete source, bootstrap, build, deployment and verification record is in
+[`device/jc11s/ui-hook/`](device/jc11s/ui-hook/README.md). The backend service
+is not yet activated by that UI integration.
 
 ## Runtime layout
 
@@ -32,7 +35,9 @@ The service must bind to loopback only. Catalog access must be optional; offline
 - Never write outside `/data`, including other mounted filesystems.
 - Never modify protected firmware partitions, system service files, or the original application binaries.
 - Never require an installer or firmware build to develop or test this module.
-- Do not activate runtime hooks automatically in this scaffold.
+- Runtime hooks must be explicitly installed by a model- and firmware-specific
+  adapter. The JC11S adapter is documented separately and fails closed on a
+  different model.
 - Fail closed for unknown device identifiers, firmware versions, invalid checksums, and malformed package paths.
 - Package activation must support rollback and a disabled-mods startup mode.
 
