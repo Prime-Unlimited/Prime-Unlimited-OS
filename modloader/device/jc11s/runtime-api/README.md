@@ -203,3 +203,22 @@ enabled in one registry/manifest journal transaction. Missing dependencies,
 cycles or direct and reverse conflicts leave both files unchanged. Disable
 refuses to break an enabled dependent and therefore requires dependent-first
 order. Automatic dependency download and library installation remain blocked.
+
+## Manual isolated launcher
+
+`POST /api/v1/launch` manually runs one enabled mod and
+`GET /api/v1/runtime/<id>` returns its last persisted status. Entrypoints must
+be mode `0600` regular files beginning exactly with `#!/bin/sh`; they are fed
+to `/bin/sh` through an already-open descriptor and never made executable.
+
+The child receives a minimal fixed environment, a private working directory,
+its own process group, a five-second deadline and a 256 KiB combined output
+limit. On the JC11S root service it is dropped to `nobody:nogroup`; its work
+directory is `0700` under a traverse-only parent, while logs and status remain
+`0600` root-owned in non-traversable directories. Timeout kills the complete
+process group. Completion, failure and timeout states are written atomically.
+
+This endpoint is manual and one-shot. It is not called from boot or Engine,
+does not launch a dependency graph, and does not yet provide a network or
+mount namespace. Those limitations must be addressed before general-purpose
+third-party mods or automatic startup are enabled.

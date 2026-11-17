@@ -178,7 +178,7 @@ func (s *server) authorizationStatus() string {
 
 func isMutationPath(path string) bool {
 	switch path {
-	case "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve":
+	case "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve", "/api/v1/launch":
 		return true
 	default:
 		return false
@@ -417,6 +417,30 @@ func (s *server) handleResolve(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *server) handleLaunch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	request, err := decodeCacheRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	status, err := launchEnabledMod(request.ID, s.root)
+	if errors.Is(err, errNotInstalled) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, status)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" || r.URL.Fragment != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query parameters are not supported"})
@@ -464,6 +488,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.handleResolve(w, r)
 			return
 		}
+		if r.URL.Path == "/api/v1/launch" {
+			s.handleLaunch(w, r)
+			return
+		}
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "mutation engine unavailable"})
 		return
 	}
@@ -486,6 +514,24 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "transaction not found"})
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/v1/runtime/") {
+		id := strings.TrimPrefix(r.URL.Path, "/api/v1/runtime/")
+		if !modIDPattern.MatchString(id) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid mod id"})
+			return
+		}
+		status, err := loadLaunchStatus(id, s.root)
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "launch status not found"})
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "launch status unavailable"})
+			return
+		}
+		writeJSON(w, http.StatusOK, status)
 		return
 	}
 	switch r.URL.Path {
