@@ -53,10 +53,11 @@ downloaded bytes to the signed catalog record; it does not independently
 authenticate a publisher.
 
 The native device service owns a random 32-byte token in a root-only `0600`
-file and compares authorization headers in constant time. The JC11S QML runs
-inside the root-owned Engine process and reads that file directly through a
-local `file:` request; the token is never returned by HTTP, rendered, logged or
-stored in the catalog. Read-only API use needs no token.
+file and compares authorization headers in constant time. At service start it
+replaces exactly one marker in the public QML template and atomically publishes
+a root-only `0600` runtime copy for the root-owned Engine process. The token is
+never returned by HTTP, rendered, logged, committed or stored in the catalog.
+Read-only API use needs no token.
 
 ## JC11S touch UI
 

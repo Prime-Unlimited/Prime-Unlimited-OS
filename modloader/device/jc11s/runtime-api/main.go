@@ -1310,6 +1310,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("authorization setup failed: %v", err)
 	}
+	if err := provisionAuthorizedUI(*root, authToken); err != nil {
+		log.Fatalf("UI authorization setup failed: %v", err)
+	}
 	httpServer := &http.Server{
 		Addr: *listen,
 		Handler: &server{model: *model, firmware: *firmware, architecture: *architecture, abi: *abi, catalog: state, authToken: authToken, root: *root,

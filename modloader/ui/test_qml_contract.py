@@ -10,7 +10,7 @@ class QmlContractTests(unittest.TestCase):
         for action in ("cache", "stage", "inspect", "install", "enable", "disable", "uninstall", "recover", "launch-set", "safe-mode/enable", "safe-mode/disable"):
             self.assertIn('"%s"' % action, text)
         self.assertIn("Authorization", text)
-        self.assertIn("file:///data/prime-unlimited/auth/mutation.token", text)
+        self.assertIn("__PRIME_UNLIMITED_AUTH_TOKEN__", text)
         self.assertIn("not in catalog", text)
         self.assertIn("Offline", text)
 
