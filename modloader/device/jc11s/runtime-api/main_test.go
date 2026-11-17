@@ -1,7 +1,10 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net"
@@ -116,7 +119,7 @@ func TestCacheEndpointUsesOnlyCatalogMetadata(t *testing.T) {
 	item.Size = int64(len(payload))
 	handler := &server{
 		model: "JC11S", firmware: "5.3.0", authToken: strings.Repeat("a", 64),
-		catalog:   catalogState{Status: "valid", Catalog: catalog{SchemaVersion: 1, Mods: []mod{item}}},
+		catalog:   catalogState{Status: "valid", Trusted: true, Catalog: catalog{SchemaVersion: 1, Mods: []mod{item}}},
 		cacheRoot: filepath.Join(t.TempDir(), "cache"), httpClient: packageServer.Client(),
 	}
 	tests := []struct {
@@ -395,7 +398,7 @@ func TestLoadCatalogValidation(t *testing.T) {
 	if err := os.WriteFile(path, []byte(strings.Repeat(" ", maxCatalogBytes+1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if state := loadCatalog(path); state.Status != "invalid" || !strings.Contains(state.Error, "1 MiB") {
+	if state := loadCatalog(path); state.Status != "invalid" || !strings.Contains(state.Error, "size limit") {
 		t.Fatalf("oversized catalog accepted: %#v", state)
 	}
 
@@ -418,6 +421,75 @@ func TestLoadCatalogValidation(t *testing.T) {
 			t.Fatalf("catalog symlink accepted: %#v", state)
 		}
 	})
+}
+
+func TestVerifiedCatalogTrustChain(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	catalogPath := filepath.Join(directory, "catalog.json")
+	signaturePath := filepath.Join(directory, "catalog.sig.json")
+	trustPath := filepath.Join(directory, "catalog-key.json")
+	catalogData := []byte(mustJSON(t, catalog{SchemaVersion: 1, Mods: []mod{validMod()}}))
+	keyID := "prime-unlimited-test-1"
+	writeTestFile(t, catalogPath, catalogData, 0o644)
+	writeTestFile(t, trustPath, []byte(mustJSON(t, catalogTrustKey{
+		Algorithm: "ed25519", KeyID: keyID, PublicKey: base64.StdEncoding.EncodeToString(publicKey),
+	})), 0o644)
+	writeTestFile(t, signaturePath, []byte(mustJSON(t, catalogSignature{
+		Algorithm: "ed25519", KeyID: keyID,
+		Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, catalogData)),
+	})), 0o644)
+	state := loadVerifiedCatalog(catalogPath, signaturePath, trustPath)
+	if state.Status != "valid" || !state.Trusted || state.KeyID != keyID || len(state.KeyFingerprint) != 64 {
+		t.Fatalf("valid trust chain rejected: %#v", state)
+	}
+
+	t.Run("tampered catalog", func(t *testing.T) {
+		writeTestFile(t, catalogPath, append(catalogData, ' '), 0o644)
+		if state := loadVerifiedCatalog(catalogPath, signaturePath, trustPath); state.Status != "invalid" || state.Trusted {
+			t.Fatalf("tampered catalog trusted: %#v", state)
+		}
+		writeTestFile(t, catalogPath, catalogData, 0o644)
+	})
+	t.Run("wrong signing key", func(t *testing.T) {
+		_, wrongKey, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeTestFile(t, signaturePath, []byte(mustJSON(t, catalogSignature{
+			Algorithm: "ed25519", KeyID: keyID,
+			Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(wrongKey, catalogData)),
+		})), 0o644)
+		if state := loadVerifiedCatalog(catalogPath, signaturePath, trustPath); state.Status != "invalid" || state.Trusted {
+			t.Fatalf("wrong signature trusted: %#v", state)
+		}
+	})
+}
+
+func TestUntrustedCatalogCannotDownload(t *testing.T) {
+	handler := &server{model: "JC11S", firmware: "5.3.0", authToken: strings.Repeat("a", 64),
+		catalog: catalogState{Status: "valid", Catalog: catalog{SchemaVersion: 1, Mods: []mod{validMod()}}}}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/cache", strings.NewReader(`{"id":"catalog-smoke-test"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+handler.authToken)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("untrusted catalog download status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func writeTestFile(t *testing.T, path string, data []byte, mode os.FileMode) {
+	t.Helper()
+	if err := os.WriteFile(path, data, mode); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func mustJSON(t *testing.T, value any) string {

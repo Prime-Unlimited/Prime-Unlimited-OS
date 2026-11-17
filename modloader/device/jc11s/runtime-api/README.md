@@ -30,23 +30,33 @@ come up before catalog provisioning.
 
 ## Catalog behavior
 
-The runtime currently supports catalog schema v1 only. Validation is strict:
+The runtime currently supports signed catalog schema v1 only. Validation is strict:
 unknown fields, duplicate IDs or list values, non-HTTPS URLs, URL credentials,
 fragments, missing or out-of-range package sizes, malformed lowercase SHA-256
 values, trailing JSON, and catalogs larger than 1 MiB are rejected. The file
 must be regular, owned by the service user, and not group- or world-writable.
 Schema v2 is rejected until its complete trust and package model is implemented.
 
+Every present catalog requires a detached Ed25519 signature and a separately
+provisioned deployment trust key. The service verifies the signature over the
+exact catalog bytes before parsing or exposing entries. Algorithm and key ID
+must match, and catalog, signature, and trust-key files must all satisfy the
+service ownership and write-permission rules. Missing or invalid trust
+material leaves health diagnostics available but marks the catalog invalid and
+blocks package caching.
+
 The API remains healthy when a catalog is invalid. `/api/v1/health` reports
 `catalogStatus` and `/api/v1/mods` returns HTTP 503 with a validation error.
 A missing catalog reports `missing` and returns an empty mod list. A valid
-catalog reports `valid` and includes its SHA-256 in the mods response.
+catalog reports `valid`, `catalogTrust: verified`, the key ID, public-key
+fingerprint, and its SHA-256. Neither private keys nor signatures are returned.
 
 For a non-installable device visibility check, provision
 `modloader/catalog/jc11s-smoke-test.json` as
 `/data/prime-unlimited/catalog/catalog.json`. Back up an existing catalog
 first, use mode `0644`, restart only `prime-unlimited-modloader-api.service`,
-and verify the health and mods endpoints. The entry uses the reserved
+provision its matching detached signature and public trust key, then verify
+the health and mods endpoints. The entry uses the reserved
 `example.invalid` domain and mutations remain unauthorized, so it cannot be
 installed. Restore the backup and restart the API to roll back.
 
@@ -83,3 +93,8 @@ verified before an atomic rename to `<sha256>.zip`; partial or invalid files
 are removed. A valid existing cache file is rehashed before reuse. No archive
 is opened, extracted, executed, installed, or activated in this milestone.
 Package signatures and publisher authenticity remain a separate next step.
+
+The catalog signature authenticates which package digest and size the
+deployment approved. The cache then verifies downloaded bytes against that
+authenticated record. Individual package signatures and archive-content
+signatures remain a separate defense-in-depth step.

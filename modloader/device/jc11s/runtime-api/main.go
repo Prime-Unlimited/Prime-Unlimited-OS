@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -55,10 +57,25 @@ type modResponse struct {
 }
 
 type catalogState struct {
-	Catalog catalog
-	Status  string
-	Error   string
-	SHA256  string
+	Catalog        catalog
+	Status         string
+	Error          string
+	SHA256         string
+	Trusted        bool
+	KeyID          string
+	KeyFingerprint string
+}
+
+type catalogTrustKey struct {
+	Algorithm string `json:"algorithm"`
+	KeyID     string `json:"keyId"`
+	PublicKey string `json:"publicKey"`
+}
+
+type catalogSignature struct {
+	Algorithm string `json:"algorithm"`
+	KeyID     string `json:"keyId"`
+	Signature string `json:"signature"`
 }
 
 type server struct {
@@ -130,7 +147,7 @@ type cacheResult struct {
 }
 
 func (s *server) catalogMod(id string) (mod, bool) {
-	if s.catalog.Status != "valid" {
+	if s.catalog.Status != "valid" || !s.catalog.Trusted {
 		return mod{}, false
 	}
 	for _, item := range s.catalog.Catalog.Mods {
@@ -214,6 +231,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"service": "prime-unlimited-mod-loader", "mode": "authenticated-read-only",
 			"catalogStatus": s.catalog.Status, "catalogError": s.catalog.Error,
+			"catalogTrust": map[bool]string{true: "verified", false: "unverified"}[s.catalog.Trusted],
+			"catalogKeyId": s.catalog.KeyID, "catalogKeyFingerprint": s.catalog.KeyFingerprint,
 			"authorizationStatus": s.authorizationStatus(),
 		})
 	case "/api/v1/mods":
@@ -231,6 +250,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"model": s.model, "firmware": s.firmware, "mods": mods,
 			"catalogStatus": s.catalog.Status, "catalogSha256": s.catalog.SHA256,
+			"catalogTrust": map[bool]string{true: "verified", false: "unverified"}[s.catalog.Trusted],
+			"catalogKeyId": s.catalog.KeyID,
 		})
 	case "/api/v1/installed":
 		writeJSON(w, http.StatusOK, map[string]any{"mods": map[string]any{}})
@@ -296,38 +317,46 @@ func validateMod(item mod) error {
 	return nil
 }
 
-func loadCatalog(path string) catalogState {
+func readOwnedFile(path string, limit int64, label string) ([]byte, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return catalogState{Catalog: catalog{SchemaVersion: 1, Mods: []mod{}}, Status: "missing"}
-		}
-		return catalogState{Status: "invalid", Error: "catalog cannot be inspected"}
+		return nil, err
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !info.Mode().IsRegular() || !ok || stat.Uid != uint32(os.Geteuid()) || info.Mode().Perm()&0o022 != 0 {
-		return catalogState{Status: "invalid", Error: "catalog must be a service-owned regular file without group or world write access"}
+		return nil, fmt.Errorf("%s must be a service-owned regular file without group or world write access", label)
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return catalogState{Status: "invalid", Error: "catalog cannot be opened"}
+		return nil, fmt.Errorf("%s cannot be opened", label)
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, maxCatalogBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
-		return catalogState{Status: "invalid", Error: "catalog cannot be read"}
+		return nil, fmt.Errorf("%s cannot be read", label)
 	}
-	if len(data) > maxCatalogBytes {
-		return catalogState{Status: "invalid", Error: "catalog exceeds 1 MiB"}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%s exceeds size limit", label)
 	}
+	return data, nil
+}
+
+func decodeStrictJSON(data []byte, target any) error {
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.DisallowUnknownFields()
-	var result catalog
-	if err := decoder.Decode(&result); err != nil {
-		return catalogState{Status: "invalid", Error: "invalid catalog JSON: " + err.Error()}
+	if err := decoder.Decode(target); err != nil {
+		return err
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return catalogState{Status: "invalid", Error: "catalog contains trailing JSON data"}
+		return errors.New("trailing JSON data")
+	}
+	return nil
+}
+
+func parseCatalog(data []byte) catalogState {
+	var result catalog
+	if err := decodeStrictJSON(data, &result); err != nil {
+		return catalogState{Status: "invalid", Error: "invalid catalog JSON: " + err.Error()}
 	}
 	if result.SchemaVersion != 1 {
 		return catalogState{Status: "invalid", Error: "only catalog schemaVersion 1 is supported"}
@@ -347,6 +376,62 @@ func loadCatalog(path string) catalogState {
 	}
 	digest := sha256.Sum256(data)
 	return catalogState{Catalog: result, Status: "valid", SHA256: hex.EncodeToString(digest[:])}
+}
+
+func loadCatalog(path string) catalogState {
+	data, err := readOwnedFile(path, maxCatalogBytes, "catalog")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return catalogState{Catalog: catalog{SchemaVersion: 1, Mods: []mod{}}, Status: "missing"}
+		}
+		return catalogState{Status: "invalid", Error: err.Error()}
+	}
+	return parseCatalog(data)
+}
+
+func loadVerifiedCatalog(catalogPath, signaturePath, trustKeyPath string) catalogState {
+	catalogData, err := readOwnedFile(catalogPath, maxCatalogBytes, "catalog")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return catalogState{Catalog: catalog{SchemaVersion: 1, Mods: []mod{}}, Status: "missing"}
+		}
+		return catalogState{Status: "invalid", Error: err.Error()}
+	}
+	trustData, err := readOwnedFile(trustKeyPath, 4096, "catalog trust key")
+	if err != nil {
+		return catalogState{Status: "invalid", Error: "catalog trust key unavailable or unsafe"}
+	}
+	signatureData, err := readOwnedFile(signaturePath, 4096, "catalog signature")
+	if err != nil {
+		return catalogState{Status: "invalid", Error: "catalog signature unavailable or unsafe"}
+	}
+	var trust catalogTrustKey
+	var signature catalogSignature
+	if decodeStrictJSON(trustData, &trust) != nil || decodeStrictJSON(signatureData, &signature) != nil {
+		return catalogState{Status: "invalid", Error: "invalid catalog trust metadata"}
+	}
+	if trust.Algorithm != "ed25519" || signature.Algorithm != "ed25519" ||
+		!modIDPattern.MatchString(trust.KeyID) || signature.KeyID != trust.KeyID {
+		return catalogState{Status: "invalid", Error: "catalog trust metadata mismatch"}
+	}
+	publicKey, err := base64.StdEncoding.DecodeString(trust.PublicKey)
+	if err != nil || len(publicKey) != ed25519.PublicKeySize {
+		return catalogState{Status: "invalid", Error: "invalid catalog public key"}
+	}
+	signatureBytes, err := base64.StdEncoding.DecodeString(signature.Signature)
+	if err != nil || len(signatureBytes) != ed25519.SignatureSize ||
+		!ed25519.Verify(ed25519.PublicKey(publicKey), catalogData, signatureBytes) {
+		return catalogState{Status: "invalid", Error: "catalog signature verification failed"}
+	}
+	state := parseCatalog(catalogData)
+	if state.Status != "valid" {
+		return state
+	}
+	fingerprint := sha256.Sum256(publicKey)
+	state.Trusted = true
+	state.KeyID = trust.KeyID
+	state.KeyFingerprint = hex.EncodeToString(fingerprint[:])
+	return state
 }
 
 func publicPackageIP(ip net.IP) bool {
@@ -607,13 +692,15 @@ func main() {
 	model := flag.String("model", "JC11S", "device model")
 	firmware := flag.String("firmware", "5.3.0", "Engine OS version")
 	catalogPath := flag.String("catalog", "/data/prime-unlimited/catalog/catalog.json", "catalog file")
+	catalogSignaturePath := flag.String("catalog-signature", "/data/prime-unlimited/catalog/catalog.sig.json", "detached catalog signature")
+	catalogTrustKeyPath := flag.String("catalog-trust-key", "/data/prime-unlimited/trust/catalog-key.json", "deployment-owned catalog trust key")
 	authTokenPath := flag.String("auth-token", "/data/prime-unlimited/auth/mutation.token", "device-owned mutation token")
 	cacheRoot := flag.String("cache-root", "/data/prime-unlimited/cache/packages", "verified package cache")
 	flag.Parse()
 	if !validListenAddress(*listen) {
 		log.Fatal("refusing non-loopback listen address")
 	}
-	state := loadCatalog(*catalogPath)
+	state := loadVerifiedCatalog(*catalogPath, *catalogSignaturePath, *catalogTrustKeyPath)
 	if state.Status == "invalid" {
 		log.Printf("catalog rejected: %s", state.Error)
 	}

@@ -43,12 +43,13 @@ The service must bind to loopback only. Catalog access must be optional; offline
 
 ## Trust and authorization
 
-Catalog v1 remains readable. Installations require a trusted, deployment-owned
-catalog approval decision; package-declared approval is ignored. Catalog v2 can
-carry Ed25519 signature metadata, but a device adapter must verify it against a
-key shipped outside the catalog before starting the service with
-`--trusted-catalog`. SHA-256 authenticates downloaded bytes against the trusted
-record; it does not authenticate a publisher.
+The native JC11S runtime requires a detached Ed25519 signature for catalog v1
+and verifies it against a deployment-owned public key provisioned separately
+from the catalog. The private signing key remains off-device. Package-declared
+approval is ignored. Catalog v2 can carry signature metadata, but still must be
+verified against a trust root shipped outside the catalog. SHA-256 binds
+downloaded bytes to the signed catalog record; it does not independently
+authenticate a publisher.
 
 Mutation endpoints are disabled unless all of `--root`, `--auth-token-file`,
 and `--trusted-catalog` are supplied. Tokens must be at least 32 characters and
