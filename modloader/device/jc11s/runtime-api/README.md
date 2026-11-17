@@ -131,10 +131,9 @@ and a completely revalidated stage. It then confirms that the entrypoint named
 by the signed catalog exists as a service-owned mode `0600` regular file.
 
 Approval, compatibility and the entrypoint are never read from package
-contents. Revoked, incompatible, dependency-bearing or conflicting records
-cannot become eligible in this milestone. A successful response is a static
-eligibility decision only: the entrypoint remains non-executable and nothing
-is installed, enabled or launched.
+contents. Revoked, incompatible and library-bearing records cannot become
+eligible. Mod dependencies and conflicts are preserved as signed registry
+metadata. A successful response remains non-executing.
 
 ## Atomic disabled installation
 
@@ -155,8 +154,8 @@ the target remains safe. Completed or recovered operations are exposed through
 `GET /api/v1/installed`.
 
 This milestone does not make files executable or invoke an entrypoint.
-Dependency-bearing, library-bearing and conflicting records remain
-ineligible.
+Library-bearing records remain ineligible; mod dependencies and conflicts are
+installed as immutable activation metadata.
 
 ## Atomic disabled uninstallation
 
@@ -197,7 +196,10 @@ dependencies, device, firmware, architecture and ABI compatibility, cycles,
 conflicting combined constraints, catalog conflicts and conflicts with
 currently enabled installed mods.
 
-Resolution is currently a preflight boundary. Dependency-bearing packages
-remain ineligible for inspection and installation, and the enable endpoint
-does not yet apply a multi-mod plan. This keeps activation fail-closed until
-atomic dependency-set installation and activation are implemented.
+The enable endpoint applies the resolved closure only across mods that are
+already installed. Every installed dependency must satisfy its signed version
+constraint and have a safe entrypoint. The complete disabled closure is
+enabled in one registry/manifest journal transaction. Missing dependencies,
+cycles or direct and reverse conflicts leave both files unchanged. Disable
+refuses to break an enabled dependent and therefore requires dependent-first
+order. Automatic dependency download and library installation remain blocked.

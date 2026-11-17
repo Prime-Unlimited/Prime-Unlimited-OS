@@ -369,3 +369,89 @@ func TestEnableFailureCheckpointsRecoverDeterministically(t *testing.T) {
 		})
 	}
 }
+
+func dependencyActivationFixture(t *testing.T) (string, installedMod, installedMod) {
+	t.Helper()
+	root := t.TempDir()
+	makeItem := func(id, version string) installedMod {
+		item := installedMod{ID: id, Version: version, PackageSHA256: strings.Repeat("a", 64), CatalogID: "test", Architecture: "armv7l", ABI: "gnueabihf", Entrypoint: "mod/start", Root: filepath.ToSlash(filepath.Join("mods", "installed", id, version))}
+		entrypoint := filepath.Join(root, filepath.FromSlash(item.Root), "mod", "start")
+		if err := os.MkdirAll(filepath.Dir(entrypoint), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for _, directory := range []string{filepath.Join(root, "mods"), filepath.Join(root, "mods", "installed"), filepath.Join(root, "mods", "installed", id), filepath.Dir(entrypoint)} {
+			if err := os.Chmod(directory, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(entrypoint, []byte("not executed"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return item
+	}
+	depItem := makeItem("dependency", "2.1.0")
+	app := makeItem("app", "1.0.0")
+	app.Dependencies = []dependency{{ID: "dependency", Constraint: "^2.0"}}
+	state := registryState{SchemaVersion: 1, Mods: map[string]installedMod{"app": app, "dependency": depItem}}
+	if err := writeAtomicJSON(filepath.Join(root, "registry", "state.json"), state); err != nil {
+		t.Fatal(err)
+	}
+	return root, app, depItem
+}
+
+func TestEnableAtomicallyActivatesInstalledDependencyClosure(t *testing.T) {
+	root, app, depItem := dependencyActivationFixture(t)
+	result, err := setModEnabled(app.ID, true, root)
+	if err != nil || strings.Join(result.Affected, ",") != "dependency,app" {
+		t.Fatalf("enable closure: %#v %v", result, err)
+	}
+	state, err := loadRegistry(filepath.Join(root, "registry", "state.json"))
+	if err != nil || !state.Mods[app.ID].Enabled || !state.Mods[depItem.ID].Enabled {
+		t.Fatalf("closure not enabled: %#v %v", state, err)
+	}
+	if _, err := setModEnabled(depItem.ID, false, root); err == nil {
+		t.Fatal("required dependency was disabled")
+	}
+	manifest, err := readOwnedFile(filepath.Join(root, "activation", "manifest.json"), 1024*1024, "activation manifest")
+	if err != nil || !strings.Contains(string(manifest), `"id":"app"`) || !strings.Contains(string(manifest), `"id":"dependency"`) {
+		t.Fatalf("manifest missing closure: %s %v", manifest, err)
+	}
+}
+
+func TestEnableDependencyClosureFailsClosed(t *testing.T) {
+	root, app, depItem := dependencyActivationFixture(t)
+	state, err := loadRegistry(filepath.Join(root, "registry", "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(state.Mods, depItem.ID)
+	if err := writeAtomicJSON(filepath.Join(root, "registry", "state.json"), state); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := setModEnabled(app.ID, true, root); err == nil {
+		t.Fatal("missing dependency accepted")
+	}
+	state.Mods[depItem.ID] = depItem
+	app.Dependencies[0].Constraint = "^3.0"
+	state.Mods[app.ID] = app
+	if err := writeAtomicJSON(filepath.Join(root, "registry", "state.json"), state); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := setModEnabled(app.ID, true, root); err == nil {
+		t.Fatal("incompatible dependency accepted")
+	}
+	app.Dependencies[0].Constraint = "^2.0"
+	state.Mods[app.ID] = app
+	depItem.Conflicts = []string{"app"}
+	state.Mods[depItem.ID] = depItem
+	if err := writeAtomicJSON(filepath.Join(root, "registry", "state.json"), state); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := setModEnabled(app.ID, true, root); err == nil {
+		t.Fatal("reverse conflict accepted")
+	}
+	final, err := loadRegistry(filepath.Join(root, "registry", "state.json"))
+	if err != nil || final.Mods[app.ID].Enabled || final.Mods[depItem.ID].Enabled {
+		t.Fatalf("failed plan changed state: %#v %v", final, err)
+	}
+}

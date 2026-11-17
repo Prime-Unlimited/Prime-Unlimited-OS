@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"syscall"
@@ -16,16 +17,18 @@ import (
 )
 
 type installedMod struct {
-	ID            string `json:"id"`
-	Version       string `json:"version"`
-	PackageSHA256 string `json:"packageSha256"`
-	CatalogID     string `json:"catalogId"`
-	Architecture  string `json:"architecture"`
-	ABI           string `json:"abi"`
-	Entrypoint    string `json:"entrypoint"`
-	Root          string `json:"root"`
-	Enabled       bool   `json:"enabled"`
-	InstalledAt   int64  `json:"installedAt"`
+	ID            string       `json:"id"`
+	Version       string       `json:"version"`
+	PackageSHA256 string       `json:"packageSha256"`
+	CatalogID     string       `json:"catalogId"`
+	Architecture  string       `json:"architecture"`
+	ABI           string       `json:"abi"`
+	Entrypoint    string       `json:"entrypoint"`
+	Root          string       `json:"root"`
+	Enabled       bool         `json:"enabled"`
+	InstalledAt   int64        `json:"installedAt"`
+	Dependencies  []dependency `json:"dependencies,omitempty"`
+	Conflicts     []string     `json:"conflicts,omitempty"`
 }
 
 type registryState struct {
@@ -40,6 +43,7 @@ type installJournal struct {
 	TransactionID string        `json:"transactionId"`
 	Target        string        `json:"target"`
 	Quarantine    string        `json:"quarantine,omitempty"`
+	Affected      []string      `json:"affected,omitempty"`
 	Previous      registryState `json:"previous"`
 	Next          registryState `json:"next"`
 }
@@ -71,10 +75,11 @@ type uninstallResult struct {
 }
 
 type activationResult struct {
-	TransactionID string `json:"transactionId"`
-	ID            string `json:"id"`
-	Version       string `json:"version"`
-	Enabled       bool   `json:"enabled"`
+	TransactionID string   `json:"transactionId"`
+	ID            string   `json:"id"`
+	Version       string   `json:"version"`
+	Enabled       bool     `json:"enabled"`
+	Affected      []string `json:"affected"`
 }
 
 type activationEntry struct {
@@ -192,6 +197,14 @@ func validateRegistryState(state registryState) error {
 		if item.Root != expectedRoot {
 			return errors.New("invalid installed registry root")
 		}
+		if validateDependencies("installed dependencies", item.Dependencies) != nil || validateListOptional("installed conflicts", item.Conflicts) != nil {
+			return errors.New("invalid installed dependency metadata")
+		}
+		for _, dep := range item.Dependencies {
+			if dep.Type != "" && dep.Type != "mod" {
+				return errors.New("installed library dependency is unsupported")
+			}
+		}
 	}
 	return nil
 }
@@ -241,29 +254,22 @@ func setModEnabled(id string, enabled bool, root string) (activationResult, erro
 	if installed.Enabled == enabled {
 		return result, errors.New("mod already has requested activation state")
 	}
-	target := filepath.Join(root, filepath.FromSlash(installed.Root))
-	entrypoint := filepath.Join(target, filepath.FromSlash(installed.Entrypoint))
-	info, err := os.Lstat(entrypoint)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o600 {
-		return result, errors.New("installed entrypoint is missing or unsafe")
+	next, affected, err := planActivation(state, id, enabled, root)
+	if err != nil {
+		return result, err
 	}
+	result.Affected = affected
 	txid, err := randomTransactionID()
 	if err != nil {
 		return result, err
 	}
 	result.TransactionID = txid
-	next := registryState{SchemaVersion: 1, Mods: make(map[string]installedMod, len(state.Mods))}
-	for modID, item := range state.Mods {
-		next.Mods[modID] = item
-	}
-	installed.Enabled = enabled
-	next.Mods[id] = installed
 	operation := "disable"
 	if enabled {
 		operation = "enable"
 	}
 	journal := installJournal{SchemaVersion: 1, Operation: operation, Phase: "prepared", TransactionID: txid,
-		Target: installed.Root, Previous: state, Next: next}
+		Target: installed.Root, Affected: affected, Previous: state, Next: next}
 	if err := writeAtomicJSON(journalPath, journal); err != nil {
 		return result, err
 	}
@@ -302,6 +308,101 @@ func setModEnabled(id string, enabled bool, root string) (activationResult, erro
 		return result, err
 	}
 	return result, nil
+}
+
+func planActivation(state registryState, id string, enabled bool, root string) (registryState, []string, error) {
+	next := registryState{SchemaVersion: 1, Mods: make(map[string]installedMod, len(state.Mods))}
+	for modID, item := range state.Mods {
+		next.Mods[modID] = item
+	}
+	if !enabled {
+		for otherID, item := range state.Mods {
+			if otherID == id || !item.Enabled {
+				continue
+			}
+			for _, dep := range item.Dependencies {
+				if dep.ID == id {
+					return registryState{}, nil, fmt.Errorf("enabled mod %s depends on %s", otherID, id)
+				}
+			}
+		}
+		item := next.Mods[id]
+		item.Enabled = false
+		next.Mods[id] = item
+		return next, []string{id}, nil
+	}
+	visiting, selected := map[string]bool{}, map[string]bool{}
+	order := []string{}
+	var visit func(string) error
+	visit = func(current string) error {
+		if visiting[current] {
+			return fmt.Errorf("cyclic installed dependency involving %s", current)
+		}
+		if selected[current] {
+			return nil
+		}
+		item, exists := state.Mods[current]
+		if !exists {
+			return fmt.Errorf("required mod %s is not installed", current)
+		}
+		entrypoint := filepath.Join(root, filepath.FromSlash(item.Root), filepath.FromSlash(item.Entrypoint))
+		info, statErr := os.Lstat(entrypoint)
+		if statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o600 {
+			return fmt.Errorf("installed entrypoint for %s is missing or unsafe", current)
+		}
+		visiting[current] = true
+		deps := append([]dependency{}, item.Dependencies...)
+		sort.Slice(deps, func(i, j int) bool { return deps[i].ID < deps[j].ID })
+		for _, dep := range deps {
+			if dep.Type != "" && dep.Type != "mod" {
+				return errors.New("installed library dependency is unsupported")
+			}
+			dependencyItem, exists := state.Mods[dep.ID]
+			if !exists {
+				return fmt.Errorf("required mod %s is not installed", dep.ID)
+			}
+			ok, constraintErr := versionSatisfies(dependencyItem.Version, dep.Constraint)
+			if constraintErr != nil || !ok {
+				return fmt.Errorf("installed mod %s does not satisfy %s", dep.ID, dep.Constraint)
+			}
+			if err := visit(dep.ID); err != nil {
+				return err
+			}
+		}
+		visiting[current], selected[current] = false, true
+		order = append(order, current)
+		return nil
+	}
+	if err := visit(id); err != nil {
+		return registryState{}, nil, err
+	}
+	for selectedID := range selected {
+		item := state.Mods[selectedID]
+		for _, conflict := range item.Conflicts {
+			if selected[conflict] || state.Mods[conflict].Enabled {
+				return registryState{}, nil, fmt.Errorf("%s conflicts with %s", selectedID, conflict)
+			}
+		}
+		for otherID, other := range state.Mods {
+			if (other.Enabled || selected[otherID]) && otherID != selectedID {
+				for _, conflict := range other.Conflicts {
+					if conflict == selectedID {
+						return registryState{}, nil, fmt.Errorf("%s conflicts with %s", otherID, selectedID)
+					}
+				}
+			}
+		}
+	}
+	affected := []string{}
+	for _, selectedID := range order {
+		item := next.Mods[selectedID]
+		if !item.Enabled {
+			item.Enabled = true
+			next.Mods[selectedID] = item
+			affected = append(affected, selectedID)
+		}
+	}
+	return next, affected, nil
 }
 
 func randomTransactionID() (string, error) {
@@ -440,7 +541,7 @@ func installDisabledMod(item mod, catalogID, cacheRoot, stagingRoot, root string
 	}
 	relativeTarget := filepath.ToSlash(filepath.Join("mods", "installed", item.ID, item.Version))
 	next.Mods[item.ID] = installedMod{ID: item.ID, Version: item.Version, PackageSHA256: item.SHA256, CatalogID: catalogID,
-		Architecture: item.Architecture, ABI: item.ABI, Entrypoint: item.Entrypoint, Root: relativeTarget, Enabled: false, InstalledAt: time.Now().Unix()}
+		Architecture: item.Architecture, ABI: item.ABI, Entrypoint: item.Entrypoint, Root: relativeTarget, Enabled: false, InstalledAt: time.Now().Unix(), Dependencies: item.Dependencies, Conflicts: item.Conflicts}
 	journal := installJournal{SchemaVersion: 1, Operation: "install", Phase: "prepared", TransactionID: txid, Target: relativeTarget, Previous: state, Next: next}
 	if err := writeAtomicJSON(journalPath, journal); err != nil {
 		return result, err
@@ -614,21 +715,39 @@ func recoverInstall(root string) error {
 	target := filepath.Join(root, filepath.FromSlash(journal.Target))
 	recoveredStage := journal.Phase
 	if journal.Operation == "install" {
-		if previousExists || !nextExists || len(journal.Next.Mods) != len(journal.Previous.Mods)+1 || nextItem.Version != parts[3] || nextItem.Root != journal.Target || journal.Quarantine != "" {
+		if previousExists || !nextExists || len(journal.Next.Mods) != len(journal.Previous.Mods)+1 || nextItem.Version != parts[3] || nextItem.Root != journal.Target || journal.Quarantine != "" || len(journal.Affected) != 0 {
 			return errors.New("install journal transition mismatch")
 		}
 	} else if journal.Operation == "uninstall" {
 		expectedQuarantine := filepath.ToSlash(filepath.Join("mods", "installed", parts[2], ".uninstall-"+journal.TransactionID))
-		if !previousExists || nextExists || len(journal.Previous.Mods) != len(journal.Next.Mods)+1 || previousItem.Version != parts[3] || previousItem.Root != journal.Target || journal.Quarantine != expectedQuarantine {
+		if !previousExists || nextExists || len(journal.Previous.Mods) != len(journal.Next.Mods)+1 || previousItem.Version != parts[3] || previousItem.Root != journal.Target || journal.Quarantine != expectedQuarantine || len(journal.Affected) != 0 {
 			return errors.New("uninstall journal transition mismatch")
 		}
 	} else {
-		if !previousExists || !nextExists || len(journal.Previous.Mods) != len(journal.Next.Mods) || previousItem.Root != journal.Target || nextItem.Root != journal.Target || previousItem.Version != parts[3] || nextItem.Version != parts[3] || journal.Quarantine != "" || previousItem.Enabled == nextItem.Enabled || nextItem.Enabled != (journal.Operation == "enable") {
+		if !previousExists || !nextExists || len(journal.Previous.Mods) != len(journal.Next.Mods) || previousItem.Root != journal.Target || nextItem.Root != journal.Target || previousItem.Version != parts[3] || nextItem.Version != parts[3] || journal.Quarantine != "" || len(journal.Affected) == 0 {
 			return errors.New("activation journal transition mismatch")
+		}
+		affected := map[string]bool{}
+		for _, id := range journal.Affected {
+			if affected[id] || !modIDPattern.MatchString(id) {
+				return errors.New("invalid activation journal affected set")
+			}
+			affected[id] = true
+		}
+		if !affected[parts[2]] {
+			return errors.New("activation journal target is not affected")
+		}
+		for id, before := range journal.Previous.Mods {
+			after := journal.Next.Mods[id]
+			beforeEnabled, afterEnabled := before.Enabled, after.Enabled
+			before.Enabled, after.Enabled = false, false
+			if !reflect.DeepEqual(before, after) || (affected[id] != (beforeEnabled != afterEnabled)) || (affected[id] && afterEnabled != (journal.Operation == "enable")) {
+				return errors.New("activation journal changed invalid entry")
+			}
 		}
 	}
 	for id, item := range journal.Previous.Mods {
-		if id != parts[2] && journal.Next.Mods[id] != item {
+		if journal.Operation != "enable" && journal.Operation != "disable" && id != parts[2] && !reflect.DeepEqual(journal.Next.Mods[id], item) {
 			return errors.New("journal changed unrelated registry entry")
 		}
 	}

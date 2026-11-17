@@ -324,8 +324,13 @@ func readValidStage(root string, expected stageResult) (stageResult, error) {
 func inspectStagedPackage(item mod, catalogID, cacheRoot, stagingRoot string) (inspectionResult, error) {
 	result := inspectionResult{CatalogID: catalogID, ID: item.ID, Version: item.Version, SHA256: item.SHA256,
 		Architecture: item.Architecture, ABI: item.ABI, Entrypoint: item.Entrypoint}
-	if len(item.Dependencies) != 0 || len(item.Libraries) != 0 || len(item.Conflicts) != 0 {
-		return result, errors.New("dependency and conflict resolution is not available")
+	if len(item.Libraries) != 0 {
+		return result, errors.New("library installation is not available")
+	}
+	for _, dep := range item.Dependencies {
+		if dep.Type != "" && dep.Type != "mod" {
+			return result, errors.New("library installation is not available")
+		}
 	}
 	if !verifyCachedPackage(filepath.Join(cacheRoot, item.SHA256+".zip"), item) {
 		return result, errors.New("verified cache unavailable")
