@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "mods": [
+    {
+      "id": "catalog-smoke-test",
+      "name": "Catalog Smoke Test",
+      "version": "0.0.0",
+      "description": "Non-installable entry used only to verify catalog visibility on JC11S.",
+      "models": [
+        "JC11S"
+      ],
+      "firmware": [
+        "5.3.0"
+      ],
+      "downloadUrl": "https://example.invalid/not-downloadable.zip",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

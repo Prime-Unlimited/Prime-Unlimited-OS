@@ -10,8 +10,32 @@ import (
 	"testing"
 )
 
+func validMod() mod {
+	return mod{
+		ID: "catalog-smoke-test", Name: "Catalog Smoke Test", Version: "0.0.0",
+		Description: "Non-installable validation entry.", Models: []string{"JC11S"},
+		Firmware: []string{"5.3.0"}, DownloadURL: "https://example.invalid/not-downloadable.zip",
+		SHA256: strings.Repeat("0", 64),
+	}
+}
+
+func writeCatalog(t *testing.T, value any) string {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "catalog.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestReadOnlyAPIContract(t *testing.T) {
-	handler := &server{model: "JC11S", firmware: "5.3.0", catalog: catalog{Mods: []map[string]any{}}}
+	handler := &server{model: "JC11S", firmware: "5.3.0", catalog: catalogState{
+		Catalog: catalog{SchemaVersion: 1, Mods: []mod{}}, Status: "valid",
+	}}
 	tests := []struct {
 		method string
 		path   string
@@ -41,46 +65,102 @@ func TestReadOnlyAPIContract(t *testing.T) {
 	}
 }
 
-func TestCatalogCompatibility(t *testing.T) {
-	handler := &server{model: "JC11S", firmware: "5.3.0", catalog: catalog{Mods: []map[string]any{
-		{"id": "compatible", "models": []any{"JC11S"}, "firmware": []any{"5.3.0"}},
-		{"id": "revoked", "models": []any{"JC11S"}, "firmware": []any{"5.3.0"}, "revoked": true},
-	}}}
+func TestCatalogCompatibilityAndStatus(t *testing.T) {
+	compatible := validMod()
+	incompatible := validMod()
+	incompatible.ID = "wrong-firmware"
+	incompatible.Firmware = []string{"0.0.0"}
+	handler := &server{model: "JC11S", firmware: "5.3.0", catalog: catalogState{
+		Catalog: catalog{SchemaVersion: 1, Mods: []mod{compatible, incompatible}}, Status: "valid", SHA256: "abc",
+	}}
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/mods", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	var body struct {
-		Mods []map[string]any `json:"mods"`
+		CatalogStatus string        `json:"catalogStatus"`
+		Mods          []modResponse `json:"mods"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Mods[0]["compatible"] != true || body.Mods[1]["compatible"] != false {
-		t.Fatalf("unexpected compatibility result: %#v", body.Mods)
+	if body.CatalogStatus != "valid" || !body.Mods[0].Compatible || body.Mods[1].Compatible {
+		t.Fatalf("unexpected response: %#v", body)
+	}
+}
+
+func TestInvalidCatalogKeepsHealthAvailable(t *testing.T) {
+	handler := &server{catalog: catalogState{Status: "invalid", Error: "test failure"}}
+	for path, want := range map[string]int{"/api/v1/health": 200, "/api/v1/mods": 503} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != want || !strings.Contains(response.Body.String(), "invalid") {
+			t.Fatalf("%s: status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestListenAddressIsStrictlyLoopback(t *testing.T) {
+	for address, want := range map[string]bool{
+		"127.0.0.1:8098":      true,
+		"0.0.0.0:8098":        false,
+		"127.0.0.2:8098":      false,
+		"[::1]:8098":          false,
+		"localhost:8098":      false,
+		"127.0.0.1":           false,
+		"127.0.0.1:8098/path": false,
+	} {
+		if got := validListenAddress(address); got != want {
+			t.Errorf("validListenAddress(%q) = %v, want %v", address, got, want)
+		}
 	}
 }
 
 func TestLoadCatalogValidation(t *testing.T) {
-	directory := t.TempDir()
-	missing, err := loadCatalog(filepath.Join(directory, "missing.json"))
-	if err != nil || len(missing.Mods) != 0 {
-		t.Fatalf("missing catalog should be empty and valid: %#v, %v", missing, err)
+	if state := loadCatalog(filepath.Join(t.TempDir(), "missing.json")); state.Status != "missing" || len(state.Catalog.Mods) != 0 {
+		t.Fatalf("missing catalog should be empty: %#v", state)
+	}
+	valid := catalog{SchemaVersion: 1, Mods: []mod{validMod()}}
+	if state := loadCatalog(writeCatalog(t, valid)); state.Status != "valid" || state.SHA256 == "" {
+		t.Fatalf("valid catalog rejected: %#v", state)
 	}
 
-	valid := `{"schemaVersion":1,"mods":[{"id":"demo","name":"Demo","version":"1","downloadUrl":"https://example.invalid/demo.zip","sha256":"abc"}]}`
-	path := filepath.Join(directory, "catalog.json")
-	if err := os.WriteFile(path, []byte(valid), 0o600); err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name string
+		data string
+	}{
+		{"unknown field", `{"schemaVersion":1,"mods":[],"extra":true}`},
+		{"unsupported schema", `{"schemaVersion":2,"mods":[]}`},
+		{"duplicate id", `{"schemaVersion":1,"mods":[` + mustJSON(t, validMod()) + `,` + mustJSON(t, validMod()) + `]}`},
+		{"uppercase sha", strings.Replace(mustJSON(t, valid), strings.Repeat("0", 64), strings.Repeat("A", 64), 1)},
+		{"URL credentials", strings.Replace(mustJSON(t, valid), "https://example.invalid", "https://user@example.invalid", 1)},
+		{"trailing JSON", mustJSON(t, valid) + `{}`},
 	}
-	loaded, err := loadCatalog(path)
-	if err != nil || len(loaded.Mods) != 1 {
-		t.Fatalf("valid catalog rejected: %#v, %v", loaded, err)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "catalog.json")
+			if err := os.WriteFile(path, []byte(test.data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if state := loadCatalog(path); state.Status != "invalid" || state.Error == "" {
+				t.Fatalf("invalid catalog accepted: %#v", state)
+			}
+		})
 	}
 
-	if err := os.WriteFile(path, []byte(strings.Repeat(" ", 1024*1024+1)), 0o600); err != nil {
+	path := filepath.Join(t.TempDir(), "large.json")
+	if err := os.WriteFile(path, []byte(strings.Repeat(" ", maxCatalogBytes+1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadCatalog(path); err == nil {
-		t.Fatal("oversized catalog was accepted")
+	if state := loadCatalog(path); state.Status != "invalid" || !strings.Contains(state.Error, "1 MiB") {
+		t.Fatalf("oversized catalog accepted: %#v", state)
 	}
+}
+
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }

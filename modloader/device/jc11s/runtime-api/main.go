@@ -1,25 +1,60 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
 
+const maxCatalogBytes = 1024 * 1024
+
+var modIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
 type catalog struct {
-	SchemaVersion int              `json:"schemaVersion"`
-	Mods          []map[string]any `json:"mods"`
+	SchemaVersion int   `json:"schemaVersion"`
+	Mods          []mod `json:"mods"`
+}
+
+type mod struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Version     string   `json:"version"`
+	Description string   `json:"description,omitempty"`
+	Models      []string `json:"models"`
+	Firmware    []string `json:"firmware"`
+	DownloadURL string   `json:"downloadUrl"`
+	SHA256      string   `json:"sha256"`
+}
+
+type modResponse struct {
+	mod
+	Compatible bool `json:"compatible"`
+}
+
+type catalogState struct {
+	Catalog catalog
+	Status  string
+	Error   string
+	SHA256  string
 }
 
 type server struct {
 	model    string
 	firmware string
-	catalog  catalog
+	catalog  catalogState
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -28,20 +63,6 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
-}
-
-func stringList(value any) []string {
-	raw, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	result := make([]string, 0, len(raw))
-	for _, item := range raw {
-		if text, ok := item.(string); ok {
-			result = append(result, text)
-		}
-	}
-	return result
 }
 
 func contains(values []string, target string) bool {
@@ -53,10 +74,8 @@ func contains(values []string, target string) bool {
 	return false
 }
 
-func (s *server) compatible(mod map[string]any) bool {
-	return contains(stringList(mod["models"]), s.model) &&
-		contains(stringList(mod["firmware"]), s.firmware) &&
-		mod["revoked"] != true
+func (s *server) compatible(item mod) bool {
+	return contains(item.Models, s.model) && contains(item.Firmware, s.firmware)
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -70,21 +89,25 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.URL.Path {
 	case "/api/v1/health":
-		writeJSON(w, http.StatusOK, map[string]string{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"service": "prime-unlimited-mod-loader", "mode": "read-only-device-runtime",
+			"catalogStatus": s.catalog.Status, "catalogError": s.catalog.Error,
 		})
 	case "/api/v1/mods":
-		mods := make([]map[string]any, 0, len(s.catalog.Mods))
-		for _, original := range s.catalog.Mods {
-			copy := make(map[string]any, len(original)+1)
-			for key, value := range original {
-				copy[key] = value
-			}
-			copy["compatible"] = s.compatible(original)
-			mods = append(mods, copy)
+		if s.catalog.Status == "invalid" {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "catalog validation failed", "catalogStatus": s.catalog.Status,
+				"catalogError": s.catalog.Error,
+			})
+			return
+		}
+		mods := make([]modResponse, 0, len(s.catalog.Catalog.Mods))
+		for _, item := range s.catalog.Catalog.Mods {
+			mods = append(mods, modResponse{mod: item, Compatible: s.compatible(item)})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"model": s.model, "firmware": s.firmware, "mods": mods,
+			"catalogStatus": s.catalog.Status, "catalogSha256": s.catalog.SHA256,
 		})
 	case "/api/v1/installed":
 		writeJSON(w, http.StatusOK, map[string]any{"mods": map[string]any{}})
@@ -97,33 +120,112 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func loadCatalog(path string) (catalog, error) {
-	data, err := os.ReadFile(path)
+func validateList(name string, values []string) error {
+	if len(values) == 0 || len(values) > 64 {
+		return fmt.Errorf("%s must contain 1 to 64 entries", name)
+	}
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		if value == "" || len(value) > 100 || strings.TrimSpace(value) != value {
+			return fmt.Errorf("invalid %s entry", name)
+		}
+		if seen[value] {
+			return fmt.Errorf("duplicate %s entry %q", name, value)
+		}
+		seen[value] = true
+	}
+	return nil
+}
+
+func validateMod(item mod) error {
+	if !modIDPattern.MatchString(item.ID) {
+		return errors.New("invalid id")
+	}
+	if item.Name == "" || len(item.Name) > 100 || strings.TrimSpace(item.Name) != item.Name {
+		return errors.New("invalid name")
+	}
+	if item.Version == "" || len(item.Version) > 40 || strings.TrimSpace(item.Version) != item.Version {
+		return errors.New("invalid version")
+	}
+	if len(item.Description) > 2000 {
+		return errors.New("description exceeds 2000 bytes")
+	}
+	if err := validateList("models", item.Models); err != nil {
+		return err
+	}
+	if err := validateList("firmware", item.Firmware); err != nil {
+		return err
+	}
+	parsed, err := url.Parse(item.DownloadURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+		return errors.New("downloadUrl must be an absolute HTTPS URL without credentials or fragment")
+	}
+	if len(item.SHA256) != 64 {
+		return errors.New("sha256 must contain 64 lowercase hexadecimal characters")
+	}
+	decoded, err := hex.DecodeString(item.SHA256)
+	if err != nil || hex.EncodeToString(decoded) != item.SHA256 {
+		return errors.New("sha256 must contain 64 lowercase hexadecimal characters")
+	}
+	return nil
+}
+
+func loadCatalog(path string) catalogState {
+	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return catalog{SchemaVersion: 1, Mods: []map[string]any{}}, nil
+			return catalogState{Catalog: catalog{SchemaVersion: 1, Mods: []mod{}}, Status: "missing"}
 		}
-		return catalog{}, err
+		return catalogState{Status: "invalid", Error: "catalog cannot be opened"}
 	}
-	if len(data) > 1024*1024 {
-		return catalog{}, fmt.Errorf("catalog exceeds 1 MiB")
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxCatalogBytes+1))
+	if err != nil {
+		return catalogState{Status: "invalid", Error: "catalog cannot be read"}
 	}
+	if len(data) > maxCatalogBytes {
+		return catalogState{Status: "invalid", Error: "catalog exceeds 1 MiB"}
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
 	var result catalog
-	if err := json.Unmarshal(data, &result); err != nil {
-		return catalog{}, err
+	if err := decoder.Decode(&result); err != nil {
+		return catalogState{Status: "invalid", Error: "invalid catalog JSON: " + err.Error()}
 	}
-	if (result.SchemaVersion != 1 && result.SchemaVersion != 2) || result.Mods == nil {
-		return catalog{}, fmt.Errorf("unsupported catalog")
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return catalogState{Status: "invalid", Error: "catalog contains trailing JSON data"}
 	}
-	for _, mod := range result.Mods {
-		for _, key := range []string{"id", "name", "version", "downloadUrl", "sha256"} {
-			text, ok := mod[key].(string)
-			if !ok || strings.TrimSpace(text) == "" {
-				return catalog{}, fmt.Errorf("invalid catalog field %s", key)
-			}
+	if result.SchemaVersion != 1 {
+		return catalogState{Status: "invalid", Error: "only catalog schemaVersion 1 is supported"}
+	}
+	if result.Mods == nil || len(result.Mods) > 2048 {
+		return catalogState{Status: "invalid", Error: "mods must be an array with at most 2048 entries"}
+	}
+	ids := make(map[string]bool, len(result.Mods))
+	for index, item := range result.Mods {
+		if err := validateMod(item); err != nil {
+			return catalogState{Status: "invalid", Error: fmt.Sprintf("mods[%d]: %v", index, err)}
 		}
+		if ids[item.ID] {
+			return catalogState{Status: "invalid", Error: fmt.Sprintf("duplicate mod id %q", item.ID)}
+		}
+		ids[item.ID] = true
 	}
-	return result, nil
+	digest := sha256.Sum256(data)
+	return catalogState{Catalog: result, Status: "valid", SHA256: hex.EncodeToString(digest[:])}
+}
+
+func validListenAddress(address string) bool {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || port == "" {
+		return false
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.Equal(net.ParseIP("127.0.0.1"))
 }
 
 func main() {
@@ -132,22 +234,22 @@ func main() {
 	firmware := flag.String("firmware", "5.3.0", "Engine OS version")
 	catalogPath := flag.String("catalog", "/data/prime-unlimited/catalog/catalog.json", "catalog file")
 	flag.Parse()
-	if !strings.HasPrefix(*listen, "127.0.0.1:") {
+	if !validListenAddress(*listen) {
 		log.Fatal("refusing non-loopback listen address")
 	}
-	loaded, err := loadCatalog(*catalogPath)
-	if err != nil {
-		log.Fatalf("catalog: %v", err)
+	state := loadCatalog(*catalogPath)
+	if state.Status == "invalid" {
+		log.Printf("catalog rejected: %s", state.Error)
 	}
 	httpServer := &http.Server{
 		Addr:              *listen,
-		Handler:           &server{model: *model, firmware: *firmware, catalog: loaded},
+		Handler:           &server{model: *model, firmware: *firmware, catalog: state},
 		ReadHeaderTimeout: 3 * time.Second,
 		ReadTimeout:       5 * time.Second,
 		WriteTimeout:      5 * time.Second,
 		IdleTimeout:       15 * time.Second,
 		MaxHeaderBytes:    16 * 1024,
 	}
-	log.Printf("Prime Unlimited runtime API listening on http://%s", *listen)
+	log.Printf("Prime Unlimited runtime API listening on http://%s (catalog: %s)", *listen, state.Status)
 	log.Fatal(httpServer.ListenAndServe())
 }
