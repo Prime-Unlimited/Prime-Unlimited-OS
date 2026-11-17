@@ -743,7 +743,7 @@ class WorkflowPage(QWidget):
         # underlying eMMC write path isn't guaranteed to be byte-exact,
         # and leaving a little headroom costs nothing meaningful out of
         # a multi-gigabyte partition.
-        size_mb = int(self._data_partition_bytes / (1024 * 1024) * 0.95)
+        size_mb = int(self._data_partition_bytes / (1024 * 1024) * 0.5)
         gib = self._data_partition_bytes / (1024**3)
         choice = QMessageBox.warning(
             self,
