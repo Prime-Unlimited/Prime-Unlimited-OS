@@ -1,7 +1,10 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,7 +18,7 @@ func validMod() mod {
 		ID: "catalog-smoke-test", Name: "Catalog Smoke Test", Version: "0.0.0",
 		Description: "Non-installable validation entry.", Models: []string{"JC11S"},
 		Firmware: []string{"5.3.0"}, DownloadURL: "https://example.invalid/not-downloadable.zip",
-		SHA256: strings.Repeat("0", 64),
+		SHA256: strings.Repeat("0", 64), Size: 1,
 	}
 }
 
@@ -75,6 +78,7 @@ func TestMutationAuthorizationFailsClosed(t *testing.T) {
 		wantStatus int
 	}{
 		{"missing", "/api/v1/install", nil, http.StatusUnauthorized},
+		{"cache missing", "/api/v1/cache", nil, http.StatusUnauthorized},
 		{"wrong", "/api/v1/install", []string{"Bearer " + strings.Repeat("b", 64)}, http.StatusUnauthorized},
 		{"wrong scheme", "/api/v1/install", []string{token}, http.StatusUnauthorized},
 		{"duplicate", "/api/v1/install", []string{"Bearer " + token, "Bearer " + token}, http.StatusUnauthorized},
@@ -96,6 +100,134 @@ func TestMutationAuthorizationFailsClosed(t *testing.T) {
 				t.Fatal("response leaked authorization token")
 			}
 		})
+	}
+}
+
+func TestCacheEndpointUsesOnlyCatalogMetadata(t *testing.T) {
+	payload := []byte("verified package bytes")
+	digest := sha256.Sum256(payload)
+	packageServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(payload)
+	}))
+	defer packageServer.Close()
+	item := validMod()
+	item.DownloadURL = packageServer.URL + "/package.zip"
+	item.SHA256 = hex.EncodeToString(digest[:])
+	item.Size = int64(len(payload))
+	handler := &server{
+		model: "JC11S", firmware: "5.3.0", authToken: strings.Repeat("a", 64),
+		catalog:   catalogState{Status: "valid", Catalog: catalog{SchemaVersion: 1, Mods: []mod{item}}},
+		cacheRoot: filepath.Join(t.TempDir(), "cache"), httpClient: packageServer.Client(),
+	}
+	tests := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"catalog id", `{"id":"catalog-smoke-test"}`, http.StatusOK},
+		{"unknown id", `{"id":"missing"}`, http.StatusNotFound},
+		{"client URL rejected", `{"id":"catalog-smoke-test","downloadUrl":"https://attacker.invalid/file"}`, http.StatusBadRequest},
+		{"client path rejected", `{"id":"catalog-smoke-test","path":"/tmp/file"}`, http.StatusBadRequest},
+		{"oversized request rejected", `{"id":"catalog-smoke-test"}` + strings.Repeat(" ", 4096), http.StatusBadRequest},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/cache", strings.NewReader(test.body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Authorization", "Bearer "+handler.authToken)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.want {
+				t.Fatalf("status=%d want=%d body=%s", response.Code, test.want, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestDownloadPackageVerifiesAndReusesAtomicCache(t *testing.T) {
+	payload := []byte("PK\x03\x04test package")
+	digest := sha256.Sum256(payload)
+	requests := 0
+	packageServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write(payload)
+	}))
+	item := validMod()
+	item.DownloadURL = packageServer.URL + "/package.zip"
+	item.SHA256 = hex.EncodeToString(digest[:])
+	item.Size = int64(len(payload))
+	cacheRoot := filepath.Join(t.TempDir(), "packages")
+	result, err := downloadPackage(t.Context(), packageServer.Client(), item, cacheRoot)
+	if err != nil || !result.Cached {
+		t.Fatalf("valid package rejected: result=%#v err=%v", result, err)
+	}
+	finalPath := filepath.Join(cacheRoot, item.SHA256+".zip")
+	info, err := os.Stat(finalPath)
+	if err != nil || info.Mode().Perm() != 0o600 || info.Size() != item.Size {
+		t.Fatalf("unexpected cache file: info=%#v err=%v", info, err)
+	}
+	packageServer.Close()
+	if _, err := downloadPackage(t.Context(), packageServer.Client(), item, cacheRoot); err != nil {
+		t.Fatalf("valid cached package was not reused: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("package fetched %d times, want 1", requests)
+	}
+}
+
+func TestDownloadPackageRejectsHashSizeAndRedirects(t *testing.T) {
+	payload := []byte("package")
+	digest := sha256.Sum256(payload)
+	packageServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirect" {
+			http.Redirect(w, r, "/package", http.StatusFound)
+			return
+		}
+		_, _ = w.Write(payload)
+	}))
+	defer packageServer.Close()
+	client := packageServer.Client()
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	tests := []struct {
+		name   string
+		mutate func(*mod)
+	}{
+		{"hash mismatch", func(item *mod) { item.SHA256 = strings.Repeat("0", 64) }},
+		{"size mismatch", func(item *mod) { item.Size++ }},
+		{"redirect", func(item *mod) { item.DownloadURL = packageServer.URL + "/redirect" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			item := validMod()
+			item.DownloadURL = packageServer.URL + "/package"
+			item.SHA256 = hex.EncodeToString(digest[:])
+			item.Size = int64(len(payload))
+			test.mutate(&item)
+			cacheRoot := filepath.Join(t.TempDir(), "packages")
+			if _, err := downloadPackage(t.Context(), client, item, cacheRoot); err == nil {
+				t.Fatal("invalid package was accepted")
+			}
+			entries, err := os.ReadDir(cacheRoot)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("failed download left cache files: entries=%v err=%v", entries, err)
+			}
+		})
+	}
+}
+
+func TestPackageNetworkPolicy(t *testing.T) {
+	for address, want := range map[string]bool{
+		"127.0.0.1": false, "10.0.0.1": false, "169.254.1.1": false,
+		"224.0.0.1": false, "0.0.0.0": false, "8.8.8.8": true,
+	} {
+		if got := publicPackageIP(net.ParseIP(address)); got != want {
+			t.Errorf("publicPackageIP(%s)=%v want=%v", address, got, want)
+		}
+	}
+	client := newPackageHTTPClient()
+	request, _ := http.NewRequest(http.MethodGet, "https://example.invalid/next", nil)
+	if err := client.CheckRedirect(request, []*http.Request{{}}); err != http.ErrUseLastResponse {
+		t.Fatalf("redirect policy returned %v", err)
 	}
 }
 
@@ -242,6 +374,9 @@ func TestLoadCatalogValidation(t *testing.T) {
 		{"duplicate id", `{"schemaVersion":1,"mods":[` + mustJSON(t, validMod()) + `,` + mustJSON(t, validMod()) + `]}`},
 		{"uppercase sha", strings.Replace(mustJSON(t, valid), strings.Repeat("0", 64), strings.Repeat("A", 64), 1)},
 		{"URL credentials", strings.Replace(mustJSON(t, valid), "https://example.invalid", "https://user@example.invalid", 1)},
+		{"missing size", strings.Replace(mustJSON(t, valid), `,"size":1`, "", 1)},
+		{"zero size", strings.Replace(mustJSON(t, valid), `"size":1`, `"size":0`, 1)},
+		{"oversized package", strings.Replace(mustJSON(t, valid), `"size":1`, `"size":134217729`, 1)},
 		{"trailing JSON", mustJSON(t, valid) + `{}`},
 	}
 	for _, test := range tests {
@@ -263,6 +398,26 @@ func TestLoadCatalogValidation(t *testing.T) {
 	if state := loadCatalog(path); state.Status != "invalid" || !strings.Contains(state.Error, "1 MiB") {
 		t.Fatalf("oversized catalog accepted: %#v", state)
 	}
+
+	t.Run("world writable catalog", func(t *testing.T) {
+		path := writeCatalog(t, valid)
+		if err := os.Chmod(path, 0o666); err != nil {
+			t.Fatal(err)
+		}
+		if state := loadCatalog(path); state.Status != "invalid" {
+			t.Fatalf("writable catalog accepted: %#v", state)
+		}
+	})
+	t.Run("catalog symlink", func(t *testing.T) {
+		target := writeCatalog(t, valid)
+		link := filepath.Join(t.TempDir(), "catalog.json")
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+		if state := loadCatalog(link); state.Status != "invalid" {
+			t.Fatalf("catalog symlink accepted: %#v", state)
+		}
+	})
 }
 
 func mustJSON(t *testing.T, value any) string {

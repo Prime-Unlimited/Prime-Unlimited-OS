@@ -3,10 +3,9 @@
 This is the small, dependency-free ARMv7 service used to make the Mod Loader
 QML operational on firmware without Python or Node. It binds only to
 `127.0.0.1:8098`, reads at most 1 MiB of catalog JSON, and initially exposes
-read-only health, catalog, installed-state, library and transaction endpoints.
-All mutation requests fail closed with HTTP 401 until the package transaction
-engine is wired in. A valid device-owned authorization token changes this to
-HTTP 501; it never enables a placeholder mutation.
+read-only health, catalog, installed-state, library and transaction endpoints,
+plus an authenticated verified-package cache. Installation, extraction and
+activation remain unavailable.
 
 Build from Termux:
 
@@ -33,9 +32,10 @@ come up before catalog provisioning.
 
 The runtime currently supports catalog schema v1 only. Validation is strict:
 unknown fields, duplicate IDs or list values, non-HTTPS URLs, URL credentials,
-fragments, malformed lowercase SHA-256 values, trailing JSON, and catalogs
-larger than 1 MiB are rejected. Schema v2 is rejected until its complete trust
-and package model is implemented.
+fragments, missing or out-of-range package sizes, malformed lowercase SHA-256
+values, trailing JSON, and catalogs larger than 1 MiB are rejected. The file
+must be regular, owned by the service user, and not group- or world-writable.
+Schema v2 is rejected until its complete trust and package model is implemented.
 
 The API remains healthy when a catalog is invalid. `/api/v1/health` reports
 `catalogStatus` and `/api/v1/mods` returns HTTP 503 with a validation error.
@@ -62,7 +62,24 @@ device restarts.
 
 Mutation requests require exactly one `Authorization: Bearer <token>` header.
 Comparison is constant-time. Missing, duplicated, or incorrect credentials
-return HTTP 401. Correct credentials currently return HTTP 501 `mutation
-engine unavailable`, because package transactions are intentionally not part
-of this milestone. Health output reports only `authorizationStatus: ready` and
+return HTTP 401. Correct credentials permit only the package-cache endpoint;
+installation and all other mutations return HTTP 501 `mutation engine
+unavailable`. Health output reports only `authorizationStatus: ready` and
 never returns the token or a token-derived value.
+
+## Verified package cache
+
+`POST /api/v1/cache` accepts only `{"id":"catalog-mod-id"}`. URL, expected
+size, SHA-256 and cache filename cannot be supplied by the caller; they are
+derived from the validated, compatible catalog entry. The transport requires
+HTTPS with TLS 1.2 or newer, ignores proxy environment variables, refuses all
+redirects, and rejects DNS results in loopback, private, link-local,
+unspecified or multicast ranges.
+
+Downloads stream through a mode `0600` temporary file in the service-owned
+mode `0700` package cache. Both Content-Length (when present) and the actual
+byte count must equal the catalog size, which is capped at 128 MiB. SHA-256 is
+verified before an atomic rename to `<sha256>.zip`; partial or invalid files
+are removed. A valid existing cache file is rehashed before reuse. No archive
+is opened, extracted, executed, installed, or activated in this milestone.
+Package signatures and publisher authenticity remain a separate next step.

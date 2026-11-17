@@ -6,4 +6,5 @@ exec "$ROOT/bin/prime-unlimited-runtime-api" \
     -model JC11S \
     -firmware 5.3.0 \
     -catalog "$ROOT/catalog/catalog.json" \
-    -auth-token "$ROOT/auth/mutation.token"
+    -auth-token "$ROOT/auth/mutation.token" \
+    -cache-root "$ROOT/cache/packages"
