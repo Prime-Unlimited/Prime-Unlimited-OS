@@ -47,6 +47,17 @@ type stageMetadata struct {
 	Files []stagedFile `json:"files"`
 }
 
+type inspectionResult struct {
+	CatalogID    string `json:"catalogId"`
+	ID           string `json:"id"`
+	Version      string `json:"version"`
+	SHA256       string `json:"sha256"`
+	Architecture string `json:"architecture"`
+	ABI          string `json:"abi"`
+	Entrypoint   string `json:"entrypoint"`
+	Eligible     bool   `json:"eligible"`
+}
+
 const stageMarker = ".prime-unlimited-stage.json"
 
 func secureDirectory(root string) error {
@@ -308,4 +319,26 @@ func readValidStage(root string, expected stageResult) (stageResult, error) {
 		return metadata.stageResult, errors.New("stage inventory mismatch")
 	}
 	return metadata.stageResult, nil
+}
+
+func inspectStagedPackage(item mod, catalogID, cacheRoot, stagingRoot string) (inspectionResult, error) {
+	result := inspectionResult{CatalogID: catalogID, ID: item.ID, Version: item.Version, SHA256: item.SHA256,
+		Architecture: item.Architecture, ABI: item.ABI, Entrypoint: item.Entrypoint}
+	if len(item.Dependencies) != 0 || len(item.Libraries) != 0 || len(item.Conflicts) != 0 {
+		return result, errors.New("dependency and conflict resolution is not available")
+	}
+	if !verifyCachedPackage(filepath.Join(cacheRoot, item.SHA256+".zip"), item) {
+		return result, errors.New("verified cache unavailable")
+	}
+	stageRoot := filepath.Join(stagingRoot, item.SHA256)
+	if _, err := readValidStage(stageRoot, stageResult{ID: item.ID, Version: item.Version, SHA256: item.SHA256}); err != nil {
+		return result, err
+	}
+	entrypoint := filepath.Join(stageRoot, filepath.FromSlash(item.Entrypoint))
+	info, err := os.Lstat(entrypoint)
+	if err != nil || validateOwnedRegularFile(info, 0o600) != nil {
+		return result, errors.New("declared entrypoint is missing or unsafe")
+	}
+	result.Eligible = true
+	return result, nil
 }

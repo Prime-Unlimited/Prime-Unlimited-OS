@@ -30,12 +30,16 @@ come up before catalog provisioning.
 
 ## Catalog behavior
 
-The runtime currently supports signed catalog schema v1 only. Validation is strict:
+The runtime supports the detached-signature profile of catalog schemas v1 and
+v2. Validation is strict:
 unknown fields, duplicate IDs or list values, non-HTTPS URLs, URL credentials,
 fragments, missing or out-of-range package sizes, malformed lowercase SHA-256
 values, trailing JSON, and catalogs larger than 1 MiB are rejected. The file
 must be regular, owned by the service user, and not group- or world-writable.
-Schema v2 is rejected until its complete trust and package model is implemented.
+Schema v2 adds a catalog ID plus externally approved architecture, ABI and
+entrypoint metadata. The JC11S runtime currently accepts exact firmware lists
+only; `firmwareConstraint`, embedded authenticity, update rules and dependency
+resolution remain fail-closed until their runtime implementations exist.
 
 Every present catalog requires a detached Ed25519 signature and a separately
 provisioned deployment trust key. The service verifies the signature over the
@@ -118,3 +122,17 @@ is reused.
 Staging does not execute package content and does not modify the installed-mod
 registry, Engine files, boot hooks or activation state. Package manifests,
 installation transactions and rollback are separate later milestones.
+
+## Trusted package inspection
+
+`POST /api/v1/inspect` is authenticated and accepts only a catalog mod ID. It
+requires a detached-signature-verified v2 catalog record approved for the
+device, exact `armv7l` architecture and `gnueabihf` ABI, a verified cache file,
+and a completely revalidated stage. It then confirms that the entrypoint named
+by the signed catalog exists as a service-owned mode `0600` regular file.
+
+Approval, compatibility and the entrypoint are never read from package
+contents. Revoked, incompatible, dependency-bearing or conflicting records
+cannot become eligible in this milestone. A successful response is a static
+eligibility decision only: the entrypoint remains non-executable and nothing
+is installed, enabled or launched.

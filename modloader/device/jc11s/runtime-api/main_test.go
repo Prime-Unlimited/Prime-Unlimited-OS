@@ -82,6 +82,7 @@ func TestMutationAuthorizationFailsClosed(t *testing.T) {
 	}{
 		{"missing", "/api/v1/install", nil, http.StatusUnauthorized},
 		{"cache missing", "/api/v1/cache", nil, http.StatusUnauthorized},
+		{"inspect missing", "/api/v1/inspect", nil, http.StatusUnauthorized},
 		{"wrong", "/api/v1/install", []string{"Bearer " + strings.Repeat("b", 64)}, http.StatusUnauthorized},
 		{"wrong scheme", "/api/v1/install", []string{token}, http.StatusUnauthorized},
 		{"duplicate", "/api/v1/install", []string{"Bearer " + token, "Bearer " + token}, http.StatusUnauthorized},

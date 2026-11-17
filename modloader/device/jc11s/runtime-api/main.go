@@ -35,20 +35,60 @@ const maxPackageBytes = 128 * 1024 * 1024
 var modIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 type catalog struct {
-	SchemaVersion int   `json:"schemaVersion"`
-	Mods          []mod `json:"mods"`
+	SchemaVersion int       `json:"schemaVersion"`
+	CatalogID     string    `json:"catalogId,omitempty"`
+	Authenticity  any       `json:"authenticity,omitempty"`
+	Mods          []mod     `json:"mods"`
+	Libraries     []library `json:"libraries,omitempty"`
 }
 
 type mod struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Version     string   `json:"version"`
-	Description string   `json:"description,omitempty"`
-	Models      []string `json:"models"`
-	Firmware    []string `json:"firmware"`
-	DownloadURL string   `json:"downloadUrl"`
-	SHA256      string   `json:"sha256"`
-	Size        int64    `json:"size"`
+	ID           string       `json:"id"`
+	Name         string       `json:"name"`
+	Version      string       `json:"version"`
+	Description  string       `json:"description,omitempty"`
+	Models       []string     `json:"models"`
+	Firmware     []string     `json:"firmware"`
+	DownloadURL  string       `json:"downloadUrl"`
+	SHA256       string       `json:"sha256"`
+	Size         int64        `json:"size"`
+	Architecture string       `json:"architecture,omitempty"`
+	ABI          string       `json:"abi,omitempty"`
+	Entrypoint   string       `json:"entrypoint,omitempty"`
+	Approval     *approval    `json:"approval,omitempty"`
+	Dependencies []dependency `json:"dependencies,omitempty"`
+	Libraries    []dependency `json:"libraries,omitempty"`
+	Conflicts    []string     `json:"conflicts,omitempty"`
+	Revoked      bool         `json:"revoked,omitempty"`
+}
+
+type approval struct {
+	Maintainer string   `json:"maintainer"`
+	Devices    []string `json:"devices"`
+}
+
+type dependency struct {
+	ID         string `json:"id"`
+	Constraint string `json:"constraint"`
+	Type       string `json:"type,omitempty"`
+}
+
+type library struct {
+	ID                 string       `json:"id"`
+	Name               string       `json:"name"`
+	Version            string       `json:"version"`
+	Models             []string     `json:"models"`
+	Firmware           []string     `json:"firmware"`
+	FirmwareConstraint string       `json:"firmwareConstraint,omitempty"`
+	Architecture       string       `json:"architecture"`
+	ABI                string       `json:"abi"`
+	DownloadURL        string       `json:"downloadUrl"`
+	SHA256             string       `json:"sha256"`
+	Size               int64        `json:"size"`
+	Approval           *approval    `json:"approval"`
+	Dependencies       []dependency `json:"dependencies,omitempty"`
+	Conflicts          []string     `json:"conflicts,omitempty"`
+	Revoked            bool         `json:"revoked,omitempty"`
 }
 
 type modResponse struct {
@@ -79,14 +119,16 @@ type catalogSignature struct {
 }
 
 type server struct {
-	model       string
-	firmware    string
-	catalog     catalogState
-	authToken   string
-	cacheRoot   string
-	stagingRoot string
-	httpClient  *http.Client
-	cacheMu     sync.Mutex
+	model        string
+	firmware     string
+	architecture string
+	abi          string
+	catalog      catalogState
+	authToken    string
+	cacheRoot    string
+	stagingRoot  string
+	httpClient   *http.Client
+	cacheMu      sync.Mutex
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -107,7 +149,13 @@ func contains(values []string, target string) bool {
 }
 
 func (s *server) compatible(item mod) bool {
-	return contains(item.Models, s.model) && contains(item.Firmware, s.firmware)
+	if !contains(item.Models, s.model) || !contains(item.Firmware, s.firmware) || item.Revoked {
+		return false
+	}
+	if s.catalog.Catalog.SchemaVersion == 2 {
+		return item.Architecture == s.architecture && item.ABI == s.abi && item.Approval != nil && contains(item.Approval.Devices, s.model)
+	}
+	return true
 }
 
 func (s *server) authorized(r *http.Request) bool {
@@ -128,7 +176,7 @@ func (s *server) authorizationStatus() string {
 
 func isMutationPath(path string) bool {
 	switch path {
-	case "/api/v1/cache", "/api/v1/stage", "/api/v1/install", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback":
+	case "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback":
 		return true
 	default:
 		return false
@@ -235,6 +283,35 @@ func (s *server) handleStage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *server) handleInspect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	request, err := decodeCacheRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if s.catalog.Catalog.SchemaVersion != 2 {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "trusted install metadata unavailable"})
+		return
+	}
+	item, ok := s.catalogMod(request.ID)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "compatible approved catalog mod not found"})
+		return
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	result, err := inspectStagedPackage(item, s.catalog.Catalog.CatalogID, s.cacheRoot, s.stagingRoot)
+	if err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "verified staged package is unavailable or ineligible"})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" || r.URL.Fragment != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query parameters are not supported"})
@@ -258,6 +335,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.handleStage(w, r)
 			return
 		}
+		if r.URL.Path == "/api/v1/inspect" {
+			s.handleInspect(w, r)
+			return
+		}
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "mutation engine unavailable"})
 		return
 	}
@@ -268,6 +349,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"catalogStatus": s.catalog.Status, "catalogError": s.catalog.Error,
 			"catalogTrust": map[bool]string{true: "verified", false: "unverified"}[s.catalog.Trusted],
 			"catalogKeyId": s.catalog.KeyID, "catalogKeyFingerprint": s.catalog.KeyFingerprint,
+			"catalogSchemaVersion": s.catalog.Catalog.SchemaVersion, "catalogId": s.catalog.Catalog.CatalogID,
 			"authorizationStatus": s.authorizationStatus(),
 		})
 	case "/api/v1/mods":
@@ -285,8 +367,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"model": s.model, "firmware": s.firmware, "mods": mods,
 			"catalogStatus": s.catalog.Status, "catalogSha256": s.catalog.SHA256,
-			"catalogTrust": map[bool]string{true: "verified", false: "unverified"}[s.catalog.Trusted],
-			"catalogKeyId": s.catalog.KeyID,
+			"catalogTrust":         map[bool]string{true: "verified", false: "unverified"}[s.catalog.Trusted],
+			"catalogKeyId":         s.catalog.KeyID,
+			"catalogSchemaVersion": s.catalog.Catalog.SchemaVersion, "catalogId": s.catalog.Catalog.CatalogID,
 		})
 	case "/api/v1/installed":
 		writeJSON(w, http.StatusOK, map[string]any{"mods": map[string]any{}})
@@ -316,40 +399,140 @@ func validateList(name string, values []string) error {
 	return nil
 }
 
-func validateMod(item mod) error {
-	if !modIDPattern.MatchString(item.ID) {
+func validatePackageFields(id, name, version, downloadURL, digest string, size int64, models, firmware []string) error {
+	if !modIDPattern.MatchString(id) {
 		return errors.New("invalid id")
 	}
-	if item.Name == "" || len(item.Name) > 100 || strings.TrimSpace(item.Name) != item.Name {
+	if name == "" || len(name) > 100 || strings.TrimSpace(name) != name {
 		return errors.New("invalid name")
 	}
-	if item.Version == "" || len(item.Version) > 40 || strings.TrimSpace(item.Version) != item.Version {
+	if version == "" || len(version) > 40 || strings.TrimSpace(version) != version {
 		return errors.New("invalid version")
+	}
+	if err := validateList("models", models); err != nil {
+		return err
+	}
+	if err := validateList("firmware", firmware); err != nil {
+		return err
+	}
+	parsed, err := url.Parse(downloadURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+		return errors.New("downloadUrl must be an absolute HTTPS URL without credentials or fragment")
+	}
+	if len(digest) != 64 {
+		return errors.New("sha256 must contain 64 lowercase hexadecimal characters")
+	}
+	decoded, err := hex.DecodeString(digest)
+	if err != nil || hex.EncodeToString(decoded) != digest {
+		return errors.New("sha256 must contain 64 lowercase hexadecimal characters")
+	}
+	if size < 1 || size > maxPackageBytes {
+		return errors.New("size must be between 1 byte and 128 MiB")
+	}
+	return nil
+}
+
+func validateMod(item mod) error {
+	if err := validatePackageFields(item.ID, item.Name, item.Version, item.DownloadURL, item.SHA256, item.Size, item.Models, item.Firmware); err != nil {
+		return err
 	}
 	if len(item.Description) > 2000 {
 		return errors.New("description exceeds 2000 bytes")
 	}
-	if err := validateList("models", item.Models); err != nil {
-		return err
-	}
-	if err := validateList("firmware", item.Firmware); err != nil {
-		return err
-	}
-	parsed, err := url.Parse(item.DownloadURL)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
-		return errors.New("downloadUrl must be an absolute HTTPS URL without credentials or fragment")
-	}
-	if len(item.SHA256) != 64 {
-		return errors.New("sha256 must contain 64 lowercase hexadecimal characters")
-	}
-	decoded, err := hex.DecodeString(item.SHA256)
-	if err != nil || hex.EncodeToString(decoded) != item.SHA256 {
-		return errors.New("sha256 must contain 64 lowercase hexadecimal characters")
-	}
-	if item.Size < 1 || item.Size > maxPackageBytes {
-		return errors.New("size must be between 1 byte and 128 MiB")
+	if item.Architecture != "" || item.ABI != "" || item.Entrypoint != "" || item.Approval != nil || item.Dependencies != nil || item.Libraries != nil || item.Conflicts != nil || item.Revoked {
+		return errors.New("schema v2 fields are not allowed in schema v1")
 	}
 	return nil
+}
+
+func validateApproval(value *approval) error {
+	if value == nil || value.Maintainer == "" || len(value.Maintainer) > 100 || strings.TrimSpace(value.Maintainer) != value.Maintainer {
+		return errors.New("invalid approval maintainer")
+	}
+	return validateList("approval devices", value.Devices)
+}
+
+func validateDependencies(name string, values []dependency) error {
+	if len(values) > 256 {
+		return fmt.Errorf("%s exceeds 256 entries", name)
+	}
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		if !modIDPattern.MatchString(value.ID) || value.Constraint == "" || len(value.Constraint) > 100 || strings.TrimSpace(value.Constraint) != value.Constraint || (value.Type != "" && value.Type != "mod" && value.Type != "library") {
+			return fmt.Errorf("invalid %s entry", name)
+		}
+		key := value.Type + "\x00" + value.ID
+		if seen[key] {
+			return fmt.Errorf("duplicate %s entry", name)
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
+func validateV2Mod(item mod) error {
+	if err := validatePackageFields(item.ID, item.Name, item.Version, item.DownloadURL, item.SHA256, item.Size, item.Models, item.Firmware); err != nil {
+		return err
+	}
+	if len(item.Description) > 2000 {
+		return errors.New("description exceeds 2000 bytes")
+	}
+	if item.Architecture == "" || len(item.Architecture) > 40 || item.ABI == "" || len(item.ABI) > 40 {
+		return errors.New("invalid architecture or ABI")
+	}
+	entrypoint, err := safeArchivePath(item.Entrypoint, defaultStageLimits)
+	if err != nil || entrypoint != item.Entrypoint || strings.HasSuffix(item.Entrypoint, "/") {
+		return errors.New("invalid entrypoint")
+	}
+	if err := validateApproval(item.Approval); err != nil {
+		return err
+	}
+	if err := validateDependencies("dependencies", item.Dependencies); err != nil {
+		return err
+	}
+	if err := validateDependencies("libraries", item.Libraries); err != nil {
+		return err
+	}
+	if err := validateListOptional("conflicts", item.Conflicts); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateListOptional(name string, values []string) error {
+	if values == nil {
+		return nil
+	}
+	if len(values) > 256 {
+		return fmt.Errorf("%s exceeds 256 entries", name)
+	}
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		if !modIDPattern.MatchString(value) || seen[value] {
+			return fmt.Errorf("invalid or duplicate %s entry", name)
+		}
+		seen[value] = true
+	}
+	return nil
+}
+
+func validateV2Library(item library) error {
+	if item.FirmwareConstraint != "" {
+		return errors.New("firmwareConstraint is not supported by this runtime")
+	}
+	if err := validatePackageFields(item.ID, item.Name, item.Version, item.DownloadURL, item.SHA256, item.Size, item.Models, item.Firmware); err != nil {
+		return err
+	}
+	if item.Architecture == "" || len(item.Architecture) > 40 || item.ABI == "" || len(item.ABI) > 40 {
+		return errors.New("invalid architecture or ABI")
+	}
+	if err := validateApproval(item.Approval); err != nil {
+		return err
+	}
+	if err := validateDependencies("dependencies", item.Dependencies); err != nil {
+		return err
+	}
+	return validateListOptional("conflicts", item.Conflicts)
 }
 
 func readOwnedFile(path string, limit int64, label string) ([]byte, error) {
@@ -393,21 +576,81 @@ func parseCatalog(data []byte) catalogState {
 	if err := decodeStrictJSON(data, &result); err != nil {
 		return catalogState{Status: "invalid", Error: "invalid catalog JSON: " + err.Error()}
 	}
-	if result.SchemaVersion != 1 {
-		return catalogState{Status: "invalid", Error: "only catalog schemaVersion 1 is supported"}
-	}
 	if result.Mods == nil || len(result.Mods) > 2048 {
 		return catalogState{Status: "invalid", Error: "mods must be an array with at most 2048 entries"}
 	}
+	if result.SchemaVersion != 1 && result.SchemaVersion != 2 {
+		return catalogState{Status: "invalid", Error: "only catalog schemaVersion 1 and 2 are supported"}
+	}
+	var rootFields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rootFields); err != nil {
+		return catalogState{Status: "invalid", Error: "invalid catalog object"}
+	}
+	if _, present := rootFields["authenticity"]; present {
+		return catalogState{Status: "invalid", Error: "embedded authenticity is unsupported; use the detached signature"}
+	}
+	if result.SchemaVersion == 1 && (result.CatalogID != "" || result.Libraries != nil) {
+		return catalogState{Status: "invalid", Error: "schema v2 root fields are not allowed in schema v1"}
+	}
+	if result.SchemaVersion == 1 {
+		var raw struct {
+			SchemaVersion int               `json:"schemaVersion"`
+			Mods          []json.RawMessage `json:"mods"`
+		}
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return catalogState{Status: "invalid", Error: "invalid schema v1 shape"}
+		}
+		allowed := map[string]bool{"id": true, "name": true, "version": true, "description": true, "models": true, "firmware": true, "downloadUrl": true, "sha256": true, "size": true}
+		for index, encoded := range raw.Mods {
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(encoded, &fields) != nil {
+				return catalogState{Status: "invalid", Error: "invalid schema v1 mod"}
+			}
+			for field := range fields {
+				if !allowed[field] {
+					return catalogState{Status: "invalid", Error: fmt.Sprintf("mods[%d]: schema v2 field %q is not allowed in schema v1", index, field)}
+				}
+			}
+		}
+		for field := range rootFields {
+			if field != "schemaVersion" && field != "mods" {
+				return catalogState{Status: "invalid", Error: fmt.Sprintf("schema v2 root field %q is not allowed in schema v1", field)}
+			}
+		}
+	}
+	if result.SchemaVersion == 2 {
+		if !modIDPattern.MatchString(result.CatalogID) {
+			return catalogState{Status: "invalid", Error: "invalid catalogId"}
+		}
+		if result.Libraries == nil || len(result.Libraries) > 2048 {
+			return catalogState{Status: "invalid", Error: "libraries must be an array with at most 2048 entries"}
+		}
+	}
 	ids := make(map[string]bool, len(result.Mods))
 	for index, item := range result.Mods {
-		if err := validateMod(item); err != nil {
+		var err error
+		if result.SchemaVersion == 1 {
+			err = validateMod(item)
+		} else {
+			err = validateV2Mod(item)
+		}
+		if err != nil {
 			return catalogState{Status: "invalid", Error: fmt.Sprintf("mods[%d]: %v", index, err)}
 		}
 		if ids[item.ID] {
 			return catalogState{Status: "invalid", Error: fmt.Sprintf("duplicate mod id %q", item.ID)}
 		}
 		ids[item.ID] = true
+	}
+	libraryIDs := make(map[string]bool, len(result.Libraries))
+	for index, item := range result.Libraries {
+		if err := validateV2Library(item); err != nil {
+			return catalogState{Status: "invalid", Error: fmt.Sprintf("libraries[%d]: %v", index, err)}
+		}
+		if libraryIDs[item.ID] {
+			return catalogState{Status: "invalid", Error: fmt.Sprintf("duplicate library id %q", item.ID)}
+		}
+		libraryIDs[item.ID] = true
 	}
 	digest := sha256.Sum256(data)
 	return catalogState{Catalog: result, Status: "valid", SHA256: hex.EncodeToString(digest[:])}
@@ -726,6 +969,8 @@ func main() {
 	listen := flag.String("listen", "127.0.0.1:8098", "loopback listen address")
 	model := flag.String("model", "JC11S", "device model")
 	firmware := flag.String("firmware", "5.3.0", "Engine OS version")
+	architecture := flag.String("architecture", "armv7l", "runtime architecture identity")
+	abi := flag.String("abi", "gnueabihf", "runtime ABI identity")
 	catalogPath := flag.String("catalog", "/data/prime-unlimited/catalog/catalog.json", "catalog file")
 	catalogSignaturePath := flag.String("catalog-signature", "/data/prime-unlimited/catalog/catalog.sig.json", "detached catalog signature")
 	catalogTrustKeyPath := flag.String("catalog-trust-key", "/data/prime-unlimited/trust/catalog-key.json", "deployment-owned catalog trust key")
@@ -746,7 +991,7 @@ func main() {
 	}
 	httpServer := &http.Server{
 		Addr: *listen,
-		Handler: &server{model: *model, firmware: *firmware, catalog: state, authToken: authToken,
+		Handler: &server{model: *model, firmware: *firmware, architecture: *architecture, abi: *abi, catalog: state, authToken: authToken,
 			cacheRoot: *cacheRoot, stagingRoot: *stagingRoot, httpClient: newPackageHTTPClient()},
 		ReadHeaderTimeout: 3 * time.Second,
 		ReadTimeout:       5 * time.Second,
