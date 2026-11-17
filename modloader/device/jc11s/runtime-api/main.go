@@ -178,7 +178,7 @@ func (s *server) authorizationStatus() string {
 
 func isMutationPath(path string) bool {
 	switch path {
-	case "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve", "/api/v1/launch":
+	case "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve", "/api/v1/launch", "/api/v1/launch-set":
 		return true
 	default:
 		return false
@@ -441,6 +441,26 @@ func (s *server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
+func (s *server) handleLaunchSet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	request, err := decodeCacheRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	run, err := launchEnabledSet(request.ID, s.root)
+	if err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, run)
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
+}
+
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" || r.URL.Fragment != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query parameters are not supported"})
@@ -492,6 +512,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.handleLaunch(w, r)
 			return
 		}
+		if r.URL.Path == "/api/v1/launch-set" {
+			s.handleLaunchSet(w, r)
+			return
+		}
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "mutation engine unavailable"})
 		return
 	}
@@ -532,6 +556,25 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, status)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/v1/runs/") {
+		id := strings.TrimPrefix(r.URL.Path, "/api/v1/runs/")
+		decoded, err := hex.DecodeString(id)
+		if err != nil || len(decoded) != 16 || hex.EncodeToString(decoded) != id {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid run id"})
+			return
+		}
+		run, err := loadLaunchRun(id, s.root)
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "launch run not found"})
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "launch run unavailable"})
+			return
+		}
+		writeJSON(w, http.StatusOK, run)
 		return
 	}
 	switch r.URL.Path {

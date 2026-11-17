@@ -218,7 +218,20 @@ directory is `0700` under a traverse-only parent, while logs and status remain
 `0600` root-owned in non-traversable directories. Timeout kills the complete
 process group. Completion, failure and timeout states are written atomically.
 
-This endpoint is manual and one-shot. It is not called from boot or Engine,
-does not launch a dependency graph, and does not yet provide a network or
-mount namespace. Those limitations must be addressed before general-purpose
-third-party mods or automatic startup are enabled.
+This endpoint is manual and one-shot. It is not called from boot or Engine and
+does not yet provide a network or mount namespace. Those limitations must be
+addressed before general-purpose third-party mods or automatic startup are
+enabled.
+
+## Dependency-ordered launch runs
+
+`POST /api/v1/launch-set` revalidates the enabled installed dependency graph
+and runs it dependency-first using the isolated one-shot launcher. A missing,
+disabled, incompatible, cyclic or conflicting node rejects the run before the
+first process. A runtime failure stops the sequence immediately, so no
+dependent starts after its prerequisite fails.
+
+Every attempt receives a random 128-bit run ID and atomically persists its
+ordered step statuses under `runtime/runs`. `GET /api/v1/runs/<id>` retrieves
+that record. Successful earlier one-shot steps are not rolled back; persistent
+process supervision and compensating stop actions remain a later milestone.
