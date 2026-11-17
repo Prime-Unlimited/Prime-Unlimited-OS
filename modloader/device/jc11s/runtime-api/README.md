@@ -5,7 +5,8 @@ QML operational on firmware without Python or Node. It binds only to
 `127.0.0.1:8098`, reads at most 1 MiB of catalog JSON, and initially exposes
 read-only health, catalog, installed-state, library and transaction endpoints.
 All mutation requests fail closed with HTTP 401 until the package transaction
-engine and device-owned authorization token are wired in.
+engine is wired in. A valid device-owned authorization token changes this to
+HTTP 501; it never enables a placeholder mutation.
 
 Build from Termux:
 
@@ -48,3 +49,20 @@ first, use mode `0644`, restart only `prime-unlimited-modloader-api.service`,
 and verify the health and mods endpoints. The entry uses the reserved
 `example.invalid` domain and mutations remain unauthorized, so it cannot be
 installed. Restore the backup and restart the API to roll back.
+
+## Device-owned authorization token
+
+At first start, the runtime creates 32 bytes from the operating system random
+source and stores them as 64 lowercase hexadecimal characters in
+`/data/prime-unlimited/auth/mutation.token`. The directory is mode `0700` and
+the file is mode `0600`. Both must be real paths owned by the service user;
+symlinks, weak permissions, malformed content, or ownership mismatches make
+startup fail closed. An existing valid token is reused across service and
+device restarts.
+
+Mutation requests require exactly one `Authorization: Bearer <token>` header.
+Comparison is constant-time. Missing, duplicated, or incorrect credentials
+return HTTP 401. Correct credentials currently return HTTP 501 `mutation
+engine unavailable`, because package transactions are intentionally not part
+of this milestone. Health output reports only `authorizationStatus: ready` and
+never returns the token or a token-derived value.

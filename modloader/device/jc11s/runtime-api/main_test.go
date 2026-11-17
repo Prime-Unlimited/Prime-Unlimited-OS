@@ -65,6 +65,115 @@ func TestReadOnlyAPIContract(t *testing.T) {
 	}
 }
 
+func TestMutationAuthorizationFailsClosed(t *testing.T) {
+	token := strings.Repeat("a", 64)
+	handler := &server{authToken: token}
+	tests := []struct {
+		name       string
+		path       string
+		headers    []string
+		wantStatus int
+	}{
+		{"missing", "/api/v1/install", nil, http.StatusUnauthorized},
+		{"wrong", "/api/v1/install", []string{"Bearer " + strings.Repeat("b", 64)}, http.StatusUnauthorized},
+		{"wrong scheme", "/api/v1/install", []string{token}, http.StatusUnauthorized},
+		{"duplicate", "/api/v1/install", []string{"Bearer " + token, "Bearer " + token}, http.StatusUnauthorized},
+		{"valid but unavailable", "/api/v1/install", []string{"Bearer " + token}, http.StatusNotImplemented},
+		{"unknown mutation", "/api/v1/unknown", []string{"Bearer " + token}, http.StatusNotFound},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(`{"id":"catalog-smoke-test"}`))
+			for _, value := range test.headers {
+				request.Header.Add("Authorization", value)
+			}
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status=%d, want=%d body=%s", response.Code, test.wantStatus, response.Body.String())
+			}
+			if strings.Contains(response.Body.String(), token) {
+				t.Fatal("response leaked authorization token")
+			}
+		})
+	}
+}
+
+func TestHealthReportsAuthorizationAvailability(t *testing.T) {
+	for token, want := range map[string]string{"": "unavailable", strings.Repeat("a", 64): "ready"} {
+		handler := &server{authToken: token}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+		if !strings.Contains(response.Body.String(), `"authorizationStatus":"`+want+`"`) {
+			t.Fatalf("token-present=%v body=%s", token != "", response.Body.String())
+		}
+	}
+}
+
+func TestAuthTokenCreationAndPersistence(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "auth")
+	path := filepath.Join(directory, "mutation.token")
+	token, err := loadOrCreateAuthToken(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(token) != 64 || token != strings.ToLower(token) {
+		t.Fatalf("unexpected generated token format: length=%d", len(token))
+	}
+	directoryInfo, err := os.Stat(directory)
+	if err != nil || directoryInfo.Mode().Perm() != 0o700 {
+		t.Fatalf("authorization directory mode=%v err=%v", directoryInfo.Mode().Perm(), err)
+	}
+	fileInfo, err := os.Stat(path)
+	if err != nil || fileInfo.Mode().Perm() != 0o600 {
+		t.Fatalf("authorization token mode=%v err=%v", fileInfo.Mode().Perm(), err)
+	}
+	reloaded, err := loadOrCreateAuthToken(path)
+	if err != nil || reloaded != token {
+		t.Fatalf("token was not persistent: equal=%v err=%v", reloaded == token, err)
+	}
+}
+
+func TestAuthTokenRejectsUnsafePathsAndContent(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, directory, path string)
+	}{
+		{"world readable", func(t *testing.T, _, path string) {
+			if err := os.WriteFile(path, []byte(strings.Repeat("a", 64)+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"invalid content", func(t *testing.T, _, path string) {
+			if err := os.WriteFile(path, []byte(strings.Repeat("Z", 64)+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"symlink", func(t *testing.T, directory, path string) {
+			target := filepath.Join(directory, "target")
+			if err := os.WriteFile(target, []byte(strings.Repeat("a", 64)+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, path); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory := filepath.Join(t.TempDir(), "auth")
+			if err := os.Mkdir(directory, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(directory, "mutation.token")
+			test.setup(t, directory, path)
+			if _, err := loadOrCreateAuthToken(path); err == nil {
+				t.Fatal("unsafe authorization token was accepted")
+			}
+		})
+	}
+}
+
 func TestCatalogCompatibilityAndStatus(t *testing.T) {
 	compatible := validMod()
 	incompatible := validMod()
