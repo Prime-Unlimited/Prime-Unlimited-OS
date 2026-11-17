@@ -120,8 +120,9 @@ the catalog identity and inventory, which is checked before an existing stage
 is reused.
 
 Staging does not execute package content and does not modify the installed-mod
-registry, Engine files, boot hooks or activation state. Package manifests,
-installation transactions and rollback are separate later milestones.
+registry, Engine files, boot hooks or activation state. Installation requires
+the additional signed inspection and transaction stages below; rollback and
+activation remain separate later milestones.
 
 ## Trusted package inspection
 
@@ -136,3 +137,25 @@ contents. Revoked, incompatible, dependency-bearing or conflicting records
 cannot become eligible in this milestone. A successful response is a static
 eligibility decision only: the entrypoint remains non-executable and nothing
 is installed, enabled or launched.
+
+## Atomic disabled installation
+
+`POST /api/v1/install` accepts only a signed-v2 catalog ID and synchronously
+installs an already inspected package as disabled. It revalidates the cache,
+complete stage inventory and signed entrypoint before copying only staged
+payload files into a private temporary directory under
+`mods/installed/<id>/`. The stage marker is excluded. Files remain `0600` and
+directories `0700`; an atomic rename publishes the version directory.
+
+`registry/state.json` records the signed catalog and package identity,
+architecture, ABI, entrypoint and `enabled: false`. `registry/pending.json`
+durably records the previous and next states around publication. Startup
+recovers a prepared journal by restoring the previous state and removing only
+its validated target; a committed journal completes the next state only when
+the target remains safe. Completed or recovered operations are exposed through
+`GET /api/v1/transactions` and the installed state through
+`GET /api/v1/installed`.
+
+This milestone does not make files executable, generate startup state, enable
+mods or invoke an entrypoint. Dependency-bearing, library-bearing and
+conflicting records remain ineligible.

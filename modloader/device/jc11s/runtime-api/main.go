@@ -33,6 +33,7 @@ const maxCatalogBytes = 1024 * 1024
 const maxPackageBytes = 128 * 1024 * 1024
 
 var modIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+var versionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$`)
 
 type catalog struct {
 	SchemaVersion int       `json:"schemaVersion"`
@@ -127,6 +128,7 @@ type server struct {
 	authToken    string
 	cacheRoot    string
 	stagingRoot  string
+	root         string
 	httpClient   *http.Client
 	cacheMu      sync.Mutex
 }
@@ -312,6 +314,40 @@ func (s *server) handleInspect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *server) handleInstall(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	request, err := decodeCacheRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if s.catalog.Catalog.SchemaVersion != 2 {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "trusted install metadata unavailable"})
+		return
+	}
+	item, ok := s.catalogMod(request.ID)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "compatible approved catalog mod not found"})
+		return
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	result, err := installDisabledMod(item, s.catalog.Catalog.CatalogID, s.cacheRoot, s.stagingRoot, s.root)
+	if errors.Is(err, errAlreadyInstalled) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		log.Printf("disabled install failed for %s", item.ID)
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "verified package installation failed"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, result)
+}
+
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" || r.URL.Fragment != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query parameters are not supported"})
@@ -339,13 +375,38 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.handleInspect(w, r)
 			return
 		}
+		if r.URL.Path == "/api/v1/install" {
+			s.handleInstall(w, r)
+			return
+		}
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "mutation engine unavailable"})
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/v1/transactions/") {
+		id := strings.TrimPrefix(r.URL.Path, "/api/v1/transactions/")
+		decoded, err := hex.DecodeString(id)
+		if err != nil || len(decoded) != 16 || hex.EncodeToString(decoded) != id {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid transaction id"})
+			return
+		}
+		records, err := listTransactions(s.root)
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "transaction registry unavailable"})
+			return
+		}
+		for _, record := range records {
+			if record.ID == id {
+				writeJSON(w, http.StatusOK, record)
+				return
+			}
+		}
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "transaction not found"})
 		return
 	}
 	switch r.URL.Path {
 	case "/api/v1/health":
 		writeJSON(w, http.StatusOK, map[string]any{
-			"service": "prime-unlimited-mod-loader", "mode": "authenticated-read-only",
+			"service": "prime-unlimited-mod-loader", "mode": "authenticated-disabled-install",
 			"catalogStatus": s.catalog.Status, "catalogError": s.catalog.Error,
 			"catalogTrust": map[bool]string{true: "verified", false: "unverified"}[s.catalog.Trusted],
 			"catalogKeyId": s.catalog.KeyID, "catalogKeyFingerprint": s.catalog.KeyFingerprint,
@@ -372,9 +433,19 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"catalogSchemaVersion": s.catalog.Catalog.SchemaVersion, "catalogId": s.catalog.Catalog.CatalogID,
 		})
 	case "/api/v1/installed":
-		writeJSON(w, http.StatusOK, map[string]any{"mods": map[string]any{}})
+		state, err := loadRegistry(filepath.Join(s.root, "registry", "state.json"))
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "installed registry unavailable"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"mods": state.Mods})
 	case "/api/v1/transactions":
-		writeJSON(w, http.StatusOK, map[string]any{"transactions": []any{}})
+		records, err := listTransactions(s.root)
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "transaction registry unavailable"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"transactions": records})
 	case "/api/v1/libraries":
 		writeJSON(w, http.StatusOK, map[string]any{"libraries": []any{}})
 	default:
@@ -477,6 +548,9 @@ func validateV2Mod(item mod) error {
 	if len(item.Description) > 2000 {
 		return errors.New("description exceeds 2000 bytes")
 	}
+	if !versionPattern.MatchString(item.Version) {
+		return errors.New("version is not a safe path component")
+	}
 	if item.Architecture == "" || len(item.Architecture) > 40 || item.ABI == "" || len(item.ABI) > 40 {
 		return errors.New("invalid architecture or ABI")
 	}
@@ -522,6 +596,9 @@ func validateV2Library(item library) error {
 	}
 	if err := validatePackageFields(item.ID, item.Name, item.Version, item.DownloadURL, item.SHA256, item.Size, item.Models, item.Firmware); err != nil {
 		return err
+	}
+	if !versionPattern.MatchString(item.Version) {
+		return errors.New("version is not a safe path component")
 	}
 	if item.Architecture == "" || len(item.Architecture) > 40 || item.ABI == "" || len(item.ABI) > 40 {
 		return errors.New("invalid architecture or ABI")
@@ -977,9 +1054,16 @@ func main() {
 	authTokenPath := flag.String("auth-token", "/data/prime-unlimited/auth/mutation.token", "device-owned mutation token")
 	cacheRoot := flag.String("cache-root", "/data/prime-unlimited/cache/packages", "verified package cache")
 	stagingRoot := flag.String("staging-root", "/data/prime-unlimited/staging/packages", "non-executable verified package staging")
+	root := flag.String("root", "/data/prime-unlimited", "persistent /data-only runtime root")
 	flag.Parse()
 	if !validListenAddress(*listen) {
 		log.Fatal("refusing non-loopback listen address")
+	}
+	if filepath.Clean(*root) != "/data/prime-unlimited" || !filepath.IsAbs(*root) {
+		log.Fatal("refusing runtime root outside /data/prime-unlimited")
+	}
+	if err := recoverInstall(*root); err != nil {
+		log.Fatalf("install recovery failed: %v", err)
 	}
 	state := loadVerifiedCatalog(*catalogPath, *catalogSignaturePath, *catalogTrustKeyPath)
 	if state.Status == "invalid" {
@@ -991,7 +1075,7 @@ func main() {
 	}
 	httpServer := &http.Server{
 		Addr: *listen,
-		Handler: &server{model: *model, firmware: *firmware, architecture: *architecture, abi: *abi, catalog: state, authToken: authToken,
+		Handler: &server{model: *model, firmware: *firmware, architecture: *architecture, abi: *abi, catalog: state, authToken: authToken, root: *root,
 			cacheRoot: *cacheRoot, stagingRoot: *stagingRoot, httpClient: newPackageHTTPClient()},
 		ReadHeaderTimeout: 3 * time.Second,
 		ReadTimeout:       5 * time.Second,

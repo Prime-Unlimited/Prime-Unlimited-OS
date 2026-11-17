@@ -7,6 +7,7 @@ exec "$ROOT/bin/prime-unlimited-runtime-api" \
     -firmware 5.3.0 \
     -architecture armv7l \
     -abi gnueabihf \
+    -root "$ROOT" \
     -catalog "$ROOT/catalog/catalog.json" \
     -catalog-signature "$ROOT/catalog/catalog.sig.json" \
     -catalog-trust-key "$ROOT/trust/catalog-key.json" \
