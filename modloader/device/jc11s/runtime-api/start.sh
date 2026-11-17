@@ -9,4 +9,5 @@ exec "$ROOT/bin/prime-unlimited-runtime-api" \
     -catalog-signature "$ROOT/catalog/catalog.sig.json" \
     -catalog-trust-key "$ROOT/trust/catalog-key.json" \
     -auth-token "$ROOT/auth/mutation.token" \
-    -cache-root "$ROOT/cache/packages"
+    -cache-root "$ROOT/cache/packages" \
+    -staging-root "$ROOT/staging/packages"

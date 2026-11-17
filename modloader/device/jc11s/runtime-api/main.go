@@ -79,13 +79,14 @@ type catalogSignature struct {
 }
 
 type server struct {
-	model      string
-	firmware   string
-	catalog    catalogState
-	authToken  string
-	cacheRoot  string
-	httpClient *http.Client
-	cacheMu    sync.Mutex
+	model       string
+	firmware    string
+	catalog     catalogState
+	authToken   string
+	cacheRoot   string
+	stagingRoot string
+	httpClient  *http.Client
+	cacheMu     sync.Mutex
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -127,7 +128,7 @@ func (s *server) authorizationStatus() string {
 
 func isMutationPath(path string) bool {
 	switch path {
-	case "/api/v1/cache", "/api/v1/install", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback":
+	case "/api/v1/cache", "/api/v1/stage", "/api/v1/install", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback":
 		return true
 	default:
 		return false
@@ -183,6 +184,10 @@ func decodeCacheRequest(r *http.Request) (cacheRequest, error) {
 }
 
 func (s *server) handleCache(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
 	request, err := decodeCacheRequest(r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -199,6 +204,32 @@ func (s *server) handleCache(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("package cache failed for %s", item.ID)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "package download or verification failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *server) handleStage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	request, err := decodeCacheRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	item, ok := s.catalogMod(request.ID)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "compatible catalog mod not found"})
+		return
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	result, err := stagePackage(item, s.cacheRoot, s.stagingRoot, defaultStageLimits)
+	if err != nil {
+		log.Printf("package staging failed for %s", item.ID)
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "cached package missing, invalid, or unsafe"})
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -221,6 +252,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if r.URL.Path == "/api/v1/cache" {
 			s.handleCache(w, r)
+			return
+		}
+		if r.URL.Path == "/api/v1/stage" {
+			s.handleStage(w, r)
 			return
 		}
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "mutation engine unavailable"})
@@ -696,6 +731,7 @@ func main() {
 	catalogTrustKeyPath := flag.String("catalog-trust-key", "/data/prime-unlimited/trust/catalog-key.json", "deployment-owned catalog trust key")
 	authTokenPath := flag.String("auth-token", "/data/prime-unlimited/auth/mutation.token", "device-owned mutation token")
 	cacheRoot := flag.String("cache-root", "/data/prime-unlimited/cache/packages", "verified package cache")
+	stagingRoot := flag.String("staging-root", "/data/prime-unlimited/staging/packages", "non-executable verified package staging")
 	flag.Parse()
 	if !validListenAddress(*listen) {
 		log.Fatal("refusing non-loopback listen address")
@@ -711,7 +747,7 @@ func main() {
 	httpServer := &http.Server{
 		Addr: *listen,
 		Handler: &server{model: *model, firmware: *firmware, catalog: state, authToken: authToken,
-			cacheRoot: *cacheRoot, httpClient: newPackageHTTPClient()},
+			cacheRoot: *cacheRoot, stagingRoot: *stagingRoot, httpClient: newPackageHTTPClient()},
 		ReadHeaderTimeout: 3 * time.Second,
 		ReadTimeout:       5 * time.Second,
 		WriteTimeout:      10 * time.Minute,

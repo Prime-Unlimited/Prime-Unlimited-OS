@@ -4,14 +4,14 @@ This is the small, dependency-free ARMv7 service used to make the Mod Loader
 QML operational on firmware without Python or Node. It binds only to
 `127.0.0.1:8098`, reads at most 1 MiB of catalog JSON, and initially exposes
 read-only health, catalog, installed-state, library and transaction endpoints,
-plus an authenticated verified-package cache. Installation, extraction and
-activation remain unavailable.
+plus authenticated verified-package caching and isolated ZIP staging.
+Installation and activation remain unavailable.
 
 Build from Termux:
 
 ```sh
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
-  go build -trimpath -ldflags='-s -w' -o prime-unlimited-runtime-api main.go
+  go build -trimpath -ldflags='-s -w' -o prime-unlimited-runtime-api .
 ```
 
 Install the binary as `/data/prime-unlimited/bin/prime-unlimited-runtime-api`,
@@ -72,10 +72,10 @@ device restarts.
 
 Mutation requests require exactly one `Authorization: Bearer <token>` header.
 Comparison is constant-time. Missing, duplicated, or incorrect credentials
-return HTTP 401. Correct credentials permit only the package-cache endpoint;
-installation and all other mutations return HTTP 501 `mutation engine
-unavailable`. Health output reports only `authorizationStatus: ready` and
-never returns the token or a token-derived value.
+return HTTP 401. Correct credentials permit only the package-cache and staging
+endpoints; installation and all other mutations return HTTP 501 `mutation
+engine unavailable`. Health output reports only `authorizationStatus: ready`
+and never returns the token or a token-derived value.
 
 ## Verified package cache
 
@@ -90,11 +90,31 @@ Downloads stream through a mode `0600` temporary file in the service-owned
 mode `0700` package cache. Both Content-Length (when present) and the actual
 byte count must equal the catalog size, which is capped at 128 MiB. SHA-256 is
 verified before an atomic rename to `<sha256>.zip`; partial or invalid files
-are removed. A valid existing cache file is rehashed before reuse. No archive
-is opened, extracted, executed, installed, or activated in this milestone.
-Package signatures and publisher authenticity remain a separate next step.
+are removed. A valid existing cache file is rehashed before reuse.
 
 The catalog signature authenticates which package digest and size the
 deployment approved. The cache then verifies downloaded bytes against that
 authenticated record. Individual package signatures and archive-content
 signatures remain a separate defense-in-depth step.
+
+## Isolated ZIP staging
+
+`POST /api/v1/stage` also accepts only `{"id":"catalog-mod-id"}` and never
+downloads. It requires the compatible entry from the verified catalog and its
+already cached package, then rechecks the cache file's ownership, mode, exact
+size and SHA-256 before opening it.
+
+Extraction is atomic into
+`/data/prime-unlimited/staging/packages/<sha256>`. Temporary and final
+directories are mode `0700`; every extracted file is forced to mode `0600`,
+so executable archive permissions are not retained. The extractor rejects
+absolute, parent-traversing, Windows-style, non-UTF-8, duplicate and overly
+deep paths; encrypted entries; symlinks and other special file types; path
+type conflicts; and archives exceeding entry, path, per-file or total-size
+limits. CRC/read failures leave no published stage. A private marker records
+the catalog identity and inventory, which is checked before an existing stage
+is reused.
+
+Staging does not execute package content and does not modify the installed-mod
+registry, Engine files, boot hooks or activation state. Package manifests,
+installation transactions and rollback are separate later milestones.
