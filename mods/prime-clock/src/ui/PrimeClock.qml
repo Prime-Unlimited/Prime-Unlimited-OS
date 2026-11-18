@@ -84,15 +84,20 @@ Item {
             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
             height: stopwatchMode ? 38 : parent.height
             pressAndHoldInterval: 600
-            property real originMouseX
-            property real originMouseY
+            property real originPointerX
+            property real originPointerY
             property real originPanelX
             property real originPanelY
-            onPressed: { originMouseX = mouse.x; originMouseY = mouse.y; originPanelX = panel.x; originPanelY = panel.y; suppressClick = false }
+            onPressed: {
+                var point = gesture.mapToItem(overlay, mouse.x, mouse.y)
+                originPointerX = point.x; originPointerY = point.y
+                originPanelX = panel.x; originPanelY = panel.y; suppressClick = false
+            }
             onPressAndHold: { dragging = true; suppressClick = true }
             onPositionChanged: if (dragging) {
-                panel.x = overlay.clampX(originPanelX + mouse.x - originMouseX)
-                panel.y = overlay.clampY(originPanelY + mouse.y - originMouseY)
+                var point = gesture.mapToItem(overlay, mouse.x, mouse.y)
+                panel.x = overlay.clampX(originPanelX + point.x - originPointerX)
+                panel.y = overlay.clampY(originPanelY + point.y - originPointerY)
             }
             onReleased: if (dragging) { dragging = false; overlay.positionSaveRequested(panel.x, panel.y) }
             onClicked: if (!suppressClick) stopwatchMode = !stopwatchMode

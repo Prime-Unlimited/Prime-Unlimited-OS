@@ -1,4 +1,4 @@
-# Prime Clock v0.1.0
+# Prime Clock v0.1.1
 
 Prime Clock is a compact Engine OS overlay and the reference implementation for
 Prime Unlimited overlay mods. A tap switches between local `HH:MM` time and a
@@ -10,8 +10,12 @@ position under `/data/prime-unlimited/settings/` through the Modloader API.
 
 | Device | Build target | Package validation | Modloader | Hardware |
 | --- | --- | --- | --- | --- |
-| Prime 4+ / JC11S | `armv7l`, `gnueabihf`, QtQuick 2.12, Engine OS 5.3.0 | automated | adapter implemented | pending Prime Clock test |
+| Prime 4+ / JC11S | `armv7l`, `gnueabihf`, QtQuick 2.12, Engine OS 5.3.0 | automated | install/enable/disable/launch/uninstall verified | hardware verified |
 | Prime 4 G2 / JP24 | RK3588/AArch64, `aarch64-linux-gnu.2.17` toolchain target; runtime identity, Qt and firmware unconfirmed | automated structure validation | integration prepared, not eligible | not tested |
+
+JC11S hardware verification covered visible single-instance rendering, clock and
+stopwatch touch UI, smooth long-press dragging, persisted position,
+Enable/Disable and Install/Uninstall while physical controls remained available.
 
 The JP24 package is deliberately not placed in a trusted live catalog until the
 device reports its exact Modloader ABI, firmware and Qt/QML compatibility. A
@@ -22,8 +26,8 @@ successful package build is not a hardware result.
 ```sh
 python3 mods/prime-clock/scripts/package.py --target jc11s --output dist
 python3 mods/prime-clock/scripts/package.py --target jp24 --output dist
-python3 mods/prime-clock/scripts/validate_package.py dist/prime-clock-v0.1.0-jc11s.zip --target jc11s
-python3 mods/prime-clock/scripts/validate_package.py dist/prime-clock-v0.1.0-jp24.zip --target jp24
+python3 mods/prime-clock/scripts/validate_package.py dist/prime-clock-v0.1.1-jc11s.zip --target jc11s
+python3 mods/prime-clock/scripts/validate_package.py dist/prime-clock-v0.1.1-jp24.zip --target jp24
 ```
 
 Packages are deterministic ZIPs. They contain only QML/JavaScript, an inert

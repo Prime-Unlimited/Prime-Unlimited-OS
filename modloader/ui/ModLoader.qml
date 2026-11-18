@@ -255,7 +255,10 @@ Rectangle {
                 Rectangle { width: 160; height: 52; radius: 10; color: "#b43b22"
                     Text { anchors.centerIn: parent; text: "UNINSTALL"; color: "white"; font.bold: true }
                     MouseArea { anchors.fill: parent; onClicked: {
-                        var target = pendingUninstall; pendingUninstall = ""; mutation("uninstall", target, "", null)
+                        var target = pendingUninstall; pendingUninstall = ""
+                        if (installed[target] && installed[target].enabled)
+                            mutation("disable", target, "", function(ok) { if (ok) mutation("uninstall", target, "", null) })
+                        else mutation("uninstall", target, "", null)
                     }}
                 }
             }

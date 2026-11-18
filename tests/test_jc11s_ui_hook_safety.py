@@ -22,7 +22,15 @@ def test_installer_does_not_create_a_ui_alsa_configuration():
 def test_overlay_injection_is_fixed_length_and_avoids_division_helper():
     source = (ROOT / "modloader/device/jc11s/ui-hook/prime_ui_hook.c").read_text()
     old = "        PageCacheInfo {\\n            anchors {\\n                right: parent.right\\n                bottom: parent.bottom\\n                margins: 5\\n            }\\n        }"
-    new = '        Loader{anchors.fill:parent;source:\\"/data/O\\"}'
+    new = '        Loader{anchors.fill:parent;source:\\"file:/data/O\\"}'
     assert len(new) <= len(old)
     assert "ZSTD_decompress" in source
     assert "%2147483647" not in source
+
+
+def test_modloader_tile_is_the_compact_engine_asset():
+    asset = (ROOT / "modloader/ui/assets/prime_unlimited_mod_loader.svg").read_text()
+    assert 'width="256" height="104" viewBox="0 0 256 104"' in asset
+    assert "PRIME UNLIMITED" in asset and "MOD</tspan> LOADER" in asset
+    installer = (ROOT / "modloader/device/jc11s/ui-hook/install-device.sh").read_text()
+    assert "prime_unlimited_mod_loader.svg" in installer

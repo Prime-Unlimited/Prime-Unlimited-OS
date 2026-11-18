@@ -6,6 +6,9 @@ Item {
     property var overlays: []
     property string snapshot: ""
     property string authToken: "__PRIME_UNLIMITED_AUTH_TOKEN__"
+    property bool mainScreen: typeof planckQuickView === "undefined" ? true : planckQuickView.isMainScreen
+    visible: mainScreen
+    enabled: mainScreen
 
     function authorized(request) {
         request.setRequestHeader("Authorization", "Bearer " + authToken)
@@ -49,9 +52,9 @@ Item {
         request.send()
     }
 
-    Timer { interval: 1000; repeat: true; running: true; triggeredOnStart: true; onTriggered: host.refresh() }
+    Timer { interval: 1000; repeat: true; running: host.mainScreen; triggeredOnStart: true; onTriggered: host.refresh() }
     Repeater {
-        model: host.overlays
+        model: host.mainScreen ? host.overlays : []
         delegate: Loader {
             anchors.fill: parent
             source: modelData.source

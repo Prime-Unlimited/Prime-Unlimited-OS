@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_qml_touch_drag_and_monotonic_contract():
     qml = (ROOT / "src/ui/PrimeClock.qml").read_text()
-    for value in ("pressAndHoldInterval: 600", "onPressAndHold", "clampX", "clampY", "positionSaveRequested", "/api/v1/monotonic"):
+    for value in ("pressAndHoldInterval: 600", "onPressAndHold", "mapToItem(overlay", "clampX", "clampY", "positionSaveRequested", "/api/v1/monotonic"):
         assert value in qml
 
 def test_stopwatch_logic_with_monotonic_inputs():
@@ -28,4 +28,4 @@ def test_profiles_do_not_overclaim_hardware():
     jp = json.loads((ROOT / "src/platform/jp24.json").read_text())
     assert (jc["architecture"], jc["abi"], jc["firmware"]) == ("armv7l", "gnueabihf", ["5.3.0"])
     assert (jp["architecture"], jp["abi"]) == ("aarch64", "aarch64-linux-gnu.2.17")
-    assert not jc["hardwareVerified"] and not jp["hardwareVerified"] and jp["firmware"] == []
+    assert jc["hardwareVerified"] and not jp["hardwareVerified"] and jp["firmware"] == []

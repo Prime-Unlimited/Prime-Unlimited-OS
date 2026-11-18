@@ -1,5 +1,9 @@
 # Prime Unlimited Mod Loader
 
+Overlay authors must follow [OVERLAY_MOD_DEVELOPMENT.md](OVERLAY_MOD_DEVELOPMENT.md).
+It records the verified generic host contract, packaging/lifecycle sequence,
+JC11S integration details, and mandatory Do's/Don'ts for future mods.
+
 Independent, /data-only mod management for Prime Unlimited OS.
 
 ## Status

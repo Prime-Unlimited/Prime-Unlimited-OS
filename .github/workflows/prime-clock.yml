@@ -67,7 +67,7 @@ jobs:
           stat --printf='%n %s bytes\n' *.zip > SIZES.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: prime-clock-v0.1.0-${{ matrix.target }}
+          name: prime-clock-v0.1.1-${{ matrix.target }}
           path: |
             dist/*.zip
             dist/SHA256SUMS.txt
