@@ -1,12 +1,12 @@
 # Prime Unlimited OS — Prime 4+ (JC11S) Process Documentation
 
-**Updated:** November 14, 2026 · **Status:** Technical record, **not a production-ready installation guide**.
+**Updated:** November 18, 2026 · **Status:** Technical record, **not a production-ready installation guide**.
 
 ## 1. Purpose and scope
 
-This document records the work performed on the Denon DJ Prime 4+ (JC11S): Fastboot access, the ext4 `/data` image, PRIMEBOMB V1–V4 experiments, observed results, the later successful SSH access using EngineX OS, and prerequisites for a reproducible Prime Unlimited OS installer.
+This document records the work performed on the Denon DJ Prime 4+ (JC11S): Fastboot access, the ext4 `/data` image, PRIMEBOMB V1–V4 experiments, observed results, a later successful SSH access, and prerequisites for a reproducible Prime Unlimited OS installer.
 
-**Evidence boundary:** None of the four original PRIMEBOMB builds demonstrably enabled SSH. The subsequent working EngineX installation is a separate development phase. The original V1–V4 report did not document the exact EngineX adaptation steps; a separate successful-installation report is available and should be retained as a primary reference.
+**Evidence boundary:** None of the four original PRIMEBOMB builds demonstrably enabled SSH. A subsequent working installation is treated as a separate development phase. The original V1–V4 report did not document the exact adaptation steps of that later successful configuration; a separate successful-installation report is available and should be retained as a primary reference.
 
 ## 2. Hardware and Fastboot
 
@@ -17,7 +17,7 @@ This document records the work performed on the Denon DJ Prime 4+ (JC11S): Fastb
 | SoC | Rockchip RK3288 |
 | Architecture | ARMv7 / ARM32 |
 | Firmware during V1–V4 experiments | Engine OS 5.0.4 |
-| Later reported firmware | Engine OS 5.3.0; EngineX web interface v5.3.0.2 |
+| Later reported firmware | Engine OS 5.3.0 |
 | Test device Fastboot serial | A12506258617421 |
 | Active slot | a |
 | Fastboot mode | Bootloader; `is-userspace: no` |
@@ -140,24 +140,24 @@ The setup attempted to generate a server host key, modify the root password hash
 
 **Important:** Fastboot reporting `OKAY` confirms a reported write operation; it does **not** prove that a boot payload ran successfully.
 
-## 7. Later successful EngineX SSH installation — separate phase
+## 7. Later successful SSH installation — separate phase
 
-A later installation of EngineX OS on JC11S produced the following confirmed observations:
+A later installation on JC11S produced the following confirmed observations:
 
 - Root SSH login with a private Ed25519 client key succeeded.
 - Historical example, using the device's temporary LAN address:
 
   ```sh
-  ssh -i ~/.ssh/enginex_prime4plus root@192.168.178.67
+  ssh -i ~/.ssh/prime4plus root@192.168.178.67
   ```
 
 - Shell prompt: `root@prime4plus:~#`.
-- Web interface: `http://192.168.178.67:8080`, version `v5.3.0.2`.
-- EngineX services and UI behavior were observed during the successful session.
+- Web interface was observed on port 8080.
+- Services and UI behavior were observed during the successful session.
 
-**Important distinction:** The dedicated *EngineXPRIME4PLUS.md* installation report documents the successful image creation, diagnostic repairs, and actual flashed image `userdata-diagnose.img` in more detail. Its later cleaned end-to-end procedure was **not independently rerun** as a fresh installation. The historical V1–V4 attempts must not be presented as the working EngineX procedure.
+**Important distinction:** A dedicated installation report documents the successful image creation, diagnostic repairs, and the actual flashed image in more detail. Its later cleaned end-to-end procedure was **not independently rerun** as a fresh installation. The historical V1–V4 attempts must not be presented as the working procedure.
 
-Do not assume upstream EngineX binaries or Denon firmware can be redistributed without checking licenses and permissions.
+Do not assume upstream binaries or Denon firmware can be redistributed without checking licenses and permissions.
 
 ## 8. Security and recovery decisions
 
@@ -188,11 +188,11 @@ Do not assume upstream EngineX binaries or Denon firmware can be redistributed w
 ## 10. Outstanding verification
 
 - [ ] Record and redact the complete JC11S `fastboot getvar all` output.
-- [ ] Preserve and validate the exact successful EngineX build and repair scripts.
+- [ ] Preserve and validate the exact successful build and repair scripts.
 - [ ] Confirm rights to use or redistribute required SSH/bootstrap components.
 - [ ] Verify a complete `/data` backup and recovery path.
 - [ ] Reproduce the cleaned bootstrap from scratch on JC11S.
-- [ ] Establish compatibility beyond the observed Engine OS 5.3.0 / EngineX 5.3.0.2 combination.
+- [ ] Establish compatibility beyond the observed Engine OS 5.3.0 combination.
 - [ ] Integrate JP24 findings as a **separate device profile**, not as JC11S Fastboot steps.
 - [ ] Test the desktop installer on real Windows and macOS hosts.
 - [ ] Confirm successful SSH reconnect after an additional normal device reboot.
@@ -200,7 +200,7 @@ Do not assume upstream EngineX binaries or Denon firmware can be redistributed w
 ## 11. Source record
 
 - Historical primary source: **“PRIMEBOMB V1–V4 – technische Dokumentation”**, dated November 5, 2026.
-- Later primary source: **“EngineX OS mit Root-SSH auf dem Denon DJ PRIME 4+”**, dated November 7, 2026.
+- Later primary source: successful SSH installation report, dated November 7, 2026.
 - Companion project document: `docs/BOOTSTRAP_SPEC.md`.
 
 This file is an engineering record. It is **not** a verified recovery guide or a release-ready installer procedure.
