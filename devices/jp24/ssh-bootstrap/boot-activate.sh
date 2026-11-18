@@ -50,8 +50,14 @@ chmod 0644 "$UNIT_TMP"
 mv -f "$UNIT_TMP" "$UNIT"
 
 systemctl daemon-reload
-# On an upgrade, the old hook may still have a directly forked sshd holding
-# port 2222. Let systemd retry after Engine's scheduled restart stops that
-# old process; do not let this expected bind conflict abort Mod Loader setup.
-systemctl restart prime4-mod-sshd.service || true
-logger -t prime4-mod "systemd-managed SSH service start requested on port 2222"
+# Never restart an already active listener: activation can run inside an SSH
+# session, and restarting the unit would terminate that session before the
+# remaining Mod Loader setup is reached. A legacy directly forked sshd does
+# not make this unit active, so the start path still creates the systemd-owned
+# listener and lets Restart=on-failure handle a temporary port conflict.
+if systemctl is-active --quiet prime4-mod-sshd.service; then
+    logger -t prime4-mod "systemd-managed SSH service already active on port 2222"
+else
+    systemctl start prime4-mod-sshd.service || true
+    logger -t prime4-mod "systemd-managed SSH service start requested on port 2222"
+fi
