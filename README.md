@@ -1,77 +1,44 @@
 <p align="center">
-  <img src="assets/prime-unlimited-os-brand.png" alt="Prime Unlimited OS — open-source modding platform for Denon Prime 4+ and Prime 4 G2" width="100%" />
+  <img src="assets/prime-unlimited-os-brand.png" alt="Prime Unlimited OS" width="100%" />
 </p>
 
-**Open-source modding platform for Denon DJ Prime 4+ and Prime 4 G2.**
+# Prime Unlimited OS
 
-Prime-Unlimited OS is a cross-platform desktop foundation for safely bootstrapping SSH and managing compatible mods on supported Denon DJ controllers.
+**Open-source installer for SSH bootstrapping on Denon DJ Prime 4+ and Prime 4 G2.**
 
-> **Development status:** the application supports guided setup, read-only diagnostics, and SSH key preparation. Hardware writing is deliberately disabled. The repository does not yet contain the confirmed identities, licensed payloads, or tested recovery procedures required for production flashing.
+Prime Unlimited OS is a desktop installer for Windows and macOS that flashes a custom image to the internal eMMC of supported Denon DJ controllers. It overwrites the `/data` partition and enables SSH access.
 
-## Supported devices (in development)
+The installer ships with everything required. No additional tools or runtimes need to be installed by the user.
 
-| Device | Hardware profile | Initial USB transport | SSH after setup |
-|---|---|---|---|
-| Denon DJ Prime 4+ | JC11S | Fastboot | Port 22 |
-| Denon DJ Prime 4 G2 | JP24 | imbupd | Port 2222 |
+## Supported devices
 
-## Implemented
+| Device              | Hardware profile | USB transport | Target         | SSH port |
+|---------------------|------------------|---------------|----------------|----------|
+| Denon DJ Prime 4+   | JC11S            | Fastboot      | `/data` (ext4) | 22       |
+| Denon DJ Prime 4 G2 | JP24             | imbupd        | `/data` (ext4) | 2222     |
 
-- Polished PySide6 desktop wizard with manual Prime 4+ (JC11S) and Prime 4 G2 (JP24) selection.
-- Separate read-only Fastboot and imbupd diagnostic paths with fail-closed writers.
-- Explicit handling for absent, wrong, multiple, ambiguous, and unverified devices.
-- Mandatory passphrase-protected Ed25519 generation or existing key-pair validation.
-- Host-key-pinned SSH verification service.
-- SHA-256 package validation and a strict mod manifest model with device/firmware compatibility and rollback declarations.
-- Secret-redacting diagnostics and persistent non-sensitive window settings.
-- Hardware-independent unit tests and PyInstaller configuration.
+## What the installer does
 
-## Run locally
+1. Detects the connected device and selects the correct transport.
+2. Prepares or imports a passphrase-protected Ed25519 key pair.
+3. Builds or selects a device-specific `/data` image with the public key and SSH configuration.
+4. Writes the image to the internal eMMC (overwriting `/data`).
+5. Reboots the device and verifies an authenticated SSH login.
+6. *(Mod manager unlock — under development)*
 
-Python 3.12 or newer is required. Create and activate a virtual environment, then run:
+## Download
 
-```sh
-python -m venv .venv
-# Windows PowerShell: .venv\Scripts\Activate.ps1
-# Windows Command Prompt: .venv\Scripts\activate.bat
-# macOS: source .venv/bin/activate
-python -m pip install -e .
-python -m app.main
-```
+Pre-built installers for Windows and macOS are available in the [Releases](https://github.com/Prime-Unlimited/Prime-Unlimited-OS/releases).
 
-## Tests
+## Important notes
 
-```sh
-python -m pip install -e .[dev]
-pytest
-```
+- Flashing overwrites `/data`. Settings, Wi-Fi configuration, and local library metadata are lost.
+- Only use the installer with a matching device. Never flash a JC11S image onto a JP24 (or vice versa).
+- A verified recovery path is strongly recommended before writing.
 
-Ordinary tests use fixtures and mocks and never require a controller.
-
-## Packaging
-
-Install development dependencies, then build on each target operating system:
-
-```sh
-pyinstaller packaging/prime-unlimited-os.spec
-```
-
-Sign and notarize release artifacts using project-controlled credentials. Credentials must never be committed.
-
-## Hardware blockers
-
-- **JC11S:** the exact positive Fastboot model identifier, independently reproduced bootstrap, redistributable payload, and proven backup/recovery procedure remain unavailable.
-- **JP24:** VID:PID `15e4:d014` is only transport evidence. The imbupd protocol implementation, positive model identity, redistributable ARM64 payload, and proven backup/recovery procedure remain unavailable.
-- A USB command reporting success is insufficient. Completion will require normal device operation and an authenticated, host-key-verified SSH session on port 22 (JC11S) or 2222 (JP24).
-
-See the [bootstrap specification](docs/BOOTSTRAP_SPEC.md), [device selection flow](docs/DEVICE_SELECTION.md), and [JC11S technical record](docs/JC11S_PROCESS.md).
-
-## Planned features
-
-- DOOM
-- USB Copy to SSD
-- Custom Splashscreen
+Further technical details: [Bootstrap specification](docs/BOOTSTRAP_SPEC.md) · [Device selection](docs/DEVICE_SELECTION.md) · [JC11S technical record](docs/JC11S_PROCESS.md)
 
 ## Disclaimer
 
-Unofficial community project. Not affiliated with or endorsed by Denon DJ or inMusic.
+Unofficial community project. Not affiliated with or endorsed by Denon DJ or inMusic.  
+Flashing the internal storage can brick the device and voids the warranty. Use at your own risk.
