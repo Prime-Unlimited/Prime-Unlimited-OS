@@ -1,5 +1,10 @@
 # Prime Clock catalog status
 
+The current published JC11S entry is `prime-clock-v0.1.1-jc11s.json`. It pins
+release asset `762426166`, size `2647` bytes and SHA-256
+`a01b6787824802d08c6ea27c3e17cb397a540467b3c0d7ad531591dfb925de96`.
+The adjacent signature is made by trust-root key `prime-unlimited-2026-1`.
+
 The JC11S catalog record uses the immutable GitHub release asset ID rather than
 the replaceable release filename URL. The runtime permits only GitHub API asset
 redirects to GitHub's release-asset host and still verifies exact size and
