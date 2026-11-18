@@ -34,8 +34,21 @@ mkdir -p "$(dirname -- "$SSH_ACTIVATE_TARGET")"
 cp "$SSH_ACTIVATE_SOURCE" "$SSH_ACTIVATE_TARGET"
 cp "$HERE/build/libprime-ui-hook.so" "$PU/lib/libprime-ui-hook.so"
 cp "$HERE/runengine-hooked.sh" "$PU/bin/runengine-hooked.sh"
-cp /usr/Engine/Scripts/runengine "$PU/bin/runengine.real"
-"$HERE/make-engine-wrapper.sh" /usr/Engine/Scripts/engine "$PU/bin/engine-hooked.sh"
+# Do not copy through an already active bind mount on an upgrade: that path
+# exposes our wrapper rather than the firmware launcher and would make
+# runengine.real recursively invoke itself. Preserve the previously captured
+# originals when the hook is already mounted.
+if awk '$2 == "/usr/Engine/Scripts/runengine" { found=1 } END { exit !found }' /proc/mounts; then
+    [ -s "$PU/bin/runengine.real" ] || { echo 'active runengine mount has no saved firmware launcher' >&2; exit 1; }
+else
+    cp /usr/Engine/Scripts/runengine "$PU/bin/runengine.real"
+fi
+if awk '$2 == "/usr/Engine/Scripts/engine" { found=1 } END { exit !found }' /proc/mounts; then
+    [ -x "$PU/bin/engine-hooked.sh" ] || { echo 'active engine mount has no saved wrapper' >&2; exit 1; }
+else
+    [ -s /usr/Engine/Scripts/engine ] || { echo 'firmware engine launcher missing' >&2; exit 1; }
+    "$HERE/make-engine-wrapper.sh" /usr/Engine/Scripts/engine "$PU/bin/engine-hooked.sh"
+fi
 cp "$HERE/../../jc11s/ui-hook/ControlCenterTab.qml" "$PU/ui/patches/ControlCenterTab.qml"
 cp "$HERE/../../../ui/ModLoader.qml" "$PU/ui/ModLoader.template.qml"
 cp "$HERE/../../../ui/OverlayHost.qml" "$PU/ui/OverlayHost.template.qml"
