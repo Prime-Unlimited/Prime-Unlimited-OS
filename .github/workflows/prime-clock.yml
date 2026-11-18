@@ -21,6 +21,7 @@ permissions:
 jobs:
   shared-tests:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -37,8 +38,8 @@ jobs:
         run: go test ./...
       - name: Build and inspect JC11S overlay hook
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
+          sudo apt-get update -qq
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
           modloader/device/jc11s/ui-hook/build-hook.sh /tmp/prime-ui-hook
 
   package:
