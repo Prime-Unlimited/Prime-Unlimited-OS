@@ -2,6 +2,8 @@
 
 Catalog synchronization, revision comparison, transactional updates and
 rollback are documented in [CATALOG_SYNC_AND_UPDATES.md](CATALOG_SYNC_AND_UPDATES.md).
+The separately serviced Modloader self-update path is documented in
+[updater/README.md](updater/README.md).
 
 Overlay authors must follow [OVERLAY_MOD_DEVELOPMENT.md](OVERLAY_MOD_DEVELOPMENT.md).
 It records the verified generic host contract, packaging/lifecycle sequence,

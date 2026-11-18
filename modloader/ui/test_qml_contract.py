@@ -29,6 +29,13 @@ class QmlContractTests(unittest.TestCase):
         self.assertIn("SYNC CATALOG", text)
         self.assertIn("updateAvailable", text)
 
+    def test_independent_self_updater_contract(self):
+        text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")
+        self.assertIn("127.0.0.1:8099/api/v1/status", text)
+        self.assertIn("UPDATE MODLOADER", text)
+        self.assertIn("ROLLBACK MODLOADER", text)
+        self.assertIn("updaterMutation", text)
+
     def test_enabled_mod_is_disabled_before_uninstall(self):
         text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")
         confirmation = text[text.index("var target = pendingUninstall"):]

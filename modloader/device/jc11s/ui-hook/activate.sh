@@ -89,4 +89,13 @@ if [ -x "$PU/bin/modloader-api-start.sh" ] && [ -x "$PU/bin/prime-unlimited-runt
     fi
 fi
 
+if [ -x "$PU/bin/modloader-updater-start.sh" ] && [ -x "$PU/bin/prime-unlimited-self-updater" ]; then
+    if ! systemctl is-active --quiet prime-unlimited-modloader-updater.service; then
+        systemd-run --quiet --unit=prime-unlimited-modloader-updater \
+            --property=Restart=on-failure --property=RestartSec=2s \
+            "$PU/bin/modloader-updater-start.sh" || true
+        printf "modloader: independent updater start requested\n" >>"$LOG"
+    fi
+fi
+
 exec /usr/sbin/sshd -D -e -f "$BASE/sshd_config" >>"$LOG" 2>&1

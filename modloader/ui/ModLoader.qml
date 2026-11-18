@@ -14,6 +14,7 @@ Rectangle {
     property string authToken: "__PRIME_UNLIMITED_AUTH_TOKEN__"
     property bool busy: false
     property bool developerMode: false
+    property var selfUpdate: ({"installed":{"version":"?","revision":0},"updateAvailable":false,"rollbackAvailable":false})
     property int selectedTab: 0
     property string pendingUninstall: ""
     property string statusText: "Connecting..."
@@ -63,6 +64,22 @@ Rectangle {
         getJson("/api/v1/installed", function(payload) { installed = payload.mods || ({}) })
         getJson("/api/v1/transactions", function(payload) { transactions = payload.transactions || [] })
         getJson("/api/v1/safety", function(payload) { safety = payload }, true)
+        refreshSelfUpdate()
+    }
+
+    function refreshSelfUpdate() {
+        var request = new XMLHttpRequest(); request.timeout = 4000
+        request.onreadystatechange = function() { if (request.readyState === XMLHttpRequest.DONE && request.status === 200) { try { selfUpdate = JSON.parse(request.responseText) } catch (e) {} } }
+        request.open("GET", "http://127.0.0.1:8099/api/v1/status"); request.send()
+    }
+
+    function updaterMutation(action) {
+        if (!authToken || busy) return
+        var request = new XMLHttpRequest(); request.timeout = 720000; busy = true
+        request.onreadystatechange = function() { if (request.readyState !== XMLHttpRequest.DONE) return; busy = false; try { var payload=JSON.parse(request.responseText); statusText=request.status===200 ? "Modloader " + action + " completed" : (payload.error || "Self-update failed") } catch(e) { statusText="Invalid updater response" }; refreshSelfUpdate() }
+        request.onerror = function() { busy=false; statusText="Self-updater unavailable" }
+        request.open("POST", "http://127.0.0.1:8099/api/v1/" + action)
+        request.setRequestHeader("Authorization", "Bearer " + authToken); request.send()
     }
 
     function mutation(action, id, version, done) {
@@ -156,6 +173,17 @@ Rectangle {
             color: "#f4f2ee"
             font.pixelSize: 27
             font.bold: true
+        }
+        Text {
+            x: 26; y: 61; color: "#aab0b8"; font.pixelSize: 12
+            text: "v" + selfUpdate.installed.version + " r" + selfUpdate.installed.revision
+        }
+        Rectangle {
+            visible: selfUpdate.updateAvailable || selfUpdate.rollbackAvailable
+            width: 154; height: 46; radius: 10; x: 520; y: 20
+            color: selfUpdate.updateAvailable ? "#d77921" : "#5a456b"
+            Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 12; font.bold: true; text: selfUpdate.updateAvailable ? "UPDATE MODLOADER" : "ROLLBACK MODLOADER" }
+            MouseArea { anchors.fill: parent; enabled: !busy; onClicked: updaterMutation(selfUpdate.updateAvailable ? "update" : "rollback") }
         }
         Rectangle {
             width: 94; height: 54; radius: 12
