@@ -37,10 +37,11 @@ jobs:
         env: {GO111MODULE: 'off'}
         run: go test ./...
       - name: Build and inspect JC11S overlay hook
-        run: |
-          sudo apt-get update -qq
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
-          modloader/device/jc11s/ui-hook/build-hook.sh /tmp/prime-ui-hook
+        env:
+          CC: clang
+          CFLAGS: --target=armv7a-linux-gnueabihf
+          READELF: readelf
+        run: modloader/device/jc11s/ui-hook/build-hook.sh /tmp/prime-ui-hook
 
   package:
     needs: shared-tests

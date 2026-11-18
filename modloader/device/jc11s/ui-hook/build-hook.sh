@@ -5,7 +5,10 @@ OUT=${1:-"$HERE/build"}
 mkdir -p "$OUT"
 CC=${CC:-arm-linux-gnueabihf-gcc}
 READELF=${READELF:-arm-linux-gnueabihf-readelf}
-"$CC" -shared -fPIC -Os -nostdlib \
+CFLAGS=${CFLAGS:-}
+# CFLAGS is intentionally word-split so CI can select Clang's target triple.
+# shellcheck disable=SC2086
+"$CC" $CFLAGS -shared -fPIC -Os -nostdlib \
     -Wl,-soname,libprime-ui-hook.so \
     -o "$OUT/libprime-ui-hook.so" "$HERE/prime_ui_hook.c"
 "$READELF" -h "$OUT/libprime-ui-hook.so" | grep -q 'Class:.*ELF32'
