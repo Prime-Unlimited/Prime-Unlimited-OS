@@ -109,7 +109,13 @@ def build(
     ):
         content, mode = files[name]
         files[name] = (content.replace(b"\r\n", b"\n"), mode)
-    directories = {"prime-ssh/hostkeys"}
+    # ConnMan stores persistent WiFi service settings under /var/lib/connman.
+    # Both JC11S /data-backed var/lib layouts are populated in the ext4 image.
+    directories = {
+        "prime-ssh/hostkeys",
+        "system/var-lib/connman",
+        "system/var/overlay/lib/connman",
+    }
     for name in files:
         directories.update(str(p) for p in Path(name).parents if str(p) != ".")
     with tempfile.TemporaryDirectory(prefix="prime-ssh-") as temporary:

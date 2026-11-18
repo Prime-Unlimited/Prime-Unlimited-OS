@@ -50,3 +50,10 @@ def test_changed_host_key_requires_explicit_approval():
     assert "Verify the device and fingerprint independently" in source
     assert "QMessageBox.StandardButton.No" in source
     assert "enroll_host_key(host, 22, expected, known_hosts)" in source
+
+
+def test_jc11s_image_precreates_connman_storage_on_data():
+    source = (ROOT / "core/jc11s_image.py").read_text()
+    assert "system/var-lib/connman" in source
+    assert "system/var/overlay/lib/connman" in source
+    assert "mkdir -p /var/lib/connman" not in source
