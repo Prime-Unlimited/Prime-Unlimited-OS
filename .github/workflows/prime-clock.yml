@@ -39,7 +39,7 @@ jobs:
       - name: Build and inspect JC11S overlay hook
         env:
           CC: clang
-          CFLAGS: --target=armv7a-linux-gnueabihf
+          CFLAGS: --target=armv7a-linux-gnueabihf -fuse-ld=lld
           READELF: readelf
         run: modloader/device/jc11s/ui-hook/build-hook.sh /tmp/prime-ui-hook
 
