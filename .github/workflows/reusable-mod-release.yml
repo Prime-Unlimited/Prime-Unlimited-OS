@@ -1,0 +1,201 @@
+name: Reusable cross-device mod release
+
+on:
+  workflow_call:
+    inputs:
+      mod-id:
+        description: Stable lowercase artifact and release name
+        required: true
+        type: string
+      mod-dir:
+        description: Repository directory containing VERSION, tests and scripts
+        required: true
+        type: string
+      release-title:
+        description: Human-readable GitHub Release title
+        required: true
+        type: string
+      tag-prefix:
+        description: Release tag prefix ending in v
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        name: Read the shared mod version
+        env:
+          MOD_DIR: ${{ inputs.mod-dir }}
+        run: echo "value=$(tr -d '\r\n' < "$MOD_DIR/VERSION")" >> "$GITHUB_OUTPUT"
+
+  shared-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.24.x'}
+      - run: python -m pip install pytest
+      - name: Test the shared mod source and UI contracts
+        env:
+          MOD_DIR: ${{ inputs.mod-dir }}
+        run: python -m pytest -q "$MOD_DIR/tests" modloader/ui
+      - name: Test the shared Mod Loader runtime
+        working-directory: modloader/device/jc11s/runtime-api
+        env: {GO111MODULE: 'off'}
+        run: go test ./...
+
+  hook-builds:
+    name: Build ${{ matrix.bits }}-bit ${{ matrix.target }} UI hook
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: jc11s
+            bits: 32
+          - target: jp24
+            bits: 64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        if: matrix.target == 'jp24'
+        with: {version: '0.14.1'}
+      - name: Build JC11S overlay hook
+        if: matrix.target == 'jc11s'
+        env:
+          CC: clang
+          CFLAGS: --target=armv7a-linux-gnueabihf -fuse-ld=lld
+          READELF: readelf
+        run: modloader/device/jc11s/ui-hook/build-hook.sh dist
+      - name: Build JP24 overlay hook
+        if: matrix.target == 'jp24'
+        env:
+          PRIME_UI_HOOK_PATCH: '1'
+        run: modloader/device/jp24/ui-hook/build-hook.sh dist
+      - name: Record hook identity
+        run: |
+          file dist/libprime-ui-hook.so
+          sha256sum dist/libprime-ui-hook.so > dist/libprime-ui-hook.so.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prime-ui-hook-${{ matrix.bits }}bit-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            dist/libprime-ui-hook.so
+            dist/libprime-ui-hook.so.sha256
+          if-no-files-found: error
+
+  package:
+    needs: [prepare, shared-tests, hook-builds]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: jc11s
+            bits: 32
+          - target: jp24
+            bits: 64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the target package twice
+        env:
+          MOD_DIR: ${{ inputs.mod-dir }}
+        run: |
+          python3 "$MOD_DIR/scripts/package.py" --target "${{ matrix.target }}" --output dist/a
+          python3 "$MOD_DIR/scripts/package.py" --target "${{ matrix.target }}" --output dist/b
+          cmp dist/a/*.zip dist/b/*.zip
+          mv dist/a/*.zip dist/
+      - name: Validate package and target metadata
+        env:
+          MOD_DIR: ${{ inputs.mod-dir }}
+        run: python3 "$MOD_DIR/scripts/validate_package.py" dist/*.zip --target "${{ matrix.target }}"
+      - name: Produce target-specific immutable metadata
+        run: |
+          cd dist
+          sha256sum *.zip > "SHA256SUMS-${{ matrix.target }}.txt"
+          stat --printf='%n %s bytes\n' *.zip > "SIZES-${{ matrix.target }}.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.mod-id }}-v${{ needs.prepare.outputs.version }}-${{ matrix.bits }}bit-${{ matrix.target }}
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS-${{ matrix.target }}.txt
+            dist/SIZES-${{ matrix.target }}.txt
+          if-no-files-found: error
+
+  shared-payload:
+    name: Verify one source payload across targets
+    needs: [prepare, package]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ inputs.mod-id }}-v${{ needs.prepare.outputs.version }}-*
+          path: packages
+          merge-multiple: true
+      - name: Compare shared files in 32- and 64-bit packages
+        run: |
+          python3 - <<'PY'
+          import glob, hashlib, zipfile
+
+          packages = sorted(glob.glob("packages/*.zip"))
+          if len(packages) != 2:
+              raise SystemExit(f"expected two target packages, found {packages}")
+
+          shared = {}
+          for package in packages:
+              with zipfile.ZipFile(package) as archive:
+                  payload = {
+                      name: hashlib.sha256(archive.read(name)).hexdigest()
+                      for name in archive.namelist()
+                      if not name.endswith("/platform.json")
+                  }
+              if shared and payload != shared:
+                  raise SystemExit("target packages contain different mod source payloads")
+              shared = payload
+          print("shared mod payload is identical across 32- and 64-bit targets")
+          PY
+
+  release:
+    if: startsWith(github.ref, format('refs/tags/{0}', inputs.tag-prefix))
+    needs: [prepare, package, shared-payload]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ inputs.mod-id }}-v${{ needs.prepare.outputs.version }}-*
+          path: release
+          merge-multiple: true
+      - name: Verify tag matches the shared source version
+        run: test "$GITHUB_REF_NAME" = "${{ inputs.tag-prefix }}${{ needs.prepare.outputs.version }}"
+      - name: Consolidate release checksums
+        run: |
+          cd release
+          sha256sum *.zip | sort > "${{ inputs.mod-id }}-SHA256SUMS.txt"
+          stat --printf='%n %s bytes\n' *.zip | sort > "${{ inputs.mod-id }}-SIZES.txt"
+      - name: Publish immutable tag assets
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          release/*.zip
+          "release/${{ inputs.mod-id }}-SHA256SUMS.txt"
+          "release/${{ inputs.mod-id }}-SIZES.txt"
+          --repo "$GITHUB_REPOSITORY"
+          --verify-tag
+          --title "${{ inputs.release-title }} ${GITHUB_REF_NAME#${{ inputs.tag-prefix }}}"
+          --notes "Unsigned 32- and 64-bit device packages built from one shared mod source. Trusted catalog signing is a separate authorized step."
