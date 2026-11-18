@@ -39,8 +39,11 @@ that the JC11S hook was verified against - confirmed live via
 - The real patch build displayed the Control Center tile and opened the
   Mod Loader screen on JP24.
 - The owner reports that the UI Mod Loader remained available across a
-  device reboot. A repeatable clean-install verification should still be
-  recorded before treating this as a release-ready installer path.
+  device reboot. On 2026-11-18, after installing this combined activation
+  path and completing a full device reboot, the Mod Loader tile was visible
+  and usable while key-authenticated SSH was active on port 2222. A second
+  clean-install reproduction should still be recorded before treating this
+  as a release-ready installer path.
 - Restarting `engine.service` kills an sshd process forked directly by the
   ALSA hook. `activate-jp24.sh` now starts a separate systemd-managed SSH
   unit before scheduling the Engine restart. The unit retries a temporary
