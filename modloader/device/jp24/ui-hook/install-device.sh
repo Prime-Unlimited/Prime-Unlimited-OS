@@ -21,7 +21,7 @@ grep -q 'JP24' /sys/firmware/devicetree/base/inmusic,product-code 2>/dev/null ||
 [ -s "$HERE/build/libprime-ui-hook.so" ] || { echo 'run PRIME_UI_HOOK_PATCH=1 build-hook.sh first' >&2; exit 1; }
 [ -s "$SSH_ACTIVATE_SOURCE" ] || { echo 'JP24 systemd SSH activation script is missing' >&2; exit 1; }
 [ -s /usr/Engine/Scripts/runengine ] || { echo 'firmware runengine missing' >&2; exit 1; }
-[ "$(wc -c < "$HERE/../jc11s/ui-hook/ControlCenterTab.qml")" -le 1156 ] || {
+[ "$(wc -c < "$HERE/../../jc11s/ui-hook/ControlCenterTab.qml")" -le 1156 ] || {
     echo 'ControlCenterTab.qml exceeds the verified qrc slot' >&2; exit 1;
 }
 
@@ -32,7 +32,7 @@ cp "$HERE/build/libprime-ui-hook.so" "$PU/lib/libprime-ui-hook.so"
 cp "$HERE/runengine-hooked.sh" "$PU/bin/runengine-hooked.sh"
 cp /usr/Engine/Scripts/runengine "$PU/bin/runengine.real"
 "$HERE/make-engine-wrapper.sh" /usr/Engine/Scripts/engine "$PU/bin/engine-hooked.sh"
-cp "$HERE/../jc11s/ui-hook/ControlCenterTab.qml" "$PU/ui/patches/ControlCenterTab.qml"
+cp "$HERE/../../jc11s/ui-hook/ControlCenterTab.qml" "$PU/ui/patches/ControlCenterTab.qml"
 cp "$HERE/../../../ui/ModLoader.qml" "$PU/ui/ModLoader.qml"
 cp "$HERE/../../../ui/assets/prime_unlimited_mod_loader.svg" "$PU/ui/prime_unlimited_mod_loader.svg"
 cp "$HERE/activate-jp24.sh" "$PU/bin/activate-jp24.sh"
