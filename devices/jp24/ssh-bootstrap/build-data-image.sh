@@ -30,7 +30,7 @@ for cmd in mke2fs debugfs; do
     }
 done
 
-for file in "$SCRIPT_DIR/alsa-boot-hook.c" "$SCRIPT_DIR/99-prime4-mod.conf"; do
+for file in "$SCRIPT_DIR/alsa-boot-hook.c" "$SCRIPT_DIR/99-prime4-mod.conf" "$SCRIPT_DIR/boot-activate.sh"; do
     [[ -f "$file" ]] || { echo "Missing source file: $file" >&2; exit 1; }
 done
 
@@ -49,8 +49,10 @@ else
 fi
 
 cp "$SCRIPT_DIR/99-prime4-mod.conf" "$TMP_DIR/99-prime4-mod.conf"
+cp "$SCRIPT_DIR/boot-activate.sh" "$TMP_DIR/boot-activate.sh"
 cp "$PUBLIC_KEY" "$TMP_DIR/authorized_keys"
 chmod 0644 "$TMP_DIR/99-prime4-mod.conf" "$TMP_DIR/libalsa-boot-hook.so"
+chmod 0755 "$TMP_DIR/boot-activate.sh"
 chmod 0600 "$TMP_DIR/authorized_keys"
 
 mkdir -p "$(dirname -- "$IMAGE")"
@@ -77,9 +79,11 @@ debugfs -w "$IMAGE" <<EOF >/dev/null 2>&1
 write $TMP_DIR/99-prime4-mod.conf system/var-lib/alsa/conf.d/99-prime4-mod.conf
 write $TMP_DIR/99-prime4-mod.conf system/var/overlay/lib/alsa/conf.d/99-prime4-mod.conf
 write $HOOK_SO prime4-mod/lib/libalsa-boot-hook.so
+write $TMP_DIR/boot-activate.sh prime4-mod/boot-activate.sh
 write $TMP_DIR/authorized_keys prime4-mod/authorized_keys
 set_inode_field system/var/overlay/lib/alsa/conf.d/99-prime4-mod.conf mode 0100644
 set_inode_field prime4-mod/lib/libalsa-boot-hook.so mode 0100755
+set_inode_field prime4-mod/boot-activate.sh mode 0100755
 set_inode_field prime4-mod/authorized_keys mode 0100600
 EOF
 
