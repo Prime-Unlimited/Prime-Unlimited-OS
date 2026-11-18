@@ -39,13 +39,18 @@ that the JC11S hook was verified against - confirmed live via
 - The real patch build displayed the Control Center tile and opened the
   Mod Loader screen on JP24.
 - The owner reports that the UI Mod Loader remained available across a
-  device reboot. The activation chain still needs repeatable verification
-  from a clean installation and fresh boot.
+  device reboot. A repeatable clean-install verification should still be
+  recorded before treating this as a release-ready installer path.
 - Restarting `engine.service` kills an sshd process forked directly by the
   ALSA hook. `activate-jp24.sh` now starts a separate systemd-managed SSH
   unit before scheduling the Engine restart. The unit retries a temporary
-  port-2222 conflict with the old direct sshd and is designed to remain
-  outside Engine's cgroup. This handoff needs hardware verification.
+  port-2222 conflict with the old direct sshd and remains outside Engine's
+  cgroup. This handoff was verified on real JP24 hardware on 2026-11-18:
+  the installer-triggered Engine restart briefly closed the original SSH
+  session, the systemd service recovered, and key-authenticated SSH worked.
+  After a complete device reboot the service was recreated under
+  `/system.slice/prime4-mod-sshd.service`, listened on port 2222, and again
+  accepted the enrolled public key.
 
 ## Build
 
@@ -85,13 +90,15 @@ restart). Before the restart it starts `/data/prime4-mod/boot-activate.sh`,
 which creates `/run/systemd/system/prime4-mod-sshd.service`. That separate
 unit owns the port-2222 listener and is designed to survive Engine restarts.
 On a legacy installation, the directly forked sshd can briefly hold port
-2222 while the service retries; the Engine restart should end that conflict.
-Verify both the unit and authenticated SSH after installation.
+2222 while the service retries; the Engine restart ends that conflict. The
+hardware verification observed three retries before the service became
+active. The generated unit is intentionally `disabled` because it lives in
+`/run`; the persistent ALSA hook recreates and starts it on every boot.
 
 ## Next step
 
-Run `install-device.sh` on a real JP24, then reboot the device and confirm
-via `verify-device.sh` that the SSH unit and Mod Loader tile come up
-automatically, with no manual `/run` drop-in needed. The mod-management Go runtime-api backend
+For a fresh firmware or clean `/data` image, run `install-device.sh`, reboot,
+and confirm via `verify-device.sh` that the SSH unit and Mod Loader tile
+come up automatically. The mod-management Go runtime-api backend
 (`modloader/device/jc11s/runtime-api/`) has not been ported to aarch64
 yet - `activate-jp24.sh` deliberately does not try to start it.
