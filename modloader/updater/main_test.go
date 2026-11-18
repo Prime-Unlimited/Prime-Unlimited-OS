@@ -29,6 +29,38 @@ func TestSignedManifestAndTamperDetection(t *testing.T) {
 	}
 }
 
+func TestPublishedManifestSignatureAndDeviceIsolation(t *testing.T) {
+	manifestData, e := os.ReadFile(filepath.Join("..", "update", "manifest.json"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	signatureData, e := os.ReadFile(filepath.Join("..", "update", "manifest.sig.json"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	trustData, e := os.ReadFile(filepath.Join("..", "catalog", "trust", "prime-unlimited-2026-1.json"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	m, e := verify(manifestData, signatureData, trustData)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if m.Version != "0.2.0" || m.Revision != 3 || len(m.Artifacts) != 2 {
+		t.Fatalf("manifest=%#v", m)
+	}
+	seen := map[string]bool{}
+	for _, a := range m.Artifacts {
+		if seen[a.Model] || a.Size < 1024 || len(a.SHA256) != 64 {
+			t.Fatalf("artifact=%#v", a)
+		}
+		seen[a.Model] = true
+	}
+	if !seen["JC11S"] || !seen["JP24"] {
+		t.Fatal("device artifact missing")
+	}
+}
+
 func bundle(t *testing.T, extra string) []byte {
 	t.Helper()
 	var b bytes.Buffer
