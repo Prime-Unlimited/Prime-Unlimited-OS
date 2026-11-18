@@ -1,10 +1,8 @@
-<div align="center">
-
-<img width="2560" height="1280" alt="Prime Unlimited OS Brand-selection" src="https://github.com/user-attachments/assets/28a3cae4-cba6-4c0a-acb5-51b60588c0b4" />
+<p align="center">
+  <img src="assets/prime-unlimited-os-brand.png" alt="Prime Unlimited OS — open-source modding platform for Denon Prime 4+ and Prime 4 G2" width="100%" />
+</p>
 
 **Open-source modding platform for Denon DJ Prime 4+ and Prime 4 G2.**
-
-</div>
 
 Prime-Unlimited OS is a cross-platform desktop foundation for safely bootstrapping SSH and managing compatible mods on supported Denon DJ controllers.
 
@@ -67,6 +65,12 @@ Sign and notarize release artifacts using project-controlled credentials. Creden
 - A USB command reporting success is insufficient. Completion will require normal device operation and an authenticated, host-key-verified SSH session on port 22 (JC11S) or 2222 (JP24).
 
 See the [bootstrap specification](docs/BOOTSTRAP_SPEC.md), [device selection flow](docs/DEVICE_SELECTION.md), and [JC11S technical record](docs/JC11S_PROCESS.md).
+
+## Planned features
+
+- DOOM
+- USB Copy to SSD
+- Custom Splashscreen
 
 ## Disclaimer
 
