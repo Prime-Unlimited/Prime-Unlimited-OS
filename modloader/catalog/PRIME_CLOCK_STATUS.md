@@ -10,10 +10,15 @@ the replaceable release filename URL. The runtime permits only GitHub API asset
 redirects to GitHub's release-asset host and still verifies exact size and
 SHA-256 before staging.
 
-JP24 is intentionally absent from the trusted catalog. The repository confirms
-the RK3588/AArch64 toolchain target `aarch64-linux-gnu.2.17`, but not the device's
-Modloader runtime ABI identity, firmware string, QtQuick version or working
-overlay adapter. Publishing guessed compatibility would violate fail-closed
-device selection. Its package is built and structurally validated by CI and can
-be cataloged under the separate ID `prime-clock-jp24` when those values are read
-from real hardware.
+The signed `prime-clock-v0.1.1-jp24.json` is a hardware-test catalog, not a
+production verification claim. Real JP24 hardware confirmed the exact runtime
+identity (`JP24`, Engine OS `5.3.0`, `aarch64`, `gnu`), persistent runtime API,
+Mod Loader tile and screen. CI reproducibly builds and validates the separate
+JP24 package under ID `prime-clock-jp24`.
+
+The JP24 overlay injection and Prime Clock rendering still require their final
+live hardware test. Until the overlay is visibly exercised through install,
+enable, drag/persistence, disable and uninstall, report JP24 as
+Modloader-compatible and hardware-test-ready, not as a hardware-verified Prime
+Clock overlay. The separate package identity prevents JC11S bytes from being
+selected on JP24 and vice versa.
