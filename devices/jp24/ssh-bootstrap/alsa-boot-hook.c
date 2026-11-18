@@ -10,9 +10,11 @@
  * triggering dlopen() of this library.
  *
  * Confirmed end to end on real hardware, fully automatically on a fresh
- * flash and reboot: the hook fires, forks sshd directly (no shell, no
- * systemd unit needed), and a real authenticated SSH login with the
- * enrolled key succeeds. Four things had to be exactly right, each of
+ * flash and reboot: the hook fires, launches boot-activate.sh, and a
+ * systemd-managed sshd service accepts an authenticated login with the
+ * enrolled key. Keeping sshd in its own systemd unit matters because an
+ * Engine restart can kill processes started in Engine's cgroup. Four
+ * things had to be exactly right, each of
  * which failed completely silently when wrong:
  *
  * 1. Build for glibc, not musl ("-target aarch64-linux-gnu.2.17", not
@@ -26,22 +28,9 @@
  *    revisions without these broke the device's LED/button control
  *    (shared ALSA symbol namespace with Engine's own code) even though
  *    the hook itself still loaded.
- * 3. sshd refuses to start without its privilege-separation directory,
- *    which systemd's sshd.service normally creates via tmpfiles.d before
- *    ever starting sshd - "Missing privilege separation directory:
- *    /var/run/sshd", logged only to sshd's own stderr, which nothing was
- *    capturing by default. sshd exits immediately (visible as a
- *    <defunct> zombie), fork() and execl() both still "succeed" from
- *    this code's point of view, and the port simply never opens. mkdir
- *    it first.
- * 4. execl()'s argv[0] for sshd MUST be the absolute path
- *    ("/usr/sbin/sshd"), not just "sshd" - sshd re-execs itself for
- *    privilege separation and refuses with "sshd re-exec requires
- *    execution with an absolute path" otherwise, again only visible on
- *    its own stderr. This is also why running the identical command
- *    manually from an interactive shell always worked during debugging:
- *    a shell sets argv[0] to exactly what was typed, which was always
- *    the full path - the bug was specific to the automatic path.
+ * 3. boot-activate.sh creates /var/run/sshd before starting the unit.
+ * 4. The systemd unit invokes /usr/sbin/sshd by its absolute path, as
+ *    required for sshd privilege separation.
  *
  * fork()/execve() from inside this hook are NOT blocked (no seccomp on
  * this device) - confirmed by the above actually working end to end.
@@ -57,13 +46,11 @@
 const char _prime4_mod_alsa_hook_dlsym_config_hook_001[] = "ALSA_0.9";
 const char _snd_config_hook_prime4_mod_alsa_hook_dlsym_config_hook_001[] = "ALSA_0.9";
 
-static void start_sshd(void) {
+static void start_ssh_service(void) {
     pid_t pid = fork();
     if (pid != 0)
         return;
     (void)setsid();
-
-    mkdir("/var/run/sshd", 0755);
 
     int devnull = open("/dev/null", O_RDWR);
     if (devnull >= 0) {
@@ -77,18 +64,7 @@ static void start_sshd(void) {
      * kill the process with SIGPIPE before it gets a chance to run. */
     signal(SIGPIPE, SIG_IGN);
 
-    execl("/usr/sbin/sshd", "/usr/sbin/sshd",
-          "-D",
-          "-f", "/dev/null",
-          "-o", "HostKey /etc/ssh/ssh_host_ed25519_key",
-          "-o", "AuthorizedKeysFile /data/prime4-mod/authorized_keys",
-          "-o", "PermitRootLogin yes",
-          "-o", "PubkeyAuthentication yes",
-          "-o", "PasswordAuthentication no",
-          "-o", "KbdInteractiveAuthentication no",
-          "-o", "StrictModes no",
-          "-o", "Port 2222",
-          (char *)0);
+    execl("/bin/sh", "/bin/sh", "/data/prime4-mod/boot-activate.sh", (char *)0);
     _exit(127);
 }
 
@@ -103,7 +79,7 @@ static void activate_once(void) {
     if (stat("/data/prime4-mod/authorized_keys", &st) != 0 || st.st_size == 0)
         return;
 
-    start_sshd();
+    start_ssh_service();
 }
 
 #define MODLOADER_STAMP "/run/prime4-mod-ui-activated"

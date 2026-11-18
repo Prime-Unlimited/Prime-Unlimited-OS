@@ -31,9 +31,13 @@ test into `core/ssh_service.py`. Not yet wired: the mod-manager flow
 3. The conf.d file's `hook_func` + `@hooks` block `dlopen()`s
    `libalsa-boot-hook.so` (built from `alsa-boot-hook.c`) and calls
    `prime4_mod_alsa_hook()`, which runs as root.
-4. That hook forks and `execl()`s `sshd` directly (no shell script, no
-   systemd unit) on port 2222 - port 22 is occupied by inMusic's own
-   sshd, which only accepts their CA-signed certs.
+4. The ALSA hook initially forks `sshd` on port 2222 so the first SSH
+   connection is available. When the Mod Loader is installed, its early
+   boot activation starts `boot-activate.sh`, which hands SSH to the
+   separate `prime4-mod-sshd.service` systemd unit before restarting
+   `engine.service`. This keeps sshd outside Engine's process cgroup, so
+   the UI hook's Engine restart does not take SSH down. Port 22 remains
+   occupied by inMusic's own sshd, which accepts only its CA-signed certs.
 
 Four bugs blocked this for a long time, each silent by default - sshd and
 ALSA both just do nothing observable rather than report an error anyone
@@ -74,8 +78,10 @@ to be the actual blocker once the bugs above were fixed.
 
 ## Files
 
-- `ssh-bootstrap/alsa-boot-hook.c` - the ALSA hook shared library (also
-  starts sshd directly - no separate boot script needed)
+- `ssh-bootstrap/alsa-boot-hook.c` - the ALSA hook shared library that
+  starts the first SSH listener and the persistent Mod Loader activation
+- `ssh-bootstrap/boot-activate.sh` - creates and starts the independent
+  systemd SSH service on port 2222
 - `ssh-bootstrap/99-prime4-mod.conf` - the ALSA conf.d file
 - `ssh-bootstrap/build-data-image.sh` - builds the ext4 `/data` image
   (macOS, needs `e2fsprogs` and either `zig` or `aarch64-linux-gnu-gcc`)

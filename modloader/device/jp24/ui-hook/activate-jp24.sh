@@ -14,9 +14,19 @@ set -eu
 PU=/data/prime-unlimited
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 LOG="$PU/logs/activation.log"
+SSH_ACTIVATE=/data/prime4-mod/boot-activate.sh
 [ "$(id -u)" = 0 ] || exit 1
 
 mkdir -p "$PU/logs"
+
+# Hand SSH to systemd before restarting Engine. The existing hook starts an
+# early sshd directly; that process can be killed with Engine's cgroup. The
+# dedicated unit retries a temporary port conflict and survives the restart.
+if [ -x "$SSH_ACTIVATE" ]; then
+    "$SSH_ACTIVATE" >>"$LOG" 2>&1 || printf "ui-hook(jp24): SSH service setup reported an error\n" >>"$LOG"
+else
+    printf "ui-hook(jp24): SSH service script missing; keeping existing SSH startup\n" >>"$LOG"
+fi
 
 # Install the preload path before engine.service executes on early ALSA
 # activation - same two-bind-mount approach verified on JC11S.
