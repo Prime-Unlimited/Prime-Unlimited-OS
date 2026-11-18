@@ -45,17 +45,22 @@ func writeAtomicPrivateFile(path string, data []byte) error {
 }
 
 func provisionAuthorizedUI(root, token string) error {
-	templatePath := filepath.Join(root, "ui", "ModLoader.template.qml")
-	template, err := readOwnedFile(templatePath, 1024*1024, "manager UI template")
-	if os.IsNotExist(err) {
-		return nil
+	for _, name := range []string{"ModLoader", "OverlayHost"} {
+		templatePath := filepath.Join(root, "ui", name+".template.qml")
+		template, err := readOwnedFile(templatePath, 1024*1024, name+" UI template")
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if bytes.Count(template, uiAuthorizationMarker) != 1 {
+			return errors.New(name + " UI template has invalid authorization marker")
+		}
+		authorized := bytes.Replace(template, uiAuthorizationMarker, []byte(token), 1)
+		if err := writeAtomicPrivateFile(filepath.Join(root, "ui", name+".qml"), authorized); err != nil {
+			return err
+		}
 	}
-	if err != nil {
-		return err
-	}
-	if bytes.Count(template, uiAuthorizationMarker) != 1 {
-		return errors.New("manager UI template has invalid authorization marker")
-	}
-	authorized := bytes.Replace(template, uiAuthorizationMarker, []byte(token), 1)
-	return writeAtomicPrivateFile(filepath.Join(root, "ui", "ModLoader.qml"), authorized)
+	return nil
 }

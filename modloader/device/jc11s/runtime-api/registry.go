@@ -24,6 +24,7 @@ type installedMod struct {
 	Architecture  string       `json:"architecture"`
 	ABI           string       `json:"abi"`
 	Entrypoint    string       `json:"entrypoint"`
+	Overlay       string       `json:"overlay,omitempty"`
 	Root          string       `json:"root"`
 	Enabled       bool         `json:"enabled"`
 	InstalledAt   int64        `json:"installedAt"`
@@ -200,6 +201,12 @@ func validateRegistryState(state registryState) error {
 		if validateDependencies("installed dependencies", item.Dependencies) != nil || validateListOptional("installed conflicts", item.Conflicts) != nil {
 			return errors.New("invalid installed dependency metadata")
 		}
+		if item.Overlay != "" {
+			overlay, err := safeArchivePath(item.Overlay, defaultStageLimits)
+			if err != nil || overlay != item.Overlay || !strings.HasSuffix(item.Overlay, ".qml") {
+				return errors.New("invalid installed overlay")
+			}
+		}
 		for _, dep := range item.Dependencies {
 			if dep.Type != "" && dep.Type != "mod" {
 				return errors.New("installed library dependency is unsupported")
@@ -349,6 +356,13 @@ func planActivation(state registryState, id string, enabled bool, root string) (
 		info, statErr := os.Lstat(entrypoint)
 		if statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o600 {
 			return fmt.Errorf("installed entrypoint for %s is missing or unsafe", current)
+		}
+		if item.Overlay != "" {
+			overlay := filepath.Join(root, filepath.FromSlash(item.Root), filepath.FromSlash(item.Overlay))
+			overlayInfo, overlayErr := os.Lstat(overlay)
+			if overlayErr != nil || !overlayInfo.Mode().IsRegular() || overlayInfo.Mode()&os.ModeSymlink != 0 || overlayInfo.Mode().Perm() != 0o600 {
+				return fmt.Errorf("installed overlay for %s is missing or unsafe", current)
+			}
 		}
 		visiting[current] = true
 		deps := append([]dependency{}, item.Dependencies...)
@@ -541,7 +555,7 @@ func installDisabledMod(item mod, catalogID, cacheRoot, stagingRoot, root string
 	}
 	relativeTarget := filepath.ToSlash(filepath.Join("mods", "installed", item.ID, item.Version))
 	next.Mods[item.ID] = installedMod{ID: item.ID, Version: item.Version, PackageSHA256: item.SHA256, CatalogID: catalogID,
-		Architecture: item.Architecture, ABI: item.ABI, Entrypoint: item.Entrypoint, Root: relativeTarget, Enabled: false, InstalledAt: time.Now().Unix(), Dependencies: item.Dependencies, Conflicts: item.Conflicts}
+		Architecture: item.Architecture, ABI: item.ABI, Entrypoint: item.Entrypoint, Overlay: item.Overlay, Root: relativeTarget, Enabled: false, InstalledAt: time.Now().Unix(), Dependencies: item.Dependencies, Conflicts: item.Conflicts}
 	journal := installJournal{SchemaVersion: 1, Operation: "install", Phase: "prepared", TransactionID: txid, Target: relativeTarget, Previous: state, Next: next}
 	if err := writeAtomicJSON(journalPath, journal); err != nil {
 		return result, err

@@ -14,21 +14,25 @@ func TestProvisionAuthorizedUICreatesPrivateRuntimeCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	template := []byte("property string authToken: \"__PRIME_UNLIMITED_AUTH_TOKEN__\"\n")
-	if err := os.WriteFile(filepath.Join(uiRoot, "ModLoader.template.qml"), template, 0o644); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"ModLoader", "OverlayHost"} {
+		if err := os.WriteFile(filepath.Join(uiRoot, name+".template.qml"), template, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	token := strings.Repeat("a", 64)
 	if err := provisionAuthorizedUI(root, token); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(uiRoot, "ModLoader.qml")
-	data, err := os.ReadFile(path)
-	if err != nil || !strings.Contains(string(data), token) || strings.Contains(string(data), string(uiAuthorizationMarker)) {
-		t.Fatalf("authorized UI content invalid: %v", err)
-	}
-	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("authorized UI mode: %v %v", info.Mode().Perm(), err)
+	for _, name := range []string{"ModLoader", "OverlayHost"} {
+		path := filepath.Join(uiRoot, name+".qml")
+		data, err := os.ReadFile(path)
+		if err != nil || !strings.Contains(string(data), token) || strings.Contains(string(data), string(uiAuthorizationMarker)) {
+			t.Fatalf("authorized UI content invalid for %s: %v", name, err)
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("authorized UI mode for %s: %v %v", name, info.Mode().Perm(), err)
+		}
 	}
 }
 

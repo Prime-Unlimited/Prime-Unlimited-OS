@@ -17,3 +17,12 @@ def test_activation_quarantines_only_the_legacy_ui_alsa_hook():
 def test_installer_does_not_create_a_ui_alsa_configuration():
     installer = (ROOT / "modloader/device/jc11s/ui-hook/install-device.sh").read_text()
     assert "99-prime-ui.conf" not in installer
+
+
+def test_overlay_injection_is_fixed_length_and_avoids_division_helper():
+    source = (ROOT / "modloader/device/jc11s/ui-hook/prime_ui_hook.c").read_text()
+    old = "        PageCacheInfo {\\n            anchors {\\n                right: parent.right\\n                bottom: parent.bottom\\n                margins: 5\\n            }\\n        }"
+    new = '        Loader { parent: Overlay.overlay ? Overlay.overlay : uiContainer; anchors.fill: parent; z: 99998; source: \\"file:///data/prime-unlimited/ui/OverlayHost.qml\\" }'
+    assert len(new) <= len(old)
+    assert "ZSTD_decompress" in source
+    assert "%2147483647" not in source

@@ -1,0 +1,91 @@
+name: Prime Clock packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/prime-unlimited-mod-loader]
+    paths:
+      - 'mods/prime-clock/**'
+      - 'modloader/**'
+      - '.github/workflows/prime-clock.yml'
+    tags: ['prime-clock-v*']
+  pull_request:
+    paths:
+      - 'mods/prime-clock/**'
+      - 'modloader/**'
+      - '.github/workflows/prime-clock.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  shared-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.24.x'}
+      - run: python -m pip install pytest
+      - run: python -m pytest -q mods/prime-clock/tests modloader/ui
+      - name: Test Modloader runtime
+        working-directory: modloader/device/jc11s/runtime-api
+        env: {GO111MODULE: 'off'}
+        run: go test ./...
+      - name: Build and inspect JC11S overlay hook
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
+          modloader/device/jc11s/ui-hook/build-hook.sh /tmp/prime-ui-hook
+
+  package:
+    needs: shared-tests
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [jc11s, jp24]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build target package twice
+        run: |
+          python3 mods/prime-clock/scripts/package.py --target ${{ matrix.target }} --output dist/a
+          python3 mods/prime-clock/scripts/package.py --target ${{ matrix.target }} --output dist/b
+          cmp dist/a/*.zip dist/b/*.zip
+          mv dist/a/*.zip dist/
+      - name: Validate package and target metadata
+        run: python3 mods/prime-clock/scripts/validate_package.py dist/*.zip --target ${{ matrix.target }}
+      - name: Produce immutable artifact metadata
+        run: |
+          cd dist
+          sha256sum *.zip > SHA256SUMS.txt
+          stat --printf='%n %s bytes\n' *.zip > SIZES.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prime-clock-v0.1.0-${{ matrix.target }}
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS.txt
+            dist/SIZES.txt
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/prime-clock-v')
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {path: release, merge-multiple: true}
+      - name: Consolidate release checksums
+        run: |
+          cd release
+          sha256sum *.zip | sort > prime-clock-SHA256SUMS.txt
+          stat --printf='%n %s bytes\n' *.zip | sort > prime-clock-SIZES.txt
+      - name: Publish immutable tag assets
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: gh release create "${GITHUB_REF_NAME}" release/*.zip release/prime-clock-SHA256SUMS.txt release/prime-clock-SIZES.txt --verify-tag --title "Prime Clock ${GITHUB_REF_NAME#prime-clock-v}" --notes "Unsigned device packages. Trusted catalog signing is a separate authorized step."
