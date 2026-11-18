@@ -3,10 +3,10 @@
 #
 # Unlike JC11S, where this logic lives inside a single activate.sh that
 # JC11S's ALSA hook also uses to start sshd, JP24's SSH bootstrap is
-# already proven and lives entirely in compiled C
-# (devices/jp24/ssh-bootstrap/alsa-boot-hook.c forks and execs sshd
-# directly - see its own extensive comment on exactly how fragile that
-# was to get right). This script is called from a SECOND, independent
+# already proven and is triggered by compiled C
+# (devices/jp24/ssh-bootstrap/alsa-boot-hook.c launches a dedicated
+# systemd SSH service through boot-activate.sh). This script is called
+# from a SECOND, independent
 # fork in that same hook, guarded by its own once-per-boot stamp file
 # separate from the SSH one, so a bug here can never affect SSH access -
 # the two bootstraps share nothing but the ALSA trigger point.
@@ -19,9 +19,9 @@ SSH_ACTIVATE=/data/prime4-mod/boot-activate.sh
 
 mkdir -p "$PU/logs"
 
-# Hand SSH to systemd before restarting Engine. The existing hook starts an
-# early sshd directly; that process can be killed with Engine's cgroup. The
-# dedicated unit retries a temporary port conflict and survives the restart.
+# Ensure systemd owns SSH before restarting Engine. On a legacy installation
+# an early sshd may still be direct; the dedicated unit retries that temporary
+# port conflict and survives the restart.
 if [ -x "$SSH_ACTIVATE" ]; then
     "$SSH_ACTIVATE" >>"$LOG" 2>&1 || printf "ui-hook(jp24): SSH service setup reported an error\n" >>"$LOG"
 else
@@ -58,13 +58,9 @@ fi
 # ALSA activation happens inside the first EMain start, before the mounts
 # above exist yet from systemd's point of view. Schedule exactly one
 # systemd-managed restart so they apply within this boot - same approach
-# verified on JC11S. Confirmed live during manual testing: this restart
-# also killed our ALSA-hook-forked sshd (port 2222 closed immediately,
-# only came back after a full device reboot), even though sshd is not
-# started by engine.service at all - systemd's Type=forking restart
-# appears to kill more than just engine.service's own cgroup. A real
-# device loses SSH for the duration of one restart cycle every boot
-# until this is understood better or avoided.
+# verified on JC11S. The former directly forked sshd was killed by this
+# restart. The dedicated prime4-mod-sshd.service now remains outside the
+# Engine cgroup and was verified after both an Engine restart and a reboot.
 RESTART_FLAG=/run/prime-unlimited-jp24-engine-restart-scheduled
 if [ ! -e "$RESTART_FLAG" ]; then
     : > "$RESTART_FLAG"

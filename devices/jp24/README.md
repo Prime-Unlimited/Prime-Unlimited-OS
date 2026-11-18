@@ -31,12 +31,11 @@ test into `core/ssh_service.py`. Not yet wired: the mod-manager flow
 3. The conf.d file's `hook_func` + `@hooks` block `dlopen()`s
    `libalsa-boot-hook.so` (built from `alsa-boot-hook.c`) and calls
    `prime4_mod_alsa_hook()`, which runs as root.
-4. The ALSA hook initially forks `sshd` on port 2222 so the first SSH
-   connection is available. When the Mod Loader is installed, its early
-   boot activation starts `boot-activate.sh`, which hands SSH to the
-   separate `prime4-mod-sshd.service` systemd unit before restarting
-   `engine.service`. This keeps sshd outside Engine's process cgroup, so
-   the UI hook's Engine restart does not take SSH down. Port 22 remains
+4. The ALSA hook launches `boot-activate.sh`, which creates and starts the
+   separate `prime4-mod-sshd.service` systemd unit on port 2222. When the
+   Mod Loader is installed, its activation calls the same idempotent script
+   before restarting `engine.service`. This keeps sshd outside Engine's
+   process cgroup, so the UI restart does not take SSH down. Port 22 remains
    occupied by inMusic's own sshd, which accepts only its CA-signed certs.
 
 Four bugs blocked this for a long time, each silent by default - sshd and
