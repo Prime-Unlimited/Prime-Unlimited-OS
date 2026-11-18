@@ -18,6 +18,8 @@ if [ "${PRIME_UI_HOOK_PATCH:-0}" != "1" ]; then
 fi
 
 if command -v zig >/dev/null 2>&1; then
+    ZIG_GLOBAL_CACHE_DIR=${ZIG_GLOBAL_CACHE_DIR:-$OUT/.zig-global-cache} \
+    ZIG_LOCAL_CACHE_DIR=${ZIG_LOCAL_CACHE_DIR:-$OUT/.zig-local-cache} \
     zig cc -target aarch64-linux-gnu.2.17 -shared -fPIC -Os -nostdlib $DEFS \
         -Wl,-soname,libprime-ui-hook.so \
         -o "$OUT/libprime-ui-hook.so" "$HERE/prime_ui_hook.c"
