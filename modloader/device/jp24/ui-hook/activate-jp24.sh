@@ -69,6 +69,13 @@ if [ ! -e "$RESTART_FLAG" ]; then
     printf "ui-hook(jp24): one engine restart scheduled\n" >>"$LOG"
 fi
 
-# The mod-management runtime API has not been ported to aarch64 yet
-# (JC11S's device/jc11s/runtime-api/ is a 32-bit ARM Go binary); starting
-# it here is deliberately deferred until that port exists.
+# Start the aarch64 loopback API once per boot. The transient unit is outside
+# engine.service and survives the scheduled Engine restart above.
+if [ -x "$PU/bin/modloader-api-start.sh" ] && [ -x "$PU/bin/prime-unlimited-runtime-api" ]; then
+    if ! systemctl is-active --quiet prime-unlimited-modloader-api.service; then
+        systemd-run --quiet --unit=prime-unlimited-modloader-api \
+            --property=Restart=on-failure --property=RestartSec=2s \
+            "$PU/bin/modloader-api-start.sh" || true
+        printf "modloader(jp24): runtime API start requested\n" >>"$LOG"
+    fi
+fi
