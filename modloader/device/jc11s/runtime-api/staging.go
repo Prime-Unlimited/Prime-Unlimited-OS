@@ -55,6 +55,7 @@ type inspectionResult struct {
 	Architecture string `json:"architecture"`
 	ABI          string `json:"abi"`
 	Entrypoint   string `json:"entrypoint"`
+	Overlay      string `json:"overlay,omitempty"`
 	Eligible     bool   `json:"eligible"`
 }
 
@@ -323,7 +324,7 @@ func readValidStage(root string, expected stageResult) (stageResult, error) {
 
 func inspectStagedPackage(item mod, catalogID, cacheRoot, stagingRoot string) (inspectionResult, error) {
 	result := inspectionResult{CatalogID: catalogID, ID: item.ID, Version: item.Version, SHA256: item.SHA256,
-		Architecture: item.Architecture, ABI: item.ABI, Entrypoint: item.Entrypoint}
+		Architecture: item.Architecture, ABI: item.ABI, Entrypoint: item.Entrypoint, Overlay: item.Overlay}
 	if len(item.Libraries) != 0 {
 		return result, errors.New("library installation is not available")
 	}
@@ -343,6 +344,13 @@ func inspectStagedPackage(item mod, catalogID, cacheRoot, stagingRoot string) (i
 	info, err := os.Lstat(entrypoint)
 	if err != nil || validateOwnedRegularFile(info, 0o600) != nil {
 		return result, errors.New("declared entrypoint is missing or unsafe")
+	}
+	if item.Overlay != "" {
+		overlay := filepath.Join(stageRoot, filepath.FromSlash(item.Overlay))
+		overlayInfo, overlayErr := os.Lstat(overlay)
+		if overlayErr != nil || validateOwnedRegularFile(overlayInfo, 0o600) != nil {
+			return result, errors.New("declared overlay is missing or unsafe")
+		}
 	}
 	result.Eligible = true
 	return result, nil

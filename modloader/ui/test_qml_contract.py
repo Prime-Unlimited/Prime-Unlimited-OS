@@ -10,7 +10,7 @@ class QmlContractTests(unittest.TestCase):
         for action in ("cache", "stage", "inspect", "install", "enable", "disable", "uninstall", "recover", "launch-set", "safe-mode/enable", "safe-mode/disable"):
             self.assertIn('"%s"' % action, text)
         self.assertIn("Authorization", text)
-        self.assertIn("file:///data/prime-unlimited/auth/mutation.token", text)
+        self.assertIn("__PRIME_UNLIMITED_AUTH_TOKEN__", text)
         self.assertIn("not in catalog", text)
         self.assertIn("Offline", text)
 
@@ -18,6 +18,18 @@ class QmlContractTests(unittest.TestCase):
         text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")
         positions = [text.index('"%s"' % step, text.index("function installVerified")) for step in ("cache", "stage", "inspect", "install")]
         self.assertEqual(positions, sorted(positions))
+
+    def test_enabled_mod_is_disabled_before_uninstall(self):
+        text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")
+        confirmation = text[text.index("var target = pendingUninstall"):]
+        disable_at = confirmation.index('mutation("disable"')
+        uninstall_at = confirmation.index('mutation("uninstall"')
+        self.assertLess(disable_at, uninstall_at)
+
+    def test_overlay_host_runs_only_on_main_screen(self):
+        text = Path(__file__).with_name("OverlayHost.qml").read_text(encoding="utf-8")
+        self.assertIn("planckQuickView.isMainScreen", text)
+        self.assertIn("model: host.mainScreen ? host.overlays : []", text)
 
 
 if __name__ == "__main__":

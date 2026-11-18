@@ -11,24 +11,13 @@ Rectangle {
     property var installed: ({})
     property var transactions: []
     property var safety: ({"safeMode": false, "mods": ({})})
-    property string authToken: ""
+    property string authToken: "__PRIME_UNLIMITED_AUTH_TOKEN__"
     property bool busy: false
     property int selectedTab: 0
     property string pendingUninstall: ""
     property string statusText: "Connecting..."
     property string deviceText: "Device not detected"
     signal closeRequested()
-
-    function loadAuthorization() {
-        var request = new XMLHttpRequest()
-        request.onreadystatechange = function() {
-            if (request.readyState !== XMLHttpRequest.DONE) return
-            var token = (request.responseText || "").replace(/[\r\n]/g, "")
-            if (request.status === 0 && /^[0-9a-f]{64}$/.test(token)) authToken = token
-        }
-        request.open("GET", "file:///data/prime-unlimited/auth/mutation.token")
-        request.send()
-    }
 
     function refresh() {
         var request = new XMLHttpRequest()
@@ -120,7 +109,7 @@ Rectangle {
         return result
     }
 
-    Component.onCompleted: { loadAuthorization(); refresh() }
+    Component.onCompleted: refresh()
 
     Rectangle {
         id: header
@@ -266,7 +255,10 @@ Rectangle {
                 Rectangle { width: 160; height: 52; radius: 10; color: "#b43b22"
                     Text { anchors.centerIn: parent; text: "UNINSTALL"; color: "white"; font.bold: true }
                     MouseArea { anchors.fill: parent; onClicked: {
-                        var target = pendingUninstall; pendingUninstall = ""; mutation("uninstall", target, "", null)
+                        var target = pendingUninstall; pendingUninstall = ""
+                        if (installed[target] && installed[target].enabled)
+                            mutation("disable", target, "", function(ok) { if (ok) mutation("uninstall", target, "", null) })
+                        else mutation("uninstall", target, "", null)
                     }}
                 }
             }

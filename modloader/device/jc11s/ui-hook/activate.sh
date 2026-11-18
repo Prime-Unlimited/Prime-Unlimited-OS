@@ -9,6 +9,33 @@ LOG="$BASE/activation.log"
 
 mkdir -p "$BASE/hostkeys" /run/sshd "$PU/logs"
 chmod 700 "$BASE/hostkeys"
+
+# Early development builds could leave a persistent ALSA configuration that
+# incorrectly loads the Qt resource interposer as an ALSA hook. That prevents
+# Engine from opening its MIDI sequencer and disables the physical controls.
+# Quarantine only the exact legacy configuration; the independent SSH ALSA
+# hook remains untouched.
+LEGACY_BACKUP="$PU/backups/control-surface-recovery-v1"
+for LEGACY_PATH in \
+    /data/system/var/overlay/lib/alsa/conf.d/99-prime-ui.conf \
+    /data/system/var-lib/alsa/conf.d/99-prime-ui.conf
+do
+    if [ -f "$LEGACY_PATH" ] &&
+       grep -q 'hook_func\.prime_ui_hook' "$LEGACY_PATH" &&
+       grep -q '/data/prime-unlimited/lib/libprime-ui-hook\.so' "$LEGACY_PATH"
+    then
+        mkdir -p "$LEGACY_BACKUP"
+        chmod 700 "$LEGACY_BACKUP"
+        case "$LEGACY_PATH" in
+            */var/overlay/*) LEGACY_NAME=99-prime-ui.conf.overlay.disabled ;;
+            *) LEGACY_NAME=99-prime-ui.conf.var-lib.disabled ;;
+        esac
+        mv "$LEGACY_PATH" "$LEGACY_BACKUP/$LEGACY_NAME"
+        chmod 600 "$LEGACY_BACKUP/$LEGACY_NAME"
+        printf "ui-hook: quarantined legacy ALSA configuration %s\n" "$LEGACY_PATH" >>"$LOG"
+    fi
+done
+
 if [ ! -s "$BASE/hostkeys/ssh_host_ed25519_key" ]; then
     /usr/bin/ssh-keygen -q -t ed25519 -N "" -f "$BASE/hostkeys/ssh_host_ed25519_key" >>"$LOG" 2>&1 || exit 1
 fi

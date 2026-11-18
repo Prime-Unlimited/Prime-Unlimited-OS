@@ -34,6 +34,7 @@ const maxPackageBytes = 128 * 1024 * 1024
 
 var modIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 var versionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$`)
+var runtimeStarted = time.Now()
 
 type catalog struct {
 	SchemaVersion int       `json:"schemaVersion"`
@@ -56,6 +57,7 @@ type mod struct {
 	Architecture string       `json:"architecture,omitempty"`
 	ABI          string       `json:"abi,omitempty"`
 	Entrypoint   string       `json:"entrypoint,omitempty"`
+	Overlay      string       `json:"overlay,omitempty"`
 	Approval     *approval    `json:"approval,omitempty"`
 	Dependencies []dependency `json:"dependencies,omitempty"`
 	Libraries    []dependency `json:"libraries,omitempty"`
@@ -506,6 +508,15 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query parameters are not supported"})
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/api/v1/overlay-settings/") {
+		if !s.authorized(r) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "overlay settings authorization required"})
+			return
+		}
+		s.handleOverlaySettings(w, r, strings.TrimPrefix(r.URL.Path, "/api/v1/overlay-settings/"))
+		return
+	}
 	if r.Method != http.MethodGet {
 		if !isMutationPath(r.URL.Path) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -679,6 +690,15 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, state)
+	case "/api/v1/overlays":
+		overlays, err := enabledOverlays(s.root)
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "overlay state unavailable"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"overlays": overlays})
+	case "/api/v1/monotonic":
+		writeJSON(w, http.StatusOK, map[string]int64{"milliseconds": time.Since(runtimeStarted).Milliseconds()})
 	case "/api/v1/libraries":
 		writeJSON(w, http.StatusOK, map[string]any{"libraries": []any{}})
 	default:
@@ -743,7 +763,7 @@ func validateMod(item mod) error {
 	if len(item.Description) > 2000 {
 		return errors.New("description exceeds 2000 bytes")
 	}
-	if item.Architecture != "" || item.ABI != "" || item.Entrypoint != "" || item.Approval != nil || item.Dependencies != nil || item.Libraries != nil || item.Conflicts != nil || item.Revoked {
+	if item.Architecture != "" || item.ABI != "" || item.Entrypoint != "" || item.Overlay != "" || item.Approval != nil || item.Dependencies != nil || item.Libraries != nil || item.Conflicts != nil || item.Revoked {
 		return errors.New("schema v2 fields are not allowed in schema v1")
 	}
 	return nil
@@ -790,6 +810,12 @@ func validateV2Mod(item mod) error {
 	entrypoint, err := safeArchivePath(item.Entrypoint, defaultStageLimits)
 	if err != nil || entrypoint != item.Entrypoint || strings.HasSuffix(item.Entrypoint, "/") {
 		return errors.New("invalid entrypoint")
+	}
+	if item.Overlay != "" {
+		overlay, overlayErr := safeArchivePath(item.Overlay, defaultStageLimits)
+		if overlayErr != nil || overlay != item.Overlay || !strings.HasSuffix(item.Overlay, ".qml") {
+			return errors.New("invalid overlay")
+		}
 	}
 	if err := validateApproval(item.Approval); err != nil {
 		return err
@@ -1056,7 +1082,11 @@ func newPackageHTTPClient() *http.Client {
 	return &http.Client{
 		Transport: transport,
 		Timeout:   10 * time.Minute,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		CheckRedirect: func(request *http.Request, via []*http.Request) error {
+			if len(via) == 1 && via[0].URL.Scheme == "https" && via[0].URL.Hostname() == "api.github.com" &&
+				request.URL.Scheme == "https" && request.URL.Hostname() == "release-assets.githubusercontent.com" {
+				return nil
+			}
 			return http.ErrUseLastResponse
 		},
 	}
@@ -1113,7 +1143,7 @@ func downloadPackage(ctx context.Context, client *http.Client, item mod, cacheRo
 	if err != nil {
 		return result, err
 	}
-	request.Header.Set("Accept", "application/zip, application/octet-stream")
+	request.Header.Set("Accept", "application/octet-stream")
 	request.Header.Set("User-Agent", "Prime-Unlimited-Runtime/1")
 	response, err := client.Do(request)
 	if err != nil {
@@ -1309,6 +1339,9 @@ func main() {
 	authToken, err := loadOrCreateAuthToken(*authTokenPath)
 	if err != nil {
 		log.Fatalf("authorization setup failed: %v", err)
+	}
+	if err := provisionAuthorizedUI(*root, authToken); err != nil {
+		log.Fatalf("UI authorization setup failed: %v", err)
 	}
 	httpServer := &http.Server{
 		Addr: *listen,

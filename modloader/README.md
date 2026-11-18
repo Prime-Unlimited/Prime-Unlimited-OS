@@ -1,5 +1,9 @@
 # Prime Unlimited Mod Loader
 
+Overlay authors must follow [OVERLAY_MOD_DEVELOPMENT.md](OVERLAY_MOD_DEVELOPMENT.md).
+It records the verified generic host contract, packaging/lifecycle sequence,
+JC11S integration details, and mandatory Do's/Don'ts for future mods.
+
 Independent, /data-only mod management for Prime Unlimited OS.
 
 ## Status
@@ -53,10 +57,11 @@ downloaded bytes to the signed catalog record; it does not independently
 authenticate a publisher.
 
 The native device service owns a random 32-byte token in a root-only `0600`
-file and compares authorization headers in constant time. The JC11S QML runs
-inside the root-owned Engine process and reads that file directly through a
-local `file:` request; the token is never returned by HTTP, rendered, logged or
-stored in the catalog. Read-only API use needs no token.
+file and compares authorization headers in constant time. At service start it
+replaces exactly one marker in the public QML template and atomically publishes
+a root-only `0600` runtime copy for the root-owned Engine process. The token is
+never returned by HTTP, rendered, logged, committed or stored in the catalog.
+Read-only API use needs no token.
 
 ## JC11S touch UI
 

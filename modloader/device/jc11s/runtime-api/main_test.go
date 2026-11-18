@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,15 @@ func validMod() mod {
 		Firmware: []string{"5.3.0"}, DownloadURL: "https://example.invalid/not-downloadable.zip",
 		SHA256: strings.Repeat("0", 64), Size: 1,
 	}
+}
+
+func mustURL(t *testing.T, value string) *url.URL {
+	t.Helper()
+	parsed, err := url.Parse(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
 }
 
 func writeCatalog(t *testing.T, value any) string {
@@ -231,8 +241,12 @@ func TestPackageNetworkPolicy(t *testing.T) {
 	}
 	client := newPackageHTTPClient()
 	request, _ := http.NewRequest(http.MethodGet, "https://example.invalid/next", nil)
-	if err := client.CheckRedirect(request, []*http.Request{{}}); err != http.ErrUseLastResponse {
+	if err := client.CheckRedirect(request, []*http.Request{{URL: mustURL(t, "https://example.invalid/start")}}); err != http.ErrUseLastResponse {
 		t.Fatalf("redirect policy returned %v", err)
+	}
+	githubAsset, _ := http.NewRequest(http.MethodGet, "https://release-assets.githubusercontent.com/path", nil)
+	if err := client.CheckRedirect(githubAsset, []*http.Request{{URL: mustURL(t, "https://api.github.com/repos/example/releases/assets/1")}}); err != nil {
+		t.Fatalf("immutable GitHub asset redirect rejected: %v", err)
 	}
 }
 

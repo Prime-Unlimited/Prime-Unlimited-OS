@@ -20,12 +20,13 @@ cp "$HERE/runengine-hooked.sh" "$PU/bin/runengine-hooked.sh"
 cp /usr/Engine/Scripts/runengine "$PU/bin/runengine.real"
 "$HERE/make-engine-wrapper.sh" /usr/Engine/Scripts/engine "$PU/bin/engine-hooked.sh"
 cp "$HERE/ControlCenterTab.qml" "$PU/ui/patches/ControlCenterTab.qml"
-cp "$HERE/../../../ui/ModLoader.qml" "$PU/ui/ModLoader.qml"
+cp "$HERE/../../../ui/ModLoader.qml" "$PU/ui/ModLoader.template.qml"
+cp "$HERE/../../../ui/OverlayHost.qml" "$PU/ui/OverlayHost.template.qml"
 cp "$HERE/../../../ui/assets/prime_unlimited_mod_loader.svg" "$PU/ui/prime_unlimited_mod_loader.svg"
 cp /data/prime-ssh/activate.sh "/data/prime-ssh/activate.sh.bak.$(date +%Y%m%d%H%M%S)"
 cp "$HERE/activate.sh" /data/prime-ssh/activate.sh
 chmod 755 "$PU/bin/runengine-hooked.sh" "$PU/bin/runengine.real" "$PU/bin/engine-hooked.sh" /data/prime-ssh/activate.sh
-chmod 644 "$PU/lib/libprime-ui-hook.so" "$PU/ui/ModLoader.qml" "$PU/ui/prime_unlimited_mod_loader.svg" "$PU/ui/patches/ControlCenterTab.qml"
+chmod 644 "$PU/lib/libprime-ui-hook.so" "$PU/ui/ModLoader.template.qml" "$PU/ui/OverlayHost.template.qml" "$PU/ui/prime_unlimited_mod_loader.svg" "$PU/ui/patches/ControlCenterTab.qml"
 
 /data/prime-ssh/activate.sh &
 [ ! -d "$CACHE" ] || rm -rf "$CACHE"

@@ -18,6 +18,18 @@ func validV2Mod() mod {
 	return item
 }
 
+func TestReleasedPrimeClockCatalogSignatureAndCompatibility(t *testing.T) {
+	catalogPath := filepath.Join("..", "..", "..", "catalog", "prime-clock-v0.1.1-jc11s.json")
+	state := loadVerifiedCatalog(catalogPath, strings.TrimSuffix(catalogPath, ".json")+".sig.json", filepath.Join("..", "..", "..", "catalog", "trust", "prime-unlimited-2026-1.json"))
+	if state.Status != "valid" || !state.Trusted || len(state.Catalog.Mods) != 1 {
+		t.Fatalf("released Prime Clock catalog invalid: %#v", state)
+	}
+	handler := &server{model: "JC11S", firmware: "5.3.0", architecture: "armv7l", abi: "gnueabihf"}
+	if !handler.compatible(state.Catalog.Mods[0]) || state.Catalog.Mods[0].Overlay != "prime-clock/ui/PrimeClock.qml" {
+		t.Fatal("released Prime Clock catalog is not JC11S overlay compatible")
+	}
+}
+
 func validV2CatalogJSON(t *testing.T, item mod) string {
 	t.Helper()
 	return `{"schemaVersion":2,"catalogId":"prime-unlimited-test","mods":[` + mustJSON(t, item) + `],"libraries":[]}`
