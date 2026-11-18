@@ -107,3 +107,8 @@ come up automatically. The installer now deploys the shared Mod Loader
 runtime API as a static aarch64 binary. `activate-jp24.sh` starts it in the
 transient `prime-unlimited-modloader-api.service`; JP24 catalog entries must
 use the exact `JP24` / `aarch64` / `gnu` compatibility identity.
+
+This complete path was hardware-verified on 2026-11-18 across a full reboot.
+Engine, the systemd-managed SSH listener, and the runtime API were active;
+repeat activation remained connected and returned success; the Engine UI,
+LEDs, Mod Loader tile, and Mod Loader screen all worked normally.

@@ -28,6 +28,19 @@ packages therefore remain incompatible by design. The first start creates the
 private mutation token and renders authorized `ModLoader.qml` and OverlayHost
 runtime files from their templates.
 
-This port is build- and integration-ready but must be marked hardware-verified
-only after the service, health endpoint, UI and reboot behavior have been
-checked on a real JP24 device.
+## Hardware verification
+
+Verified on 2026-11-18 on a real Prime 4 G2 (`JP24`) running Engine OS 5.3.0.
+After a complete device reboot:
+
+- `engine.service`, `prime4-mod-sshd.service`, and
+  `prime-unlimited-modloader-api.service` were all active;
+- the loopback health endpoint reported `authorizationStatus: ready`;
+- both launcher bind mounts were present;
+- a repeated activation completed with exit status 0 without interrupting
+  the active SSH session;
+- the Engine UI, hardware LEDs, Mod Loader tile, and Mod Loader screen all
+  operated normally.
+
+The missing catalog reported by the health endpoint is expected until a
+signed JP24 catalog and trust key are provisioned.
