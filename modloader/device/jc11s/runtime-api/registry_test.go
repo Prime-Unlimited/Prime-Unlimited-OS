@@ -59,6 +59,52 @@ func TestInstallDisabledModCommitsFilesRegistryAndTransaction(t *testing.T) {
 	}
 }
 
+func TestVerifiedUpdateAndRollbackPreservePreviousVersion(t *testing.T) {
+	item, cacheRoot, stagingRoot, root := stagedInstallFixture(t)
+	item.Revision = 1
+	if _, err := installDisabledMod(item, "trusted-test", cacheRoot, stagingRoot, root); err != nil {
+		t.Fatal(err)
+	}
+	payload := makeZIP(t, []zipEntry{{name: "mod/start.sh", data: "#!/bin/sh\n", mode: 0o777}, {name: "mod/data.txt", data: "updated"}})
+	updated, updatedCache := cachedZIP(t, payload)
+	updated.ID = item.ID
+	updated.Name = item.Name
+	updated.Version = "1.1.0"
+	updated.Revision = 2
+	updated.Models = item.Models
+	updated.Firmware = item.Firmware
+	updated.Architecture = item.Architecture
+	updated.ABI = item.ABI
+	updated.Entrypoint = item.Entrypoint
+	updated.Approval = item.Approval
+	updatedStage := filepath.Join(t.TempDir(), "stage")
+	if _, err := stagePackage(updated, updatedCache, updatedStage, defaultStageLimits); err != nil {
+		t.Fatal(err)
+	}
+	result, err := updateDisabledMod(updated, "trusted-test", updatedCache, updatedStage, root)
+	if err != nil || !result.Updated || result.RolledBack {
+		t.Fatalf("update=%#v err=%v", result, err)
+	}
+	state, err := loadRegistry(filepath.Join(root, "registry", "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Mods[item.ID].Version != "1.1.0" || state.Mods[item.ID].Revision != 2 {
+		t.Fatalf("new state=%#v", state.Mods[item.ID])
+	}
+	rolled, err := rollbackMod(item.ID, root)
+	if err != nil || !rolled.RolledBack {
+		t.Fatalf("rollback=%#v err=%v", rolled, err)
+	}
+	state, err = loadRegistry(filepath.Join(root, "registry", "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Mods[item.ID].Version != "1.0.0" || state.Mods[item.ID].PackageSHA256 != item.SHA256 {
+		t.Fatalf("restored state=%#v", state.Mods[item.ID])
+	}
+}
+
 func TestInstallAPIExposesDisabledStateAndTransaction(t *testing.T) {
 	item, cacheRoot, stagingRoot, root := stagedInstallFixture(t)
 	token := strings.Repeat("a", 64)

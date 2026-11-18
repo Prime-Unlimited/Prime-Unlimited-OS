@@ -48,6 +48,7 @@ type mod struct {
 	ID           string       `json:"id"`
 	Name         string       `json:"name"`
 	Version      string       `json:"version"`
+	Revision     int          `json:"revision,omitempty"`
 	Description  string       `json:"description,omitempty"`
 	Models       []string     `json:"models"`
 	Firmware     []string     `json:"firmware"`
@@ -96,7 +97,13 @@ type library struct {
 
 type modResponse struct {
 	mod
-	Compatible bool `json:"compatible"`
+	Compatible        bool   `json:"compatible"`
+	DeviceEligible    bool   `json:"deviceEligible"`
+	InstalledVersion  string `json:"installedVersion,omitempty"`
+	InstalledRevision int    `json:"installedRevision,omitempty"`
+	InstalledSHA256   string `json:"installedSha256,omitempty"`
+	UpdateAvailable   bool   `json:"updateAvailable"`
+	UpdateReason      string `json:"updateReason,omitempty"`
 }
 
 type catalogState struct {
@@ -122,17 +129,26 @@ type catalogSignature struct {
 }
 
 type server struct {
-	model        string
-	firmware     string
-	architecture string
-	abi          string
-	catalog      catalogState
-	authToken    string
-	cacheRoot    string
-	stagingRoot  string
-	root         string
-	httpClient   *http.Client
-	cacheMu      sync.Mutex
+	model                string
+	firmware             string
+	architecture         string
+	abi                  string
+	catalog              catalogState
+	catalogPath          string
+	catalogSignaturePath string
+	catalogTrustKeyPath  string
+	catalogURL           string
+	catalogSignatureURL  string
+	catalogLastSync      int64
+	catalogSource        string
+	catalogSyncError     string
+	authToken            string
+	cacheRoot            string
+	stagingRoot          string
+	root                 string
+	httpClient           *http.Client
+	cacheMu              sync.Mutex
+	catalogMu            sync.RWMutex
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -180,7 +196,7 @@ func (s *server) authorizationStatus() string {
 
 func isMutationPath(path string) bool {
 	switch path {
-	case "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve", "/api/v1/launch", "/api/v1/launch-set", "/api/v1/safe-mode/enable", "/api/v1/safe-mode/disable", "/api/v1/recover":
+	case "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/update", "/api/v1/catalog/sync", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve", "/api/v1/launch", "/api/v1/launch-set", "/api/v1/safe-mode/enable", "/api/v1/safe-mode/disable", "/api/v1/recover":
 		return true
 	default:
 		return false
@@ -200,6 +216,8 @@ type cacheResult struct {
 }
 
 func (s *server) catalogMod(id string) (mod, bool) {
+	s.catalogMu.RLock()
+	defer s.catalogMu.RUnlock()
 	if s.catalog.Status != "valid" || !s.catalog.Trusted {
 		return mod{}, false
 	}
@@ -543,6 +561,18 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.handleInstall(w, r)
 			return
 		}
+		if r.URL.Path == "/api/v1/update" {
+			s.handleUpdate(w, r)
+			return
+		}
+		if r.URL.Path == "/api/v1/rollback" {
+			s.handleRollback(w, r)
+			return
+		}
+		if r.URL.Path == "/api/v1/catalog/sync" {
+			s.handleCatalogSync(w, r)
+			return
+		}
 		if r.URL.Path == "/api/v1/uninstall" {
 			s.handleUninstall(w, r)
 			return
@@ -642,6 +672,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.URL.Path {
 	case "/api/v1/health":
+		s.catalogMu.RLock()
+		defer s.catalogMu.RUnlock()
 		writeJSON(w, http.StatusOK, map[string]any{
 			"service": "prime-unlimited-mod-loader", "mode": "authenticated-nonexecuting-lifecycle",
 			"catalogStatus": s.catalog.Status, "catalogError": s.catalog.Error,
@@ -649,8 +681,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"catalogKeyId": s.catalog.KeyID, "catalogKeyFingerprint": s.catalog.KeyFingerprint,
 			"catalogSchemaVersion": s.catalog.Catalog.SchemaVersion, "catalogId": s.catalog.Catalog.CatalogID,
 			"authorizationStatus": s.authorizationStatus(),
+			"catalogSource":       s.catalogSource, "catalogLastSync": s.catalogLastSync,
+			"catalogSyncError": s.catalogSyncError,
 		})
 	case "/api/v1/mods":
+		s.catalogMu.RLock()
+		defer s.catalogMu.RUnlock()
 		if s.catalog.Status == "invalid" {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 				"error": "catalog validation failed", "catalogStatus": s.catalog.Status,
@@ -658,9 +694,18 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		registry, registryErr := loadRegistry(filepath.Join(s.root, "registry", "state.json"))
+		if registryErr != nil {
+			registry = emptyRegistry()
+		}
 		mods := make([]modResponse, 0, len(s.catalog.Catalog.Mods))
 		for _, item := range s.catalog.Catalog.Mods {
-			mods = append(mods, modResponse{mod: item, Compatible: s.compatible(item)})
+			response := modResponse{mod: item, Compatible: s.compatible(item), DeviceEligible: contains(item.Models, s.model)}
+			if installed, exists := registry.Mods[item.ID]; exists {
+				response.InstalledVersion, response.InstalledRevision, response.InstalledSHA256 = installed.Version, installed.Revision, installed.PackageSHA256
+				response.UpdateAvailable, response.UpdateReason = updateDetails(item, installed)
+			}
+			mods = append(mods, response)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"model": s.model, "firmware": s.firmware, "mods": mods,
@@ -668,6 +713,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"catalogTrust":         map[bool]string{true: "verified", false: "unverified"}[s.catalog.Trusted],
 			"catalogKeyId":         s.catalog.KeyID,
 			"catalogSchemaVersion": s.catalog.Catalog.SchemaVersion, "catalogId": s.catalog.Catalog.CatalogID,
+			"catalogSource": s.catalogSource, "catalogLastSync": s.catalogLastSync,
 		})
 	case "/api/v1/installed":
 		state, err := loadRegistry(filepath.Join(s.root, "registry", "state.json"))
@@ -803,6 +849,9 @@ func validateV2Mod(item mod) error {
 	}
 	if !versionPattern.MatchString(item.Version) {
 		return errors.New("version is not a safe path component")
+	}
+	if item.Revision < 0 {
+		return errors.New("revision must not be negative")
 	}
 	if item.Architecture == "" || len(item.Architecture) > 40 || item.ABI == "" || len(item.ABI) > 40 {
 		return errors.New("invalid architecture or ABI")
@@ -1314,6 +1363,8 @@ func main() {
 	catalogPath := flag.String("catalog", "/data/prime-unlimited/catalog/catalog.json", "catalog file")
 	catalogSignaturePath := flag.String("catalog-signature", "/data/prime-unlimited/catalog/catalog.sig.json", "detached catalog signature")
 	catalogTrustKeyPath := flag.String("catalog-trust-key", "/data/prime-unlimited/trust/catalog-key.json", "deployment-owned catalog trust key")
+	catalogURL := flag.String("catalog-url", "", "signed device catalog URL on raw.githubusercontent.com")
+	catalogSignatureURL := flag.String("catalog-signature-url", "", "detached device catalog signature URL on raw.githubusercontent.com")
 	authTokenPath := flag.String("auth-token", "/data/prime-unlimited/auth/mutation.token", "device-owned mutation token")
 	cacheRoot := flag.String("cache-root", "/data/prime-unlimited/cache/packages", "verified package cache")
 	stagingRoot := flag.String("staging-root", "/data/prime-unlimited/staging/packages", "non-executable verified package staging")
@@ -1332,7 +1383,7 @@ func main() {
 	if err != nil || writeActivationManifest(*root, registry) != nil {
 		log.Fatal("activation manifest reconciliation failed")
 	}
-	state := loadVerifiedCatalog(*catalogPath, *catalogSignaturePath, *catalogTrustKeyPath)
+	state, usedFallback := loadVerifiedCatalogWithFallback(*catalogPath, *catalogSignaturePath, *catalogTrustKeyPath)
 	if state.Status == "invalid" {
 		log.Printf("catalog rejected: %s", state.Error)
 	}
@@ -1343,10 +1394,24 @@ func main() {
 	if err := provisionAuthorizedUI(*root, authToken); err != nil {
 		log.Fatalf("UI authorization setup failed: %v", err)
 	}
+	runtimeServer := &server{model: *model, firmware: *firmware, architecture: *architecture, abi: *abi, catalog: state, authToken: authToken, root: *root,
+		catalogPath: *catalogPath, catalogSignaturePath: *catalogSignaturePath, catalogTrustKeyPath: *catalogTrustKeyPath,
+		catalogURL: *catalogURL, catalogSignatureURL: *catalogSignatureURL, catalogSource: "offline-cache",
+		cacheRoot: *cacheRoot, stagingRoot: *stagingRoot, httpClient: newPackageHTTPClient()}
+	if usedFallback {
+		runtimeServer.catalogSource = "offline-last-good"
+	}
+	if *catalogURL != "" && *catalogSignatureURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		if _, syncErr := runtimeServer.syncCatalog(ctx); syncErr != nil {
+			runtimeServer.catalogSyncError = syncErr.Error()
+			log.Printf("GitHub catalog sync unavailable; using last valid catalog")
+		}
+		cancel()
+	}
 	httpServer := &http.Server{
-		Addr: *listen,
-		Handler: &server{model: *model, firmware: *firmware, architecture: *architecture, abi: *abi, catalog: state, authToken: authToken, root: *root,
-			cacheRoot: *cacheRoot, stagingRoot: *stagingRoot, httpClient: newPackageHTTPClient()},
+		Addr:              *listen,
+		Handler:           runtimeServer,
 		ReadHeaderTimeout: 3 * time.Second,
 		ReadTimeout:       5 * time.Second,
 		WriteTimeout:      10 * time.Minute,

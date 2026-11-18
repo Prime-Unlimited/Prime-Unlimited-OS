@@ -19,6 +19,7 @@ import (
 type installedMod struct {
 	ID            string       `json:"id"`
 	Version       string       `json:"version"`
+	Revision      int          `json:"revision,omitempty"`
 	PackageSHA256 string       `json:"packageSha256"`
 	CatalogID     string       `json:"catalogId"`
 	Architecture  string       `json:"architecture"`
@@ -191,7 +192,7 @@ func validateRegistryState(state registryState) error {
 		return errors.New("invalid installed registry")
 	}
 	for id, item := range state.Mods {
-		if id != item.ID || !modIDPattern.MatchString(id) || !versionPattern.MatchString(item.Version) || len(item.PackageSHA256) != 64 {
+		if id != item.ID || !modIDPattern.MatchString(id) || !versionPattern.MatchString(item.Version) || item.Revision < 0 || len(item.PackageSHA256) != 64 {
 			return errors.New("invalid installed registry entry")
 		}
 		expectedRoot := filepath.ToSlash(filepath.Join("mods", "installed", item.ID, item.Version))
@@ -554,7 +555,7 @@ func installDisabledMod(item mod, catalogID, cacheRoot, stagingRoot, root string
 		next.Mods[id] = installed
 	}
 	relativeTarget := filepath.ToSlash(filepath.Join("mods", "installed", item.ID, item.Version))
-	next.Mods[item.ID] = installedMod{ID: item.ID, Version: item.Version, PackageSHA256: item.SHA256, CatalogID: catalogID,
+	next.Mods[item.ID] = installedMod{ID: item.ID, Version: item.Version, Revision: item.Revision, PackageSHA256: item.SHA256, CatalogID: catalogID,
 		Architecture: item.Architecture, ABI: item.ABI, Entrypoint: item.Entrypoint, Overlay: item.Overlay, Root: relativeTarget, Enabled: false, InstalledAt: time.Now().Unix(), Dependencies: item.Dependencies, Conflicts: item.Conflicts}
 	journal := installJournal{SchemaVersion: 1, Operation: "install", Phase: "prepared", TransactionID: txid, Target: relativeTarget, Previous: state, Next: next}
 	if err := writeAtomicJSON(journalPath, journal); err != nil {

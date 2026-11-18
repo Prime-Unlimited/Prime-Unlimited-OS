@@ -30,6 +30,31 @@ func TestReleasedPrimeClockCatalogSignatureAndCompatibility(t *testing.T) {
 	}
 }
 
+func TestCanonicalDeviceCatalogSignaturesAndIsolation(t *testing.T) {
+	for _, test := range []struct{ name, file, model, architecture, abi string }{{"jc11s", "jc11s.json", "JC11S", "armv7l", "gnueabihf"}, {"jp24", "jp24.json", "JP24", "aarch64", "gnu"}} {
+		t.Run(test.name, func(t *testing.T) {
+			catalogPath := filepath.Join("..", "..", "..", "catalog", test.file)
+			state := loadVerifiedCatalog(catalogPath, strings.TrimSuffix(catalogPath, ".json")+".sig.json", filepath.Join("..", "..", "..", "catalog", "trust", "prime-unlimited-2026-1.json"))
+			if state.Status != "valid" || !state.Trusted || len(state.Catalog.Mods) != 1 {
+				t.Fatalf("canonical catalog invalid: %#v", state)
+			}
+			runtime := server{model: test.model, firmware: "5.3.0", architecture: test.architecture, abi: test.abi, catalog: state}
+			if !runtime.compatible(state.Catalog.Mods[0]) {
+				t.Fatal("device catalog entry is incompatible")
+			}
+			wrong := runtime
+			if test.model == "JC11S" {
+				wrong.model = "JP24"
+			} else {
+				wrong.model = "JC11S"
+			}
+			if wrong.compatible(state.Catalog.Mods[0]) {
+				t.Fatal("catalog crossed device boundary")
+			}
+		})
+	}
+}
+
 func validV2CatalogJSON(t *testing.T, item mod) string {
 	t.Helper()
 	return `{"schemaVersion":2,"catalogId":"prime-unlimited-test","mods":[` + mustJSON(t, item) + `],"libraries":[]}`

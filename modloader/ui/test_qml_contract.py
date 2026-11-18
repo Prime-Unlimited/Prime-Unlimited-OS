@@ -7,7 +7,7 @@ class QmlContractTests(unittest.TestCase):
         text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")
         for endpoint in ("/api/v1/mods", "/api/v1/installed", "/api/v1/transactions", "/api/v1/safety"):
             self.assertIn(endpoint, text)
-        for action in ("cache", "stage", "inspect", "install", "enable", "disable", "uninstall", "recover", "launch-set", "safe-mode/enable", "safe-mode/disable"):
+        for action in ("cache", "stage", "inspect", "install", "update", "rollback", "catalog/sync", "enable", "disable", "uninstall", "recover", "launch-set", "safe-mode/enable", "safe-mode/disable"):
             self.assertIn('"%s"' % action, text)
         self.assertIn("Authorization", text)
         self.assertIn("__PRIME_UNLIMITED_AUTH_TOKEN__", text)
@@ -18,6 +18,16 @@ class QmlContractTests(unittest.TestCase):
         text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")
         positions = [text.index('"%s"' % step, text.index("function installVerified")) for step in ("cache", "stage", "inspect", "install")]
         self.assertEqual(positions, sorted(positions))
+
+    def test_update_pipeline_and_developer_catalog_controls(self):
+        text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")
+        update = text[text.index("function updateVerified"):]
+        positions = [update.index('"%s"' % step) for step in ("cache", "stage", "inspect", "update")]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("developerMode", text)
+        self.assertIn("deviceEligible", text)
+        self.assertIn("SYNC CATALOG", text)
+        self.assertIn("updateAvailable", text)
 
     def test_enabled_mod_is_disabled_before_uninstall(self):
         text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")

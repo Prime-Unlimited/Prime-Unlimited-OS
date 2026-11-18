@@ -13,6 +13,7 @@ Rectangle {
     property var safety: ({"safeMode": false, "mods": ({})})
     property string authToken: "__PRIME_UNLIMITED_AUTH_TOKEN__"
     property bool busy: false
+    property bool developerMode: false
     property int selectedTab: 0
     property string pendingUninstall: ""
     property string statusText: "Connecting..."
@@ -81,7 +82,7 @@ Rectangle {
         request.open("POST", apiBase + "/api/v1/" + action)
         request.setRequestHeader("Content-Type", "application/json")
         request.setRequestHeader("Authorization", "Bearer " + authToken)
-        if (action === "safe-mode/enable" || action === "safe-mode/disable") request.send()
+        if (action === "safe-mode/enable" || action === "safe-mode/disable" || action === "catalog/sync") request.send()
         else request.send(JSON.stringify({"id": id}))
     }
 
@@ -95,8 +96,39 @@ Rectangle {
         next(0)
     }
 
+    function updateVerified(id) {
+        var wasEnabled = installed[id] && installed[id].enabled
+        function executeUpdate() {
+            var steps = ["cache", "stage", "inspect", "update"]
+            function next(index) {
+                if (index >= steps.length) {
+                    statusText = "Verified update completed"
+                    if (wasEnabled) mutation("enable", id, "", function() { refresh() })
+                    else refresh()
+                    return
+                }
+                statusText = "Update: " + steps[index]
+                mutation(steps[index], id, "", function(ok) { if (ok) next(index + 1) })
+            }
+            next(0)
+        }
+        if (wasEnabled) mutation("disable", id, "", function(ok) { if (ok) executeUpdate() })
+        else executeUpdate()
+    }
+
+    function syncCatalog() {
+        statusText = "Syncing signed GitHub catalog..."
+        mutation("catalog/sync", "", "", function() { refresh() })
+    }
+
     function visibleMods() {
-        if (selectedTab === 0) return mods
+        if (selectedTab === 0) {
+            var available = []
+            for (var index = 0; index < mods.length; ++index) {
+                if (mods[index].compatible || (developerMode && mods[index].deviceEligible)) available.push(mods[index])
+            }
+            return available
+        }
         var result = []
         var seen = ({})
         for (var i = 0; i < mods.length; ++i) {
@@ -157,9 +189,22 @@ Rectangle {
     Text {
         id: status
         x: 24; y: 133
+        width: 290
         text: statusText
         color: "#ff541c"
         font.pixelSize: 16
+        elide: Text.ElideRight
+    }
+    Rectangle {
+        x: 330; y: 140; width: 126; height: 28; radius: 8
+        color: developerMode ? "#6d512c" : "#33373c"
+        Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 12; text: developerMode ? "DEV MODE ON" : "DEV MODE OFF" }
+        MouseArea { anchors.fill: parent; onClicked: developerMode = !developerMode }
+    }
+    Rectangle {
+        x: 464; y: 140; width: 126; height: 28; radius: 8; color: "#34516b"
+        Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 12; text: "SYNC CATALOG" }
+        MouseArea { anchors.fill: parent; enabled: !busy; onClicked: syncCatalog() }
     }
     Rectangle {
         x: 600; y: 140; width: 180; height: 28; radius: 8
@@ -182,19 +227,19 @@ Rectangle {
                 model: visibleMods()
                 delegate: Rectangle {
                     width: entries.width
-                    height: 116
+                    height: 132
                     radius: 12
                     color: "#22262b"
                     Text {
                         x: 16; y: 12
-                        text: modelData.name + "  v" + modelData.version
+                        text: modelData.name + "  v" + modelData.version + "  r" + (modelData.revision || 0)
                         color: "#f4f2ee"
                         font.pixelSize: 21
                         font.bold: true
                     }
                     Text {
                         x: 16; y: 48
-                        text: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined ? "Quarantined after " + safety.mods[modelData.id].failureCount + " failures" : (modelData.compatible ? "Compatible" : "Not compatible with this device")
+                        text: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined ? "Quarantined after " + safety.mods[modelData.id].failureCount + " failures" : (modelData.updateAvailable ? "Update available: " + modelData.updateReason : (modelData.compatible ? "Compatible" : "Not compatible with this device"))
                         color: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined ? "#ff9b78" : (modelData.compatible ? "#73d6a3" : "#ff9b78")
                         font.pixelSize: 16
                     }
@@ -202,6 +247,18 @@ Rectangle {
                         x: 330; y: 13; width: 250
                         text: (modelData.dependencies || []).length + " mod dependencies, " + (modelData.libraries || []).length + " libraries"
                         color: "#aab0b8"; font.pixelSize: 13; elide: Text.ElideRight
+                    }
+                    Text {
+                        x: 16; y: 75; width: 300
+                        visible: installed[modelData.id] !== undefined
+                        text: "Installed: v" + installed[modelData.id].version + " r" + (installed[modelData.id].revision || 0) + "  SHA " + installed[modelData.id].packageSha256.substring(0, 10) + "..."
+                        color: modelData.updateAvailable ? "#ffb15c" : "#aab0b8"; font.pixelSize: 12; elide: Text.ElideRight
+                    }
+                    Rectangle {
+                        visible: installed[modelData.id] !== undefined && modelData.updateAvailable
+                        width: 104; height: 48; radius: 9; x: parent.width - 334; y: 19; color: "#d77921"
+                        Text { anchors.centerIn: parent; text: "UPDATE"; color: "white"; font.bold: true }
+                        MouseArea { anchors.fill: parent; enabled: !busy && modelData.compatible; onClicked: updateVerified(modelData.id) }
                     }
                     Rectangle {
                         width: 104; height: 48; radius: 9; x: parent.width - (present ? 224 : 116); y: 19
@@ -223,11 +280,16 @@ Rectangle {
                     }
                     Row {
                         visible: installed[modelData.id] !== undefined
-                        x: 330; y: 78; spacing: 8
+                        x: 330; y: 91; spacing: 8
                         Rectangle {
                             width: 104; height: 28; radius: 7; color: "#34516b"
                             Text { anchors.centerIn: parent; text: "LAUNCH"; color: "white"; font.bold: true }
                             MouseArea { anchors.fill: parent; enabled: installed[modelData.id] && installed[modelData.id].enabled && !busy; onClicked: mutation("launch-set", modelData.id, "", null) }
+                        }
+                        Rectangle {
+                            width: 104; height: 28; radius: 7; color: "#5a456b"
+                            Text { anchors.centerIn: parent; text: "ROLLBACK"; color: "white"; font.bold: true }
+                            MouseArea { anchors.fill: parent; enabled: installed[modelData.id] && !installed[modelData.id].enabled && !busy; onClicked: mutation("rollback", modelData.id, "", function() { refresh() }) }
                         }
                         Rectangle {
                             visible: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined

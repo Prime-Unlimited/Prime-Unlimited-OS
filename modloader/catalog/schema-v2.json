@@ -61,6 +61,7 @@
       "required": ["id", "name", "version", "models", "architecture", "abi", "downloadUrl", "sha256", "size", "entrypoint", "approval"],
       "properties": {
         "id": {"$ref": "#/$defs/id"}, "name": {"type": "string", "minLength": 1}, "version": {"type": "string", "minLength": 1},
+        "revision": {"type": "integer", "minimum": 0},
         "description": {"type": "string"}, "models": {}, "firmware": {}, "firmwareConstraint": {}, "architecture": {}, "abi": {},
         "downloadUrl": {}, "sha256": {}, "size": {}, "entrypoint": {"type": "string", "pattern": "^[^/\\\\][^\\\\]*$"},
         "approval": {"$ref": "#/$defs/approval"}, "overlay": {"type": "string", "pattern": "^[^/\\\\][^\\\\]*\\.qml$"}, "dependencies": {"type": "array", "items": {"$ref": "#/$defs/dependency"}},
