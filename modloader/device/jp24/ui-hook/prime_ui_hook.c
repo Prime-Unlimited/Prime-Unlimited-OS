@@ -17,7 +17,7 @@
  *     JP24 hardware, before trusting the patch path on a 64-bit process
  *     we have not verified this hook against yet.
  */
-typedef unsigned int u32;typedef unsigned short u16;typedef unsigned long up;typedef unsigned int size_t;typedef int pid_t;typedef unsigned long long u64;
+typedef unsigned int u32;typedef unsigned short u16;typedef unsigned long up;typedef unsigned long size_t;typedef int pid_t;typedef unsigned long long u64;
 extern void*dlsym(void*,const char*);extern int open(const char*,int,...);extern int close(int);extern int write(int,const void*,size_t);extern int read(int,void*,size_t);extern int mprotect(void*,size_t,int);extern void*malloc(size_t);extern void free(void*);extern pid_t getpid(void);extern int snprintf(char*,size_t,const char*,...);
 #define RN ((void*)-1l)
 #define LOG "/data/prime-unlimited/logs/ui-hook.log"

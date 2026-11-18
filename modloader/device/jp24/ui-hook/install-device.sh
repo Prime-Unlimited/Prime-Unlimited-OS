@@ -41,7 +41,6 @@ chmod 644 "$PU/lib/libprime-ui-hook.so" "$PU/ui/ModLoader.qml" "$PU/ui/prime_unl
 
 "$PU/bin/activate-jp24.sh" &
 [ ! -d "$CACHE" ] || rm -rf "$CACHE"
-systemd-run --quiet --unit=prime-unlimited-jp24-engine-restart-install --on-active=2s \
-    /bin/systemctl restart engine.service
-echo 'installation staged; run verify-device.sh after Engine returns'
+echo 'installation staged; activation schedules one Engine restart'
+echo 'run verify-device.sh after Engine returns'
 echo 'SSH is started by a separate systemd unit and should remain reachable across the Engine restart'
