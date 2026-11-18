@@ -1082,7 +1082,11 @@ func newPackageHTTPClient() *http.Client {
 	return &http.Client{
 		Transport: transport,
 		Timeout:   10 * time.Minute,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		CheckRedirect: func(request *http.Request, via []*http.Request) error {
+			if len(via) == 1 && via[0].URL.Scheme == "https" && via[0].URL.Hostname() == "api.github.com" &&
+				request.URL.Scheme == "https" && request.URL.Hostname() == "release-assets.githubusercontent.com" {
+				return nil
+			}
 			return http.ErrUseLastResponse
 		},
 	}
@@ -1139,7 +1143,7 @@ func downloadPackage(ctx context.Context, client *http.Client, item mod, cacheRo
 	if err != nil {
 		return result, err
 	}
-	request.Header.Set("Accept", "application/zip, application/octet-stream")
+	request.Header.Set("Accept", "application/octet-stream")
 	request.Header.Set("User-Agent", "Prime-Unlimited-Runtime/1")
 	response, err := client.Do(request)
 	if err != nil {
