@@ -4,6 +4,7 @@ import argparse, json, os, pathlib, subprocess, zipfile
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 def build(target, output):
+    output = output.resolve()
     cfg = {"jc11s": ("arm", "7"), "jp24": ("arm64", "")}[target]
     version = json.loads((ROOT / "modloader/VERSION.json").read_text())
     work = output / "work"

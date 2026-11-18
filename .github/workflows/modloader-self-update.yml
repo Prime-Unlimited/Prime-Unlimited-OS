@@ -30,7 +30,23 @@ jobs:
         with: {go-version: '1.24.x'}
       - run: python3 modloader/updater/package.py --target ${{ matrix.target }} --output dist/a
       - run: python3 modloader/updater/package.py --target ${{ matrix.target }} --output dist/b
-      - run: cmp dist/a/*.zip dist/b/*.zip && mkdir -p release && cp dist/a/*.zip release/
+      - name: Verify reproducibility, allowlist and binary identity
+        run: |
+          cmp dist/a/*.zip dist/b/*.zip
+          python3 - <<'PY'
+          import glob, zipfile
+          expected={"VERSION.json","bin/modloader-api-start.sh","bin/modloader-updater-start.sh","bin/prime-unlimited-runtime-api","bin/prime-unlimited-self-updater","ui/ModLoader.template.qml","ui/OverlayHost.template.qml"}
+          package=glob.glob("dist/a/*.zip")[0]
+          with zipfile.ZipFile(package) as archive:
+              assert set(archive.namelist()) == expected, archive.namelist()
+              for name in ("bin/prime-unlimited-runtime-api","bin/prime-unlimited-self-updater"):
+                  assert archive.read(name).startswith(b"\x7fELF")
+          PY
+          mkdir -p inspect release
+          unzip -q dist/a/*.zip 'bin/prime-unlimited-*' -d inspect
+          file inspect/bin/*
+          if [ "${{ matrix.target }}" = jc11s ]; then file inspect/bin/* | grep -q 'ELF 32-bit.*ARM'; else file inspect/bin/* | grep -q 'ELF 64-bit.*ARM aarch64'; fi
+          cp dist/a/*.zip release/
       - uses: actions/upload-artifact@v4
         with: {name: 'modloader-self-update-${{ matrix.target }}', path: 'release/*.zip', if-no-files-found: error}
   release:
