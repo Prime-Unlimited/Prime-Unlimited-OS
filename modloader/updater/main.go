@@ -277,7 +277,7 @@ func (s *server) check(ctx context.Context) error {
 	s.state.Available = &available
 	s.state.UpdateAvailable = compare(installed, available) < 0
 	s.state.Error = ""
-	_, e = os.Stat(filepath.Join(s.root, "updater/backup/version.json"))
+	_, e = os.Stat(filepath.Join(s.root, "updater/backup/updater/version.json"))
 	s.state.RollbackAvailable = e == nil
 	s.mu.Unlock()
 	return nil
