@@ -17,7 +17,7 @@ def test_reproducible_packages(tmp_path):
     for target in ("jc11s", "jp24"):
         outputs = []
         for index in (1, 2):
-            directory = tmp_path / str(index)
+            directory = tmp_path / target / str(index)
             subprocess.run([sys.executable, ROOT / "scripts/package.py", "--target", target, "--output", directory], check=True)
             package = next(directory.glob("*.zip")); outputs.append(hashlib.sha256(package.read_bytes()).hexdigest())
             subprocess.run([sys.executable, ROOT / "scripts/validate_package.py", str(package), "--target", target], check=True)
