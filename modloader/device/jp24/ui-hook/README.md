@@ -112,7 +112,9 @@ active. The generated unit is intentionally `disabled` because it lives in
 ## Second-stage splash
 
 The same `splash_visit()` call used on JC11S replaces Engine's
-`img/SplashScreen.png` from `/data/prime-unlimited/ui/splash/SplashScreen.png`.
+`img/SplashScreen.png` from `/data/prime-unlimited/ui/splash/SplashScreen.png`
+(the brand image stretched to 1280x800) and anchors the boot image to the
+full parent when the QML pattern matches.
 On JP24 the replacement is compiled only into the `PRIME_UI_HOOK_PATCH=1`
 build. A diagnostic build logs the candidate and keeps the stock splash. The
 aarch64 mapping stays inside the positive 32-bit offset window Qt sign-extends;

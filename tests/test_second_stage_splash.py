@@ -7,7 +7,7 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 PNG = ROOT / "modloader" / "device" / "common" / "splash" / "SplashScreen.png"
-SVG = ROOT / "assets" / "prime-unlimited-logo.svg"
+BRAND = ROOT / "assets" / "prime-unlimited-os-brand.png"
 RENDER = ROOT / "tools" / "splash" / "render_second_stage.py"
 HOOK = ROOT / "modloader" / "device" / "common" / "splash_resource.c"
 
@@ -21,12 +21,13 @@ def test_committed_splash_is_the_engine_second_stage_size():
     assert 24 < PNG.stat().st_size <= 2 * 1024 * 1024
 
 
-def test_renderer_uses_the_repository_logo_and_is_stable(tmp_path):
+def test_renderer_stretches_the_brand_image_and_is_stable(tmp_path):
     source = RENDER.read_text()
-    assert "assets" in source and "prime-unlimited-logo.svg" in source
+    assert "assets" in source and "prime-unlimited-os-brand.png" in source
     assert "1280" in source and "800" in source
-    svg = SVG.read_text()
-    assert "PRIME" in svg and "UNLIMITED" in svg
+    assert "letterbox" in source
+    brand = Image.open(BRAND)
+    assert brand.size == (2560, 1280)
     rendered = tmp_path / "SplashScreen.png"
     subprocess.run([sys.executable, str(RENDER), str(rendered)], check=True)
     assert hashlib.sha256(rendered.read_bytes()).digest() == hashlib.sha256(PNG.read_bytes()).digest()
@@ -44,6 +45,14 @@ def test_host_resource_swap_covers_fallback_and_sxtw():
     assert "0x20000000" in source
     assert "0x7fffffff" in source
     assert "stock splash kept" in source
+    assert "splash image stretched to parent" in source
+    assert "splash version anchored to os-version.qml" in source
+    assert "fillMode: Image.Stretch" in source
+    about = (ROOT / "modloader/device/jc11s/ui-hook/Version.qml").read_text()
+    assert "file:///data/prime-unlimited/os-version.qml" in about
+    assert "file:///data/prime-unlimited/os-version.qml" in source
+    assert "Prime Unlimited OS " in about
+    assert "Prime Unlimited OS " in source
     assert "/data/prime-unlimited/ui/splash/SplashScreen.png" in source
     assert "mmcblk" not in source
     assert "fastboot" not in source

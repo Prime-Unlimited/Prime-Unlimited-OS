@@ -6,6 +6,9 @@ void splash_visit(int version, unsigned char *tree, const unsigned char *names, 
 
 int splash_path_is_second_stage(const char *path);
 int splash_payload_accepted(const unsigned char *png, unsigned png_len);
+
+/* 1 = boot Image now fills its parent with Image.Stretch. 0 = payload unchanged. */
+int splash_stretch_layout(unsigned char *payload, unsigned len);
 int splash_relocation_allowed(unsigned long long blob, unsigned long long data, int require_sxtw);
 unsigned splash_map_span(unsigned bytes);
 

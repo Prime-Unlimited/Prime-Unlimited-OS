@@ -274,6 +274,155 @@ static void test_visit_swaps_only_the_second_stage(const char *png_path) {
     free(data);
 }
 
+static void test_stretch_layout(void) {
+    const char *source =
+        "prelude\n"
+        "    sourceComponent: FocusScope {\n"
+        "        id: splashscreen\n"
+        "\n"
+        "        AIRMouseEventBlocker {}\n"
+        "        Image {\n"
+        "            source: PlanckGUI.views.splashScreenController.viewModel.hasConfirmation\n"
+        "                ? kept\n"
+        "        }\n"
+        "        Image {\n"
+        "            id: overlay\n"
+        "            source: overlay-source\n"
+        "        }\n"
+        "        SequentialAnimation {\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "            running: true\n"
+        "        }\n"
+        "            sourceComponent: SplashScreenWithAcknowledgement {}\n"
+        "            active: PlanckGUI.views.splashScreenController.viewModel.hasConfirmation\n"
+        "        }\n";
+    char *buffer = malloc(strlen(source) + 1);
+    char *untouched;
+    unsigned len;
+    expect(buffer != NULL, "stretch buffer");
+    if (!buffer)
+        return;
+    len = (unsigned)strlen(source);
+    memcpy(buffer, source, len);
+    untouched = malloc(len);
+    expect(untouched != NULL, "stretch control buffer");
+    if (!untouched) {
+        free(buffer);
+        return;
+    }
+    memcpy(untouched, source, len);
+    buffer[20] = 'X';
+    expect(!splash_stretch_layout((unsigned char *)buffer, len), "broken pattern is rejected");
+    buffer[20] = untouched[20];
+    memcpy(buffer, untouched, len);
+    expect(splash_stretch_layout((unsigned char *)buffer, len), "synthetic layout stretches");
+    buffer[len] = 0;
+    expect(strstr(buffer, "anchors.fill: parent") != NULL, "parent fill inserted");
+    expect(strstr(buffer, "fillMode: Image.Stretch") != NULL, "stretch fill mode inserted");
+    expect(strstr(buffer, "id: overlay") != NULL, "overlay image kept");
+    expect(strstr(buffer, "overlay-source") != NULL, "overlay source kept");
+    expect(strstr(buffer, "fillMode: Image.Stretch") < strstr(buffer, "id: overlay"), "stretch applies to the boot image");
+    expect(strstr(strstr(buffer, "id: overlay"), "fillMode") == NULL, "overlay is not stretched");
+    expect(strstr(buffer, "file:///data/prime-unlimited/os-version.qml") != NULL, "version file matches About");
+    expect(strstr(buffer, "Prime Unlimited OS ") != NULL, "version label matches About");
+    free(untouched);
+    free(buffer);
+}
+
+static void test_stretch_engine_qml(void) {
+    FILE *in = fopen("/tmp/Engine.bin", "rb");
+    unsigned char *file;
+    long size;
+    long at;
+    unsigned char *qml;
+    const unsigned char *second;
+    if (!in)
+        return;
+    if (fseek(in, 0, SEEK_END) != 0) {
+        fclose(in);
+        return;
+    }
+    size = ftell(in);
+    if (size < 3000 || fseek(in, 0, SEEK_SET) != 0) {
+        fclose(in);
+        return;
+    }
+    file = malloc((unsigned long)size);
+    expect(file != NULL && fread(file, 1, (size_t)size, in) == (size_t)size, "read Engine.bin");
+    fclose(in);
+    if (!file)
+        return;
+    for (at = 0; at + 4 + 38 < size; at++) {
+        if (file[at] == 0 && file[at + 1] == 0 && file[at + 2] == 0x09 && file[at + 3] == 0x45 &&
+            memcmp(file + at + 4, "import QtQuick 2.0\nimport airQuick 1.0", 38) == 0)
+            break;
+    }
+    expect(at + 4 + 2373 <= size, "Engine splash qml located");
+    if (at + 4 + 2373 > size) {
+        free(file);
+        return;
+    }
+    qml = malloc(2374);
+    expect(qml != NULL, "qml buffer");
+    if (!qml) {
+        free(file);
+        return;
+    }
+    memcpy(qml, file + at + 4, 2373);
+    qml[2373] = 0;
+    free(file);
+    expect(splash_stretch_layout(qml, 2373), "engine qml stretches in place");
+    expect(strstr((char *)qml, "anchors.fill: parent") != NULL, "engine parent fill");
+    expect(strstr((char *)qml, "fillMode: Image.Stretch") != NULL, "engine stretch mode");
+    expect(strstr((char *)qml, "SplashScreen_NoText") != NULL, "confirmation image name kept");
+    expect(strstr((char *)qml, "splashscreenLoader.source") != NULL, "boot source kept");
+    second = (const unsigned char *)strstr((char *)qml, "id: overlay");
+    expect(second != NULL, "engine overlay remains");
+    expect(second && strstr((char *)second, "fillMode") == NULL, "engine overlay is not restyled");
+    expect(strstr((char *)qml, "file:///data/prime-unlimited/os-version.qml") != NULL, "engine version file");
+    expect(strstr((char *)qml, "anchors.right: parent.right") != NULL, "engine version sits on the right");
+    expect(strstr((char *)qml, "anchors.bottom: parent.bottom") != NULL, "engine version sits on the bottom");
+    expect(strstr((char *)qml, "Prime Unlimited OS ") != NULL, "engine version label matches About");
+    free(qml);
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "usage: splash_resource_host PNG\n");
@@ -285,6 +434,8 @@ int main(int argc, char **argv) {
     test_map_and_real_png(argv[1]);
     test_absent_file_keeps_stock();
     test_visit_swaps_only_the_second_stage(argv[1]);
+    test_stretch_layout();
+    test_stretch_engine_qml();
     if (failures) {
         fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

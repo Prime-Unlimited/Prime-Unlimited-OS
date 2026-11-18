@@ -351,6 +351,234 @@ static int apply_png(unsigned char *node, int version, unsigned char *data,
 #endif
 }
 
+static const char STRETCH_FOCUS_OLD[] =
+    "    sourceComponent: FocusScope {\n"
+    "        id: splashscreen\n"
+    "\n"
+    "        AIRMouseEventBlocker {}";
+static const char STRETCH_FOCUS_NEW[] =
+    "    sourceComponent: FocusScope {\n"
+    "        id: splashscreen\n"
+    "        anchors.fill: parent\n"
+    "        AIRMouseEventBlocker {}";
+static const char STRETCH_IMAGE_OLD[] =
+    "        Image {\n"
+    "            source: PlanckGUI.views.splashScreenController.viewModel.hasConfirmation";
+static const char STRETCH_IMAGE_NEW[] =
+    "        Image {\n"
+    "            anchors.fill: parent\n"
+    "            fillMode: Image.Stretch\n"
+    "            source: PlanckGUI.views.splashScreenController.viewModel.hasConfirmation";
+static const char STRETCH_TAIL[] = "        SequentialAnimation {";
+/* Same file and the same "Prime Unlimited OS " + version text as Version.qml. */
+static const char STRETCH_VERSION_OLD[] =
+    "            sourceComponent: SplashScreenWithAcknowledgement {}\n"
+    "            active: PlanckGUI.views.splashScreenController.viewModel.hasConfirmation\n"
+    "        }";
+static const char STRETCH_VERSION_NEW[] =
+    "            sourceComponent: SplashScreenWithAcknowledgement {}\n"
+    "            active: PlanckGUI.views.splashScreenController.viewModel.hasConfirmation\n"
+    "        }\n"
+    "        Loader {\n"
+    "            id: puOsVersion\n"
+    "            visible: false\n"
+    "            source: \"file:///data/prime-unlimited/os-version.qml\"\n"
+    "        }\n"
+    "        Text {\n"
+    "            anchors.right: parent.right\n"
+    "            anchors.bottom: parent.bottom\n"
+    "            anchors.margins: 18\n"
+    "            color: \"#f5f2eb\"\n"
+    "            font.pixelSize: 28\n"
+    "            text: puOsVersion.item ? \"Prime Unlimited OS \" + puOsVersion.item.version : \"Prime Unlimited OS unknown\"\n"
+    "        }";
+
+static unsigned text_len(const char *text) {
+    unsigned n = 0;
+    while (text[n])
+        n++;
+    return n;
+}
+
+static int find_once(const unsigned char *payload, unsigned len, const char *needle, unsigned *at) {
+    unsigned needle_len = text_len(needle);
+    unsigned i;
+    unsigned hits = 0;
+    unsigned found = 0;
+    if (needle_len == 0 || needle_len > len)
+        return 0;
+    for (i = 0; i + needle_len <= len; i++) {
+        unsigned j;
+        for (j = 0; j < needle_len; j++) {
+            if (payload[i + j] != (unsigned char)needle[j])
+                break;
+        }
+        if (j == needle_len) {
+            hits++;
+            found = i;
+        }
+    }
+    if (hits != 1)
+        return 0;
+    *at = found;
+    return 1;
+}
+
+static int contains_text(const unsigned char *payload, unsigned len, const char *needle) {
+    unsigned needle_len = text_len(needle);
+    unsigned i;
+    if (needle_len == 0 || needle_len > len)
+        return 0;
+    for (i = 0; i + needle_len <= len; i++) {
+        unsigned j;
+        for (j = 0; j < needle_len; j++) {
+            if (payload[i + j] != (unsigned char)needle[j])
+                break;
+        }
+        if (j == needle_len)
+            return 1;
+    }
+    return 0;
+}
+
+static unsigned leading_spaces(const unsigned char *text, unsigned len) {
+    unsigned i;
+    unsigned count = 0;
+    int line_start = 1;
+    for (i = 0; i < len; i++) {
+        if (line_start && text[i] == ' ')
+            count++;
+        else
+            line_start = text[i] == '\n';
+    }
+    return count;
+}
+
+static int drop_leading_spaces(unsigned char *text, unsigned len, unsigned extra) {
+    unsigned dropped = 0;
+    while (dropped < extra) {
+        unsigned i;
+        int line_start = 1;
+        int found = 0;
+        for (i = 0; i < len; i++) {
+            unsigned k;
+            if (line_start && text[i] == ' ') {
+                for (k = i; k + 1 < len; k++)
+                    text[k] = text[k + 1];
+                len--;
+                dropped++;
+                found = 1;
+                break;
+            }
+            line_start = text[i] == '\n';
+        }
+        if (!found)
+            return 0;
+    }
+    return 1;
+}
+
+int splash_stretch_layout(unsigned char *payload, unsigned len) {
+    unsigned focus_at;
+    unsigned image_at;
+    unsigned tail_at;
+    unsigned version_at;
+    unsigned focus_old = text_len(STRETCH_FOCUS_OLD);
+    unsigned focus_new = text_len(STRETCH_FOCUS_NEW);
+    unsigned image_old = text_len(STRETCH_IMAGE_OLD);
+    unsigned image_new = text_len(STRETCH_IMAGE_NEW);
+    unsigned version_old = text_len(STRETCH_VERSION_OLD);
+    unsigned version_new = text_len(STRETCH_VERSION_NEW);
+    unsigned extra;
+    unsigned middle;
+    unsigned after_image;
+    unsigned before_version;
+    unsigned after_version;
+    unsigned out_len;
+    unsigned char *copy;
+    if (!payload || len < 64)
+        return 0;
+    if (!find_once(payload, len, STRETCH_FOCUS_OLD, &focus_at))
+        return 0;
+    if (!find_once(payload, len, STRETCH_IMAGE_OLD, &image_at))
+        return 0;
+    if (!find_once(payload, len, STRETCH_TAIL, &tail_at))
+        return 0;
+    if (!find_once(payload, len, STRETCH_VERSION_OLD, &version_at))
+        return 0;
+    if (focus_at + focus_old > image_at || image_at + image_old > tail_at || tail_at > version_at)
+        return 0;
+    if (version_at + version_old > len)
+        return 0;
+    if (focus_new < focus_old || image_new < image_old || version_new < version_old)
+        return 0;
+    extra = (focus_new - focus_old) + (image_new - image_old) + (version_new - version_old);
+    if (leading_spaces(payload, len) < extra)
+        return 0;
+    copy = malloc((unsigned long)len + extra);
+    if (!copy)
+        return 0;
+    copy_bytes(copy, payload, focus_at);
+    out_len = focus_at;
+    copy_bytes(copy + out_len, (const unsigned char *)STRETCH_FOCUS_NEW, focus_new);
+    out_len += focus_new;
+    middle = image_at - (focus_at + focus_old);
+    copy_bytes(copy + out_len, payload + focus_at + focus_old, middle);
+    out_len += middle;
+    copy_bytes(copy + out_len, (const unsigned char *)STRETCH_IMAGE_NEW, image_new);
+    out_len += image_new;
+    after_image = tail_at - (image_at + image_old);
+    copy_bytes(copy + out_len, payload + image_at + image_old, after_image);
+    out_len += after_image;
+    before_version = version_at - tail_at;
+    copy_bytes(copy + out_len, payload + tail_at, before_version);
+    out_len += before_version;
+    copy_bytes(copy + out_len, (const unsigned char *)STRETCH_VERSION_NEW, version_new);
+    out_len += version_new;
+    after_version = len - (version_at + version_old);
+    copy_bytes(copy + out_len, payload + version_at + version_old, after_version);
+    out_len += after_version;
+    if (out_len != len + extra || !drop_leading_spaces(copy, out_len, extra)) {
+        free(copy);
+        return 0;
+    }
+    copy_bytes(payload, copy, len);
+    free(copy);
+    return 1;
+}
+
+static void maybe_stretch_layout(unsigned char *node, int version, unsigned char *data) {
+    u32 flags = ((u32)node[4] << 8) | node[5];
+    u32 slot_off;
+    u32 slot_len;
+    unsigned char *payload;
+    if (flags & (SPLASH_COMPRESSED | SPLASH_ZSTD | SPLASH_DIRECTORY))
+        return;
+    slot_off = be32(node + 10);
+    slot_len = be32(data + slot_off);
+    if (slot_len < 1200u || slot_len > 12000u)
+        return;
+    payload = data + slot_off + 4;
+    if (!contains_text(payload, slot_len, "id: splashscreenLoader"))
+        return;
+#ifdef DIAGNOSTIC_ONLY
+    logline("ui-hook: splash layout candidate, diagnostic build keeps stock layout");
+#else
+    if (!protect(payload, slot_len) || !protect(node, (u32)node_bytes(version))) {
+        logline("ui-hook: splash stretch protect failed, stock layout kept");
+        return;
+    }
+    if (!splash_stretch_layout(payload, slot_len)) {
+        logline("ui-hook: splash stretch pattern absent, stock layout kept");
+        return;
+    }
+    if (version >= 2)
+        put_stamp(node, payload, slot_len);
+    logline("ui-hook: splash image stretched to parent");
+    logline("ui-hook: splash version anchored to os-version.qml");
+#endif
+}
+
 static void append_name(char *dest, const char *parent, const char *name) {
     unsigned n = 0;
     unsigned i = 0;
@@ -401,6 +629,7 @@ static void walk(int version, unsigned char *tree, const unsigned char *names, u
             walk(version, tree, names, data, first + i, depth + 1, next);
         return;
     }
+    maybe_stretch_layout(node, version, data);
     if (!splash_path_is_second_stage(next))
         return;
 #ifdef DIAGNOSTIC_ONLY

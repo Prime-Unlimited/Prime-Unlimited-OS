@@ -136,11 +136,14 @@ These details matter when reproducing the result:
 
 ## Second-stage splash
 
-`prime_ui_hook.c` also calls `splash_visit()`. When
-`/data/prime-unlimited/ui/splash/SplashScreen.png` is a 1280x800 PNG, the hook
-replaces only the Engine resource `img/SplashScreen.png`. The firmware splash
-partition is not modified. A missing or rejected file leaves the stock picture
-in place. Details are in `docs/SECOND_STAGE_SPLASH.md`.
+`prime_ui_hook.c` also calls `splash_visit()`.
+`/data/prime-unlimited/ui/splash/SplashScreen.png` is
+`assets/prime-unlimited-os-brand.png` stretched to 1280x800. The hook replaces
+only the Engine resource `img/SplashScreen.png`, and when the boot splash QML
+matches it anchors that image to the full parent with `Image.Stretch`. The
+bottom-right text uses the same `os-version.qml` version as the About headline. The
+firmware splash partition is not modified. A missing or rejected file leaves
+the stock picture in place. Details are in `docs/SECOND_STAGE_SPLASH.md`.
 
 ## Known scope
 
