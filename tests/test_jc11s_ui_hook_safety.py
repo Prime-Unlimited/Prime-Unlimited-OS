@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 
@@ -34,3 +35,35 @@ def test_modloader_tile_is_the_compact_engine_asset():
     assert "PRIME UNLIMITED" in asset and "MOD</tspan> LOADER" in asset
     installer = (ROOT / "modloader/device/jc11s/ui-hook/install-device.sh").read_text()
     assert "prime_unlimited_mod_loader.svg" in installer
+
+
+def test_about_version_uses_separate_prime_unlimited_os_version():
+    os_version = (ROOT / "VERSION").read_text().strip()
+    modloader_version = json.loads((ROOT / "modloader/VERSION.json").read_text())
+    qml = (ROOT / "modloader/device/jc11s/ui-hook/Version.qml").read_text()
+    os_version_qml = (ROOT / "os/OSVersion.qml").read_text()
+
+    assert os_version == "0.0.1"
+    assert modloader_version == {"version": "0.2.0", "revision": 3}
+    assert "file:///data/prime-unlimited/os-version.qml" in qml
+    assert 'property string version: "0.0.1"' in os_version_qml
+    assert 'text: "Prime Unlimited OS " + primeUnlimitedVersion' in qml
+    assert "Engine OS" not in qml
+    assert "updaterController" not in qml
+
+
+def test_both_device_installers_provision_os_version_without_touching_engine_version():
+    for device in ("jc11s", "jp24"):
+        installer = (ROOT / f"modloader/device/{device}/ui-hook/install-device.sh").read_text()
+        hook = (ROOT / f"modloader/device/{device}/ui-hook/prime_ui_hook.c").read_text()
+        verifier = (ROOT / f"modloader/device/{device}/ui-hook/verify-device.sh").read_text()
+
+        assert 'cp "$OS_VERSION" "$PU/os-version"' in installer
+        assert 'cp "$OS_VERSION_QML" "$PU/os-version.qml"' in installer
+        assert 'Version.qml")" -le 930' in installer
+        assert "ui/patches/Version.qml" in installer
+        assert 'same(name,"Version.qml")' in hook
+        assert "swap applied Version.qml timestamped" in hook
+        assert "swap applied Version.qml timestamped" in verifier
+        assert "/tmp/com.denondj.engine.version" not in installer
+        assert "/tmp/com.denondj.engine.version" not in hook

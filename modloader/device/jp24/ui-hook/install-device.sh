@@ -22,6 +22,8 @@ CATALOG_TRUST="$HERE/../../../catalog/trust/prime-unlimited-2026-1.json"
 UPDATER="$HERE/../../../updater/build/jp24/prime-unlimited-self-updater"
 UPDATER_START="$HERE/../updater/start.sh"
 MODLOADER_VERSION="$HERE/../../../VERSION.json"
+OS_VERSION="$HERE/../../../../VERSION"
+OS_VERSION_QML="$HERE/../../../../os/OSVersion.qml"
 [ "$(id -u)" = 0 ] || { echo 'run as root' >&2; exit 1; }
 grep -q 'JP24' /sys/firmware/devicetree/base/inmusic,product-code 2>/dev/null || {
     echo 'refusing non-JP24 target' >&2; exit 1;
@@ -32,9 +34,14 @@ grep -q 'JP24' /sys/firmware/devicetree/base/inmusic,product-code 2>/dev/null ||
 [ -s "$SSH_ACTIVATE_SOURCE" ] || { echo 'JP24 systemd SSH activation script is missing' >&2; exit 1; }
 [ -s "$CATALOG" ] && [ -s "$CATALOG_SIGNATURE" ] && [ -s "$CATALOG_TRUST" ] || { echo 'signed JP24 catalog bundle missing' >&2; exit 1; }
 [ -s "$UPDATER" ] && [ -s "$UPDATER_START" ] && [ -s "$MODLOADER_VERSION" ] || { echo 'build the JP24 self-updater first' >&2; exit 1; }
+[ "$(cat "$OS_VERSION")" = "0.0.1" ] || { echo 'Prime Unlimited OS version is missing or invalid' >&2; exit 1; }
+grep -q 'version: "0.0.1"' "$OS_VERSION_QML" || { echo 'Prime Unlimited OS QML version is missing or invalid' >&2; exit 1; }
 [ -s /usr/Engine/Scripts/runengine ] || { echo 'firmware runengine missing' >&2; exit 1; }
 [ "$(wc -c < "$HERE/../../jc11s/ui-hook/ControlCenterTab.qml")" -le 1156 ] || {
     echo 'ControlCenterTab.qml exceeds the verified qrc slot' >&2; exit 1;
+}
+[ "$(wc -c < "$HERE/../../jc11s/ui-hook/Version.qml")" -le 930 ] || {
+    echo 'Version.qml exceeds its guarded replacement size' >&2; exit 1;
 }
 
 mkdir -p "$PU/bin" "$PU/lib" "$PU/logs" "$PU/ui/originals" "$PU/ui/patches"
@@ -48,6 +55,8 @@ chmod 700 "$PU/updater"
 cp "$UPDATER" "$PU/bin/prime-unlimited-self-updater"
 cp "$UPDATER_START" "$PU/bin/modloader-updater-start.sh"
 cp "$MODLOADER_VERSION" "$PU/updater/version.json"
+cp "$OS_VERSION" "$PU/os-version"
+cp "$OS_VERSION_QML" "$PU/os-version.qml"
 mkdir -p "$(dirname -- "$SSH_ACTIVATE_TARGET")"
 cp "$SSH_ACTIVATE_SOURCE" "$SSH_ACTIVATE_TARGET"
 cp "$HERE/build/libprime-ui-hook.so" "$PU/lib/libprime-ui-hook.so"
@@ -68,6 +77,7 @@ else
     "$HERE/make-engine-wrapper.sh" /usr/Engine/Scripts/engine "$PU/bin/engine-hooked.sh"
 fi
 cp "$HERE/../../jc11s/ui-hook/ControlCenterTab.qml" "$PU/ui/patches/ControlCenterTab.qml"
+cp "$HERE/../../jc11s/ui-hook/Version.qml" "$PU/ui/patches/Version.qml"
 cp "$HERE/../../../ui/ModLoader.qml" "$PU/ui/ModLoader.template.qml"
 cp "$HERE/../../../ui/OverlayHost.qml" "$PU/ui/OverlayHost.template.qml"
 cp "$HERE/../../../ui/assets/prime_unlimited_mod_loader.svg" "$PU/ui/prime_unlimited_mod_loader.svg"
@@ -75,7 +85,7 @@ cp "$HERE/activate-jp24.sh" "$PU/bin/activate-jp24.sh"
 cp "$RUNTIME" "$PU/bin/prime-unlimited-runtime-api"
 cp "$RUNTIME_START" "$PU/bin/modloader-api-start.sh"
 chmod 755 "$SSH_ACTIVATE_TARGET" "$PU/bin/runengine-hooked.sh" "$PU/bin/runengine.real" "$PU/bin/engine-hooked.sh" "$PU/bin/activate-jp24.sh" "$PU/bin/prime-unlimited-runtime-api" "$PU/bin/modloader-api-start.sh"
-chmod 644 "$PU/lib/libprime-ui-hook.so" "$PU/ui/ModLoader.template.qml" "$PU/ui/OverlayHost.template.qml" "$PU/ui/prime_unlimited_mod_loader.svg" "$PU/ui/patches/ControlCenterTab.qml"
+chmod 644 "$PU/lib/libprime-ui-hook.so" "$PU/ui/ModLoader.template.qml" "$PU/ui/OverlayHost.template.qml" "$PU/ui/prime_unlimited_mod_loader.svg" "$PU/ui/patches/ControlCenterTab.qml" "$PU/ui/patches/Version.qml" "$PU/os-version" "$PU/os-version.qml"
 chmod 600 "$PU/catalog/catalog.json" "$PU/catalog/catalog.sig.json" "$PU/trust/catalog-key.json"
 chmod 755 "$PU/bin/prime-unlimited-self-updater" "$PU/bin/modloader-updater-start.sh"
 chmod 600 "$PU/updater/version.json"

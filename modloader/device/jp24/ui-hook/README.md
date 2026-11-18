@@ -9,6 +9,11 @@ itself, not the device, and JP24 runs the same Engine OS version (5.3.0)
 that the JC11S hook was verified against - confirmed live via
 `/tmp/com.denondj.engine.version` on real JP24 hardware.
 
+The hook also swaps `Version.qml` so the About headline reads the independent
+`/data/prime-unlimited/os-version.qml`. This is display-only: Engine's original
+version file, updater model, build hash, device detection, and compatibility
+state are not modified.
+
 ## What is actually different from JC11S
 
 - **Platform**: JC11S's Engine runs as a 32-bit Android (Bionic) process

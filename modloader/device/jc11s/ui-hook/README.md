@@ -13,6 +13,11 @@ The integration is deliberately split into reproducible pieces:
   timestamp from a content hash so Qt cannot reuse stale compiled QML.
 - `ControlCenterTab.qml` adds the final Control Center tile, loads the repo's
   SVG, and opens `/data/prime-unlimited/ui/ModLoader.qml`.
+- `Version.qml` changes only the visible About headline to read the separate
+  `/data/prime-unlimited/os-version.qml` (with a plain companion version file
+  at `/data/prime-unlimited/os-version`). Engine's own version model, build hash,
+  `/tmp/com.denondj.engine.version`, update logic, and compatibility data stay
+  untouched.
 - `activate.sh` is the early ALSA/SSH-hook entrypoint. It bind-mounts the two
   launch wrappers, creates the runtime systemd drop-in, and schedules exactly
   one systemd-managed Engine restart per boot.
@@ -102,6 +107,8 @@ Success requires all of the following:
   ui/originals/ControlCenterTab.qml
   ui/originals/EmbeddedMain.qml
   ui/patches/ControlCenterTab.qml
+  ui/patches/Version.qml
+  os-version
 ```
 
 Runtime-only state is created under `/run`, including the systemd drop-in and
