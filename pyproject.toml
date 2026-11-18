@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prime-unlimited-os"
+version = "0.1.0"
+description = "Safe desktop installer and SSH mod manager for supported Denon DJ controllers"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+  "cryptography>=43,<46",
+  "paramiko>=3.5,<5",
+  "PySide6>=6.8,<7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "pytest-cov>=6", "ruff>=0.8", "pyinstaller>=6.11"]
+
+[project.gui-scripts]
+prime-unlimited-os = "app.main:main"
+
+[tool.setuptools.packages.find]
+include = ["app*", "core*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

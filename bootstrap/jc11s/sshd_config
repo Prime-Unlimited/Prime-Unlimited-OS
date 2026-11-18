@@ -1,0 +1,16 @@
+Port 22
+HostKey /data/prime-ssh/hostkeys/ssh_host_ed25519_key
+PidFile /run/prime-ssh.pid
+AuthorizedKeysFile /data/prime-ssh/authorized_keys
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PermitRootLogin prohibit-password
+AllowUsers root
+StrictModes yes
+AllowAgentForwarding no
+AllowTcpForwarding no
+X11Forwarding no
+PermitTunnel no

@@ -1,0 +1,129 @@
+name: Desktop installers (Windows and macOS)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/desktop-installer-foundation
+      - feat/integrate-jc11s-jp24
+  pull_request:
+    branches:
+      - feat/desktop-installer-foundation
+
+permissions:
+  contents: read
+
+jobs:
+  jc11s-hook:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ARMv7 cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
+      - name: Compile JC11S SSH hook
+        run: |
+          sh tools/build-jc11s-hook.sh bootstrap/jc11s/libprime-ssh.so
+          cd bootstrap/jc11s
+          sha256sum libprime-ssh.so > libprime-ssh.so.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jc11s-hook-${{ github.sha }}
+          path: |
+            bootstrap/jc11s/libprime-ssh.so
+            bootstrap/jc11s/libprime-ssh.so.sha256
+
+  build:
+    needs: jc11s-hook
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            artifact: Prime-Unlimited-OS-Windows
+            binary: dist/Prime-Unlimited-OS.exe
+          - os: macos-latest
+            label: macOS-Apple-Silicon
+            artifact: Prime-Unlimited-OS-macOS-arm64
+            binary: dist/Prime-Unlimited-OS
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download compiled JC11S hook
+        uses: actions/download-artifact@v4
+        with:
+          name: jc11s-hook-${{ github.sha }}
+          path: bootstrap/jc11s
+
+      - name: Install Windows filesystem tools
+        if: runner.os == 'Windows'
+        uses: cygwin/cygwin-install-action@v7
+        with:
+          install-dir: C:\\cygwin
+          packages: |
+            e2fsprogs
+            binutils
+
+      - name: Bundle Windows filesystem runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: tools/collect-windows-e2fsprogs.ps1 -Source C:\\cygwin -Destination vendor\\windows\\e2fsprogs
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip
+      - name: Install project and packaging tools
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest
+
+      - name: Build windowed executable
+        run: python -m PyInstaller --noconfirm --clean packaging/prime-unlimited-os.spec
+
+      - name: Check executable exists
+        shell: python
+        env:
+          BINARY_PATH: ${{ matrix.binary }}
+        run: |
+          import os
+          from pathlib import Path
+          p = Path(os.environ["BINARY_PATH"])
+          assert p.is_file() and p.stat().st_size > 0, f"Missing executable: {p}"
+          print(f"Built {p}: {p.stat().st_size} bytes")
+
+      - name: Generate SHA256
+        shell: python
+        env:
+          BINARY_PATH: ${{ matrix.binary }}
+        run: |
+          import hashlib
+          import os
+          from pathlib import Path
+          p = Path(os.environ["BINARY_PATH"])
+          digest = hashlib.sha256(p.read_bytes()).hexdigest()
+          Path("dist/SHA256SUMS.txt").write_text(f"{digest}  {p.name}\n")
+          print(f"{digest}  {p.name}")
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ github.sha }}
+          path: |
+            ${{ matrix.binary }}
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
