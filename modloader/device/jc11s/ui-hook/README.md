@@ -134,6 +134,14 @@ These details matter when reproducing the result:
    original artwork had transparent top/bottom margins that made the tile look
    smaller than its 256 by 104 pixel neighbours.
 
+## Second-stage splash
+
+`prime_ui_hook.c` also calls `splash_visit()`. When
+`/data/prime-unlimited/ui/splash/SplashScreen.png` is a 1280x800 PNG, the hook
+replaces only the Engine resource `img/SplashScreen.png`. The firmware splash
+partition is not modified. A missing or rejected file leaves the stock picture
+in place. Details are in `docs/SECOND_STAGE_SPLASH.md`.
+
 ## Known scope
 
 The Control Center integration and QML resource swap are verified on hardware.

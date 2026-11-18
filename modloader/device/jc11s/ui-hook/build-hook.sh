@@ -10,7 +10,7 @@ CFLAGS=${CFLAGS:-}
 # shellcheck disable=SC2086
 "$CC" $CFLAGS -shared -fPIC -Os -nostdlib \
     -Wl,-soname,libprime-ui-hook.so \
-    -o "$OUT/libprime-ui-hook.so" "$HERE/prime_ui_hook.c"
+    -o "$OUT/libprime-ui-hook.so" "$HERE/prime_ui_hook.c" "$HERE/../../common/splash_resource.c"
 "$READELF" -h "$OUT/libprime-ui-hook.so" | grep -q 'Class:.*ELF32'
 "$READELF" -h "$OUT/libprime-ui-hook.so" | grep -q 'Machine:.*ARM'
 "$READELF" -Ws "$OUT/libprime-ui-hook.so" | grep -q ' ZSTD_decompress$'

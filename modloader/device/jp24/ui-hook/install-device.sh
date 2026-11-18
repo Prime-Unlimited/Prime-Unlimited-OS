@@ -24,6 +24,7 @@ UPDATER_START="$HERE/../updater/start.sh"
 MODLOADER_VERSION="$HERE/../../../VERSION.json"
 OS_VERSION="$HERE/../../../../VERSION"
 OS_VERSION_QML="$HERE/../../../../os/OSVersion.qml"
+SPLASH="$HERE/../../common/splash/SplashScreen.png"
 [ "$(id -u)" = 0 ] || { echo 'run as root' >&2; exit 1; }
 grep -q 'JP24' /sys/firmware/devicetree/base/inmusic,product-code 2>/dev/null || {
     echo 'refusing non-JP24 target' >&2; exit 1;
@@ -43,8 +44,10 @@ grep -q 'version: "0.0.1"' "$OS_VERSION_QML" || { echo 'Prime Unlimited OS QML v
 [ "$(wc -c < "$HERE/../../jc11s/ui-hook/Version.qml")" -le 930 ] || {
     echo 'Version.qml exceeds its guarded replacement size' >&2; exit 1;
 }
+[ -s "$SPLASH" ] || { echo 'second-stage splash PNG missing' >&2; exit 1; }
+[ "$(wc -c < "$SPLASH")" -le 2097152 ] || { echo 'second-stage splash PNG exceeds 2 MiB' >&2; exit 1; }
 
-mkdir -p "$PU/bin" "$PU/lib" "$PU/logs" "$PU/ui/originals" "$PU/ui/patches"
+mkdir -p "$PU/bin" "$PU/lib" "$PU/logs" "$PU/ui/originals" "$PU/ui/patches" "$PU/ui/splash"
 mkdir -p "$PU/catalog" "$PU/trust"
 chmod 700 "$PU/catalog" "$PU/trust"
 cp "$CATALOG" "$PU/catalog/catalog.json"
@@ -81,11 +84,12 @@ cp "$HERE/../../jc11s/ui-hook/Version.qml" "$PU/ui/patches/Version.qml"
 cp "$HERE/../../../ui/ModLoader.qml" "$PU/ui/ModLoader.template.qml"
 cp "$HERE/../../../ui/OverlayHost.qml" "$PU/ui/OverlayHost.template.qml"
 cp "$HERE/../../../ui/assets/prime_unlimited_mod_loader.svg" "$PU/ui/prime_unlimited_mod_loader.svg"
+cp "$SPLASH" "$PU/ui/splash/SplashScreen.png"
 cp "$HERE/activate-jp24.sh" "$PU/bin/activate-jp24.sh"
 cp "$RUNTIME" "$PU/bin/prime-unlimited-runtime-api"
 cp "$RUNTIME_START" "$PU/bin/modloader-api-start.sh"
 chmod 755 "$SSH_ACTIVATE_TARGET" "$PU/bin/runengine-hooked.sh" "$PU/bin/runengine.real" "$PU/bin/engine-hooked.sh" "$PU/bin/activate-jp24.sh" "$PU/bin/prime-unlimited-runtime-api" "$PU/bin/modloader-api-start.sh"
-chmod 644 "$PU/lib/libprime-ui-hook.so" "$PU/ui/ModLoader.template.qml" "$PU/ui/OverlayHost.template.qml" "$PU/ui/prime_unlimited_mod_loader.svg" "$PU/ui/patches/ControlCenterTab.qml" "$PU/ui/patches/Version.qml" "$PU/os-version" "$PU/os-version.qml"
+chmod 644 "$PU/lib/libprime-ui-hook.so" "$PU/ui/ModLoader.template.qml" "$PU/ui/OverlayHost.template.qml" "$PU/ui/prime_unlimited_mod_loader.svg" "$PU/ui/patches/ControlCenterTab.qml" "$PU/ui/patches/Version.qml" "$PU/ui/splash/SplashScreen.png" "$PU/os-version" "$PU/os-version.qml"
 chmod 600 "$PU/catalog/catalog.json" "$PU/catalog/catalog.sig.json" "$PU/trust/catalog-key.json"
 chmod 755 "$PU/bin/prime-unlimited-self-updater" "$PU/bin/modloader-updater-start.sh"
 chmod 600 "$PU/updater/version.json"

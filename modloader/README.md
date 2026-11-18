@@ -24,6 +24,11 @@ The complete source, bootstrap, build, deployment and verification record is in
 [`device/jc11s/ui-hook/`](device/jc11s/ui-hook/README.md). The backend service
 is connected to the touch UI through its loopback API.
 
+The second Engine splash (`Skins/Embedded/img/SplashScreen.png`) can be replaced
+from `/data/prime-unlimited/ui/splash/SplashScreen.png` by the same preload hook.
+The firmware `splash` partition is not part of that path. See
+[docs/SECOND_STAGE_SPLASH.md](../docs/SECOND_STAGE_SPLASH.md).
+
 ## Runtime layout
 
 All persistent files and executable components must live under `/data/prime-unlimited/`:

@@ -109,6 +109,16 @@ hardware verification observed three retries before the service became
 active. The generated unit is intentionally `disabled` because it lives in
 `/run`; the persistent ALSA hook recreates and starts it on every boot.
 
+## Second-stage splash
+
+The same `splash_visit()` call used on JC11S replaces Engine's
+`img/SplashScreen.png` from `/data/prime-unlimited/ui/splash/SplashScreen.png`.
+On JP24 the replacement is compiled only into the `PRIME_UI_HOOK_PATCH=1`
+build. A diagnostic build logs the candidate and keeps the stock splash. The
+aarch64 mapping stays inside the positive 32-bit offset window Qt sign-extends;
+if that mapping fails, the stock splash stays. The firmware splash partition
+is not modified.
+
 ## Next step
 
 Build `../runtime-api/build.sh` and the patched UI hook first. For a fresh

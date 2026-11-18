@@ -1,3 +1,4 @@
+#include "../../common/splash_resource.h"
 typedef unsigned int u32;typedef unsigned short u16;typedef unsigned int size_t;typedef int pid_t;typedef unsigned long long u64;
 extern void*dlsym(void*,const char*);extern int open(const char*,int,...);extern int close(int);extern int write(int,const void*,size_t);extern int read(int,void*,size_t);extern int mprotect(void*,size_t,int);extern void*malloc(size_t);extern void free(void*);extern pid_t getpid(void);extern int snprintf(char*,size_t,const char*,...);
 #define RN ((void*)-1l)
@@ -17,4 +18,4 @@ static void node(int v,const unsigned char*t,const unsigned char*n,const unsigne
 __attribute__((constructor))static void init(void){char b[90];snprintf(b,sizeof(b),"ui-hook: persistent constructor pid %d",(int)getpid());line(b);}
 int snd_config_hook_prime_ui_hook(void*a,void*b,void**c,void*d){(void)a;(void)b;(void)c;(void)d;return 0;}int prime_ui_hook(void*a,void*b,void**c,void*d){return snd_config_hook_prime_ui_hook(a,b,c,d);}
 typedef int(*qr)(int,const unsigned char*,const unsigned char*,const unsigned char*);
-int _Z21qRegisterResourceDataiPKhS0_S0_(int v,const unsigned char*t,const unsigned char*n,const unsigned char*d){static qr r;if(!r)r=(qr)dlsym(RN,"_Z21qRegisterResourceDataiPKhS0_S0_");node(v,t,n,d,0,0);int x=r?r(v,t,n,d):0;line("ui-hook: qRegisterResourceData intercepted");return x;}
+int _Z21qRegisterResourceDataiPKhS0_S0_(int v,const unsigned char*t,const unsigned char*n,const unsigned char*d){static qr r;if(!r)r=(qr)dlsym(RN,"_Z21qRegisterResourceDataiPKhS0_S0_");node(v,t,n,d,0,0);splash_visit(v,(unsigned char*)t,n,(unsigned char*)d);int x=r?r(v,t,n,d):0;line("ui-hook: qRegisterResourceData intercepted");return x;}
