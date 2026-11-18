@@ -23,8 +23,8 @@ func TestProvisionAuthorizedUICreatesPrivateRuntimeCopy(t *testing.T) {
 	if err := provisionAuthorizedUI(root, token); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"ModLoader", "OverlayHost"} {
-		path := filepath.Join(uiRoot, name+".qml")
+	for name, runtimePath := range map[string]string{"ModLoader": filepath.Join(uiRoot, "ModLoader.qml"), "OverlayHost": filepath.Join(filepath.Dir(root), "O")} {
+		path := runtimePath
 		data, err := os.ReadFile(path)
 		if err != nil || !strings.Contains(string(data), token) || strings.Contains(string(data), string(uiAuthorizationMarker)) {
 			t.Fatalf("authorized UI content invalid for %s: %v", name, err)

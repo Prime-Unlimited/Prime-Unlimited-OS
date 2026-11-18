@@ -58,7 +58,12 @@ func provisionAuthorizedUI(root, token string) error {
 			return errors.New(name + " UI template has invalid authorization marker")
 		}
 		authorized := bytes.Replace(template, uiAuthorizationMarker, []byte(token), 1)
-		if err := writeAtomicPrivateFile(filepath.Join(root, "ui", name+".qml"), authorized); err != nil {
+		runtimeName := name + ".qml"
+		runtimePath := filepath.Join(root, "ui", runtimeName)
+		if name == "OverlayHost" {
+			runtimePath = filepath.Join(filepath.Dir(root), "O")
+		}
+		if err := writeAtomicPrivateFile(runtimePath, authorized); err != nil {
 			return err
 		}
 	}
