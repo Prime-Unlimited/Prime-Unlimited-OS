@@ -2,8 +2,9 @@
 
 Port of `devices/jc11s/ui-hook/` to the Prime 4 G2 (`JP24`, Rockchip RK3588,
 aarch64). The interception technique is unchanged: `LD_PRELOAD`-shadow Qt's
-`qRegisterResourceData`, walk the Qt RCC resource tree it receives, and swap
-`ControlCenterTab.qml`'s bytes in place. That tree format is part of Qt
+`qRegisterResourceData`, walk the Qt RCC resource tree it receives, swap
+`ControlCenterTab.qml`'s bytes in place, and inject `/data/O` into the
+compressed `EmbeddedMain.qml` resource. That tree format is part of Qt
 itself, not the device, and JP24 runs the same Engine OS version (5.3.0)
 that the JC11S hook was verified against - confirmed live via
 `/tmp/com.denondj.engine.version` on real JP24 hardware.
@@ -25,6 +26,11 @@ that the JC11S hook was verified against - confirmed live via
   garbage on JP24's process (addresses well above 4 GiB are routine in a
   64-bit process). This port uses `up` (`unsigned long`, 64-bit on this
   LP64 aarch64 target) for that arithmetic instead - see `prime_ui_hook.c`.
+- **Overlay injection**: the patched build mirrors JC11S's two proven paths:
+  it rewrites and recompresses `EmbeddedMain.qml` in the RCC data and also
+  intercepts `ZSTD_decompress`. Both paths replace the existing
+  `PageCacheInfo` block with a loader for `/data/O`. All page calculations
+  use the same LP64-safe `up` type as the Control Center patch.
 - **DIAGNOSTIC_ONLY by default**: `build-hook.sh` builds with
   `-DDIAGNOSTIC_ONLY` unless `PRIME_UI_HOOK_PATCH=1` is set, which makes
   `applypatch` log what `qRegisterResourceData` saw (resource name, flags,
@@ -112,3 +118,8 @@ This complete path was hardware-verified on 2026-11-18 across a full reboot.
 Engine, the systemd-managed SSH listener, and the runtime API were active;
 repeat activation remained connected and returned success; the Engine UI,
 LEDs, Mod Loader tile, and Mod Loader screen all worked normally.
+
+The additional `EmbeddedMain.qml` overlay injection is build-verified for
+aarch64 but remains a separate hardware-verification step. Do not publish a
+JP24 overlay catalog entry until the injection log, Engine UI, LEDs, overlay
+rendering, repeat activation, and full reboot have all been confirmed.

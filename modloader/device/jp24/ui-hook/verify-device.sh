@@ -15,6 +15,8 @@ grep -F 'ExecStart=/usr/sbin/sshd' /run/systemd/system/prime4-mod-sshd.service
 tr '\000' '\n' < "/proc/$P/environ" | grep -F 'LD_PRELOAD=/data/prime-unlimited/lib/libprime-ui-hook.so'
 grep -F '/data/prime-unlimited/lib/libprime-ui-hook.so' "/proc/$P/maps"
 grep -F 'swap applied ControlCenterTab.qml timestamped' /data/prime-unlimited/logs/ui-hook.log
+grep -F 'overlay host injected into EmbeddedMain.qml' /data/prime-unlimited/logs/ui-hook.log
 [ -s /data/prime-unlimited/ui/ModLoader.qml ]
+[ -s /data/O ]
 ! grep -Fq '__PRIME_UNLIMITED_AUTH_TOKEN__' /data/prime-unlimited/ui/ModLoader.qml
-printf 'verified Engine PID %s with active preload, QML swap, systemd-managed SSH, and runtime API\n' "$P"
+printf 'verified Engine PID %s with active preload, QML and overlay injection, systemd-managed SSH, and runtime API\n' "$P"

@@ -1,4 +1,4 @@
-/* JP24 (Prime 4 G2, aarch64) port of the JC11S ControlCenterTab.qml
+/* JP24 (Prime 4 G2, aarch64) port of the JC11S Control Center and overlay
  * resource hook. The interception mechanism (LD_PRELOAD shadowing Qt's
  * qRegisterResourceData, walking the Qt RCC resource tree to find a node
  * by name) is unchanged from devices/jc11s/ui-hook/prime_ui_hook.c, since
@@ -11,8 +11,8 @@
  *     glibc/systemd process; the same cast would truncate a real address
  *     (easily >4 GiB in a 64-bit process) to garbage. Pointer arithmetic
  *     here uses `up` (unsigned long, 64-bit on this LP64 target) instead.
- *   - DIAGNOSTIC_ONLY (set via -DDIAGNOSTIC_ONLY at build time) skips the
- *     actual byte-swap and leaves the resource untouched, only logging
+ *   - DIAGNOSTIC_ONLY (set via -DDIAGNOSTIC_ONLY at build time) skips all
+ *     Control Center and EmbeddedMain byte changes, only logging
  *     what qRegisterResourceData saw - for the first live test on real
  *     JP24 hardware, before trusting the patch path on a 64-bit process
  *     we have not verified this hook against yet.
@@ -24,13 +24,25 @@ extern void*dlsym(void*,const char*);extern int open(const char*,int,...);extern
 static u16 b16(const unsigned char*p){return((u16)p[0]<<8)|p[1];}static u32 b32(const unsigned char*p){return((u32)p[0]<<24)|((u32)p[1]<<16)|((u32)p[2]<<8)|p[3];}
 static void line(const char*s){int f=open(LOG,1|64|1024,0644);if(f>=0){size_t n=0;while(s[n])n++;write(f,s,n);write(f,"\n",1);close(f);}}
 static int same(const char*a,const char*b){while(*a&&*b&&*a==*b){a++;b++;}return *a==*b;}
+static size_t slen(const char*s){size_t n=0;while(s[n])n++;return n;}
+static void erase(unsigned char*p,size_t n,const char*s){size_t m=slen(s),i,j;if(m>n)return;for(i=0;i+m<=n;i++){for(j=0;j<m&&p[i+j]==(unsigned char)s[j];j++){}if(j==m){for(j=0;j<m;j++)if(p[i+j]!='\n')p[i+j]=' ';return;}}}
+static int overlay(unsigned char*p,size_t n){const char*a="        PageCacheInfo {\n            anchors {\n                right: parent.right\n                bottom: parent.bottom\n                margins: 5\n            }\n        }";const char*b="        Loader{anchors.fill:parent;source:\"file:/data/O\"}";size_t an=slen(a),bn=slen(b),i,j;if(bn>an||an>n)return 0;for(i=0;i+an<=n;i++){for(j=0;j<an&&p[i+j]==(unsigned char)a[j];j++){}if(j==an){for(j=0;j<an;j++)p[i+j]=' ';for(j=0;j<bn;j++)p[i+j]=(unsigned char)b[j];line("ui-hook: overlay host injected into EmbeddedMain.qml");return 1;}}return 0;}
+#ifndef DIAGNOSTIC_ONLY
+typedef size_t(*zd)(void*,size_t,const void*,size_t);
+size_t ZSTD_decompress(void*out,size_t cap,const void*in,size_t len){static zd real;if(!real)real=(zd)dlsym(RN,"ZSTD_decompress");if(!real)return(size_t)-1;size_t got=real(out,cap,in,len);if(got<=cap)overlay((unsigned char*)out,got);return got;}
+static int patchcompressed(unsigned char*e,unsigned char*h,unsigned char*p,u32 n){typedef u64(*gs)(const void*,size_t);typedef size_t(*dc)(void*,size_t,const void*,size_t);typedef size_t(*cc)(void*,size_t,const void*,size_t,int);gs get=(gs)dlsym(RN,"ZSTD_getFrameContentSize");dc dec=(dc)dlsym(RN,"ZSTD_decompress");cc comp=(cc)dlsym(RN,"ZSTD_compress");if(!get||!dec||!comp)return 0;u64 z=get(p,n);if(!z||z>20000000ULL)return 0;unsigned char*m=(unsigned char*)malloc((size_t)z);unsigned char*q=(unsigned char*)malloc((size_t)z);if(!m||!q){if(m)free(m);if(q)free(q);return 0;}size_t got=dec(m,(size_t)z,p,n);if(got!=(size_t)z||!overlay(m,got)){free(m);free(q);return 0;}erase(m,got,"    // Note: Most of these shortcuts are filtered out for non-INTERNAL builds\n    // If you want to enable a shortcut for all build types, you need to add them\n    // into the existing list in EmbeddedShortcutFilter.cpp");size_t packed=comp(q,(size_t)z,m,got,19);free(m);if(packed>n){char msg[120];snprintf(msg,sizeof(msg),"ui-hook: overlay recompression exceeded qrc slot packed=%u max=%u",(unsigned)packed,(unsigned)n);free(q);line(msg);return 0;}up pg=((up)p/4096ul)*4096ul;up plen=((((up)p+n+4095ul)/4096ul)*4096ul)-pg;if(mprotect((void*)pg,plen,3)){free(q);return 0;}u32 i;for(i=0;i<(u32)packed;i++)p[i]=q[i];free(q);h[0]=(u32)packed>>24;h[1]=(u32)packed>>16;h[2]=(u32)packed>>8;h[3]=(u32)packed;up ep=((up)e/4096ul)*4096ul;mprotect((void*)ep,4096,3);e[14]=0;e[15]=0;e[16]=1;e[17]=143;e[18]=212;e[19]=160;e[20]=64;e[21]=1;line("ui-hook: compressed EmbeddedMain.qml patched");return 1;}
+#endif
 static void dump(const char*out,const unsigned char*p,u32 n,u16 fl){int f;if(fl&4){typedef u64(*gs)(const void*,size_t);typedef size_t(*dc)(void*,size_t,const void*,size_t);gs get=(gs)dlsym(RN,"ZSTD_getFrameContentSize");dc dec=(dc)dlsym(RN,"ZSTD_decompress");if(get&&dec){u64 z=get(p,n);if(z>0&&z<20000000ULL){void*m=malloc((size_t)z);if(m){size_t got=dec(m,(size_t)z,p,n);if(got==(size_t)z){f=open(out,1|64|512,0644);if(f>=0){write(f,m,got);close(f);line("ui-hook: zstd resource dumped");}}free(m);}}}return;}f=open(out,1|64|512,0644);if(f>=0){write(f,p,n);close(f);line("ui-hook: raw resource dumped");}}
 #ifdef DIAGNOSTIC_ONLY
 static void applypatch(unsigned char*e,unsigned char*h,unsigned char*p,u32 max){(void)e;(void)h;(void)p;(void)max;line("ui-hook: DIAGNOSTIC_ONLY build, patch skipped");}
 #else
 static void applypatch(unsigned char*e,unsigned char*h,unsigned char*p,u32 max){int f=open("/data/prime-unlimited/ui/patches/ControlCenterTab.qml",0);if(f<0)return;up pg=((up)p/4096ul)*4096ul;up plen=((((up)p+max+4095ul)/4096ul)*4096ul)-pg;if(mprotect((void*)pg,plen,3)){close(f);return;}int g=read(f,p,max);close(f);if(g>0){u32 x=(u32)g;h[0]=x>>24;h[1]=x>>16;h[2]=x>>8;h[3]=x;u64 st=0xcbf29ce484222325ULL;int k;for(k=0;k<g;k++)st=(st^p[k])*0x100000001b3ULL;st=1577836800000ULL+st%2524608000000ULL;up ep=((up)e/4096ul)*4096ul;mprotect((void*)ep,4096,3);e[14]=st>>56;e[15]=st>>48;e[16]=st>>40;e[17]=st>>32;e[18]=st>>24;e[19]=st>>16;e[20]=st>>8;e[21]=st;line("ui-hook: swap applied ControlCenterTab.qml timestamped");}}
 #endif
-static void node(int v,const unsigned char*t,const unsigned char*n,const unsigned char*d,u32 idx,int dep){if(dep>40)return;u32 ns=v>=2?22:14;const unsigned char*e=t+idx*ns;u32 no=b32(e);u16 fl=b16(e+4);const unsigned char*np=n+no;u16 nl=b16(np);np+=6;char name[192];u32 i,m=nl<191?nl:191;for(i=0;i<m;i++)name[i]=(char)np[i*2+1];name[m]=0;if(fl&2){u32 c=b32(e+6),o=b32(e+10);for(i=0;i<c;i++)node(v,t,n,d,o+i,dep+1);return;}if(same(name,"ControlCenterTab.qml")||same(name,"EmbeddedMain.qml")){u32 o=b32(e+10),len=b32(d+o);char msg[220];snprintf(msg,sizeof(msg),"ui-hook: resource %s flags=%u len=%u",name,(unsigned)fl,(unsigned)len);line(msg);if(same(name,"ControlCenterTab.qml"))applypatch((unsigned char*)e,(unsigned char*)(d+o),(unsigned char*)(d+o+4),len);dump(same(name,"EmbeddedMain.qml")?"/data/prime-unlimited/ui/originals/EmbeddedMain.qml":"/data/prime-unlimited/ui/originals/ControlCenterTab.qml",d+o+4,len,fl);}}
+static void node(int v,const unsigned char*t,const unsigned char*n,const unsigned char*d,u32 idx,int dep){if(dep>40)return;u32 ns=v>=2?22:14;const unsigned char*e=t+idx*ns;u32 no=b32(e);u16 fl=b16(e+4);const unsigned char*np=n+no;u16 nl=b16(np);np+=6;char name[192];u32 i,m=nl<191?nl:191;for(i=0;i<m;i++)name[i]=(char)np[i*2+1];name[m]=0;if(fl&2){u32 c=b32(e+6),o=b32(e+10);for(i=0;i<c;i++)node(v,t,n,d,o+i,dep+1);return;}if(same(name,"ControlCenterTab.qml")||same(name,"EmbeddedMain.qml")){u32 o=b32(e+10),len=b32(d+o);char msg[220];snprintf(msg,sizeof(msg),"ui-hook: resource %s flags=%u len=%u",name,(unsigned)fl,(unsigned)len);line(msg);if(same(name,"ControlCenterTab.qml"))applypatch((unsigned char*)e,(unsigned char*)(d+o),(unsigned char*)(d+o+4),len);
+#ifndef DIAGNOSTIC_ONLY
+if(same(name,"EmbeddedMain.qml")&&(fl&4))patchcompressed((unsigned char*)e,(unsigned char*)(d+o),(unsigned char*)(d+o+4),len);
+#endif
+dump(same(name,"EmbeddedMain.qml")?"/data/prime-unlimited/ui/originals/EmbeddedMain.qml":"/data/prime-unlimited/ui/originals/ControlCenterTab.qml",d+o+4,b32(d+o),fl);}}
 __attribute__((constructor))static void init(void){char b[90];snprintf(b,sizeof(b),"ui-hook: persistent constructor pid %d",(int)getpid());line(b);}
 int snd_config_hook_prime_ui_hook(void*a,void*b,void**c,void*d){(void)a;(void)b;(void)c;(void)d;return 0;}int prime_ui_hook(void*a,void*b,void**c,void*d){return snd_config_hook_prime_ui_hook(a,b,c,d);}
 typedef int(*qr)(int,const unsigned char*,const unsigned char*,const unsigned char*);
