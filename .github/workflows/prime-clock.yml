@@ -90,4 +90,4 @@ jobs:
           stat --printf='%n %s bytes\n' *.zip | sort > prime-clock-SIZES.txt
       - name: Publish immutable tag assets
         env: {GH_TOKEN: '${{ github.token }}'}
-        run: gh release create "${GITHUB_REF_NAME}" release/*.zip release/prime-clock-SHA256SUMS.txt release/prime-clock-SIZES.txt --verify-tag --title "Prime Clock ${GITHUB_REF_NAME#prime-clock-v}" --notes "Unsigned device packages. Trusted catalog signing is a separate authorized step."
+        run: gh release create "${GITHUB_REF_NAME}" release/*.zip release/prime-clock-SHA256SUMS.txt release/prime-clock-SIZES.txt --repo "${GITHUB_REPOSITORY}" --verify-tag --title "Prime Clock ${GITHUB_REF_NAME#prime-clock-v}" --notes "Unsigned device packages. Trusted catalog signing is a separate authorized step."
