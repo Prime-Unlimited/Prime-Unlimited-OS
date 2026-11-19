@@ -34,9 +34,14 @@ class QmlContractTests(unittest.TestCase):
     def test_independent_self_updater_contract(self):
         text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")
         self.assertIn("127.0.0.1:8099/api/v1/status", text)
-        self.assertIn('updaterMutation(selfUpdate.updateAvailable ? "update" : "check")', text)
+        self.assertIn('updaterMutation(selfUpdate.updateAvailable ? "update" : "check", true)', text)
         self.assertIn('return selfUpdate.updateAvailable ? "UPDATE" : "CHECK UPDATES"', text)
         self.assertIn("updaterMutation", text)
+        self.assertIn('updaterMutation("check", true)', text)
+        self.assertIn("MODLOADER UPDATE AVAILABLE", text)
+        self.assertIn('updaterMutation("update", false)', text)
+        self.assertIn("restartModLoader()", text)
+        self.assertIn("host.active = true", text)
 
     def test_header_order_and_reduced_lifecycle_controls(self):
         text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")

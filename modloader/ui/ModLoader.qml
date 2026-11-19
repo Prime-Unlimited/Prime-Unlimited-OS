@@ -15,7 +15,8 @@ Rectangle {
     property bool busy: false
     property bool updaterBusy: false
     property bool developerMode: false
-    property var selfUpdate: ({"installed":{"version":"?","revision":0},"updateAvailable":false,"rollbackAvailable":false})
+    property bool showUpdatePrompt: false
+    property var selfUpdate: ({"installed":{"version":"?","revision":0},"available":{"version":"?","revision":0},"updateAvailable":false,"rollbackAvailable":false})
     property int selectedTab: 0
     property string pendingUninstall: ""
     property string statusText: "Connecting..."
@@ -68,12 +69,15 @@ Rectangle {
         refreshSelfUpdate()
     }
 
-    function refreshSelfUpdate() {
+    function refreshSelfUpdate(done) {
         var request = new XMLHttpRequest(); request.timeout = 4000
         request.onreadystatechange = function() {
             if (request.readyState !== XMLHttpRequest.DONE) return
             if (request.status === 200) {
-                try { selfUpdate = JSON.parse(request.responseText) }
+                try {
+                    selfUpdate = JSON.parse(request.responseText)
+                    if (done) done(selfUpdate)
+                }
                 catch (e) { statusText = "Invalid self-updater response" }
             }
         }
@@ -81,7 +85,19 @@ Rectangle {
         request.open("GET", "http://127.0.0.1:8099/api/v1/status"); request.send()
     }
 
-    function updaterMutation(action) {
+    function restartModLoader() {
+        var host = modLoader.parent
+        if (!host) { modLoader.closeRequested(); return }
+        var timer = Qt.createQmlObject('import QtQuick 2.12; Timer { interval: 3000; running: true; repeat: false }', host, "ModLoaderRestartTimer")
+        timer.triggered.connect(function() {
+            host.source = "file:///data/prime-unlimited/ui/ModLoader.qml?" + Date.now()
+            host.active = true
+            timer.destroy()
+        })
+        modLoader.closeRequested()
+    }
+
+    function updaterMutation(action, promptOnAvailable) {
         if (!authToken || updaterBusy) return
         var request = new XMLHttpRequest(); request.timeout = 720000; updaterBusy = true
         statusText = action === "check" ? "Checking for Modloader updates..." : "Updating Modloader..."
@@ -90,11 +106,19 @@ Rectangle {
             updaterBusy = false
             try {
                 var payload = JSON.parse(request.responseText)
-                statusText = request.status === 200
+                var succeeded = request.status === 200
+                statusText = succeeded
                     ? (action === "check" ? "Modloader update check completed" : "Modloader update completed")
                     : (payload.error || "Self-update failed")
+                if (succeeded && action === "update") {
+                    restartModLoader()
+                    return
+                }
             } catch(e) { statusText = "Invalid updater response" }
-            refreshSelfUpdate()
+            refreshSelfUpdate(function(state) {
+                if (action === "check" && promptOnAvailable && state.updateAvailable)
+                    showUpdatePrompt = true
+            })
         }
         request.onerror = function() {
             updaterBusy = false
@@ -201,7 +225,10 @@ Rectangle {
         return result
     }
 
-    Component.onCompleted: refresh()
+    Component.onCompleted: {
+        refresh()
+        updaterMutation("check", true)
+    }
 
     Rectangle {
         id: header
@@ -210,10 +237,10 @@ Rectangle {
         color: "#191c20"
         Text {
             id: headerTitle
-            x: 10; y: 4; width: 330; height: 34
+            x: 10; y: 2; width: 330; height: 38
             verticalAlignment: Text.AlignVCenter
             text: "PRIME UNLIMITED MODLOADER"
-            color: "#f4f2ee"; font.pixelSize: 21; font.bold: true
+            color: "#f4f2ee"; font.pixelSize: 26; font.bold: true; font.letterSpacing: -0.8
         }
         Text {
             id: headerVersion
@@ -259,7 +286,7 @@ Rectangle {
                 }
                 MouseArea {
                     anchors.fill: parent; enabled: !updaterBusy
-                    onClicked: updaterMutation(selfUpdate.updateAvailable ? "update" : "check")
+                    onClicked: updaterMutation(selfUpdate.updateAvailable ? "update" : "check", true)
                 }
             }
             Rectangle {
@@ -408,6 +435,31 @@ Rectangle {
                             mutation("disable", target, "", function(ok) { if (ok) mutation("uninstall", target, "", null) })
                         else mutation("uninstall", target, "", null)
                     }}
+                }
+            }
+        }
+    }
+    Rectangle {
+        visible: showUpdatePrompt
+        anchors.fill: parent; color: "#d9101215"; z: 20
+        Rectangle {
+            width: 520; height: 210; radius: 14; anchors.centerIn: parent; color: "#22262b"
+            Text {
+                x: 24; y: 24; width: 472; wrapMode: Text.WordWrap
+                color: "white"; font.pixelSize: 20; font.bold: true
+                text: "MODLOADER UPDATE AVAILABLE\n\nv" + selfUpdate.available.version + "-r" + selfUpdate.available.revision + " installieren?"
+            }
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter; y: 136; spacing: 18
+                Rectangle {
+                    width: 170; height: 52; radius: 10; color: "#33373c"
+                    Text { anchors.centerIn: parent; text: "NO"; color: "white"; font.bold: true }
+                    MouseArea { anchors.fill: parent; onClicked: showUpdatePrompt = false }
+                }
+                Rectangle {
+                    width: 170; height: 52; radius: 10; color: "#ff541c"
+                    Text { anchors.centerIn: parent; text: "YES"; color: "white"; font.bold: true }
+                    MouseArea { anchors.fill: parent; onClicked: { showUpdatePrompt = false; updaterMutation("update", false) } }
                 }
             }
         }
