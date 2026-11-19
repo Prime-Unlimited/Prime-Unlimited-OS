@@ -96,6 +96,11 @@ class AssembleCatalogTests(unittest.TestCase):
             manifest = copy.deepcopy(self.manifest); manifest["targets"][0][field] = value
             with self.assertRaises(ReleaseError): self.assemble_result(manifest=manifest)
 
+    def test_package_modified_after_manifest_digest_rejected(self):
+        (self.packages / self.manifest["targets"][0]["filename"]).write_bytes(b"modified package")
+        with self.assertRaisesRegex(ReleaseError, "package (digest|size)"):
+            self.assemble_result()
+
     def test_unapproved_target_cannot_claim_partial_status(self):
         manifest = copy.deepcopy(self.manifest); manifest["targets"][1]["status"]["built"] = True
         output = json.loads(self.assemble_result(manifest=manifest))
