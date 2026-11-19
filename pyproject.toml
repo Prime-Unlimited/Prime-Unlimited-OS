@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3", "pytest-cov>=6", "ruff>=0.8", "pyinstaller>=6.11"]
+dev = ["pytest>=8.3", "pytest-cov>=6", "ruff>=0.8", "pyinstaller>=6.11", "Pillow>=11,<13"]
 
 [project.gui-scripts]
 prime-unlimited-os = "app.main:main"
