@@ -13,6 +13,7 @@ Rectangle {
     property var safety: ({"safeMode": false, "mods": ({})})
     property string authToken: "__PRIME_UNLIMITED_AUTH_TOKEN__"
     property bool busy: false
+    property bool updaterBusy: false
     property bool developerMode: false
     property var selfUpdate: ({"installed":{"version":"?","revision":0},"updateAvailable":false,"rollbackAvailable":false})
     property int selectedTab: 0
@@ -69,17 +70,50 @@ Rectangle {
 
     function refreshSelfUpdate() {
         var request = new XMLHttpRequest(); request.timeout = 4000
-        request.onreadystatechange = function() { if (request.readyState === XMLHttpRequest.DONE && request.status === 200) { try { selfUpdate = JSON.parse(request.responseText) } catch (e) {} } }
+        request.onreadystatechange = function() {
+            if (request.readyState !== XMLHttpRequest.DONE) return
+            if (request.status === 200) {
+                try { selfUpdate = JSON.parse(request.responseText) }
+                catch (e) { statusText = "Invalid self-updater response" }
+            }
+        }
+        request.onerror = function() { if (updaterBusy) statusText = "Self-updater unavailable" }
         request.open("GET", "http://127.0.0.1:8099/api/v1/status"); request.send()
     }
 
     function updaterMutation(action) {
-        if (!authToken || busy) return
-        var request = new XMLHttpRequest(); request.timeout = 720000; busy = true
-        request.onreadystatechange = function() { if (request.readyState !== XMLHttpRequest.DONE) return; busy = false; try { var payload=JSON.parse(request.responseText); statusText=request.status===200 ? "Modloader " + action + " completed" : (payload.error || "Self-update failed") } catch(e) { statusText="Invalid updater response" }; refreshSelfUpdate() }
-        request.onerror = function() { busy=false; statusText="Self-updater unavailable" }
+        if (!authToken || updaterBusy) return
+        var request = new XMLHttpRequest(); request.timeout = 720000; updaterBusy = true
+        statusText = action === "check" ? "Checking for Modloader updates..." : "Updating Modloader..."
+        request.onreadystatechange = function() {
+            if (request.readyState !== XMLHttpRequest.DONE) return
+            updaterBusy = false
+            try {
+                var payload = JSON.parse(request.responseText)
+                statusText = request.status === 200
+                    ? (action === "check" ? "Modloader update check completed" : "Modloader update completed")
+                    : (payload.error || "Self-update failed")
+            } catch(e) { statusText = "Invalid updater response" }
+            refreshSelfUpdate()
+        }
+        request.onerror = function() { updaterBusy=false; statusText="Self-updater unavailable" }
+        request.ontimeout = function() { updaterBusy=false; statusText="Self-updater timed out" }
         request.open("POST", "http://127.0.0.1:8099/api/v1/" + action)
         request.setRequestHeader("Authorization", "Bearer " + authToken); request.send()
+    }
+
+    function selfUpdateButtonText() {
+        if (updaterBusy || selfUpdate.checking) return selfUpdate.updateAvailable ? "UPDATING..." : "CHECKING..."
+        return selfUpdate.updateAvailable ? "UPDATE" : "CHECK UPDATES"
+    }
+
+    function isApprovedForDevice(item) {
+        if (!item.approval || !item.approval.maintainer || !item.approval.devices) return false
+        var model = deviceText.split(" /")[0]
+        for (var index = 0; index < item.approval.devices.length; ++index) {
+            if (item.approval.devices[index] === model) return true
+        }
+        return false
     }
 
     function mutation(action, id, version, done) {
@@ -142,7 +176,9 @@ Rectangle {
         if (selectedTab === 0) {
             var available = []
             for (var index = 0; index < mods.length; ++index) {
-                if (mods[index].compatible || (developerMode && mods[index].deviceEligible)) available.push(mods[index])
+                var approved = isApprovedForDevice(mods[index])
+                if ((approved && mods[index].compatible) || (developerMode && mods[index].deviceEligible))
+                    available.push(mods[index])
             }
             return available
         }
@@ -163,88 +199,108 @@ Rectangle {
     Rectangle {
         id: header
         width: parent.width
-        height: 86
+        height: 64
         color: "#191c20"
         Text {
-            anchors.left: parent.left
-            anchors.leftMargin: 24
-            anchors.verticalCenter: parent.verticalCenter
-            text: "PRIME UNLIMITED  MOD LOADER"
-            color: "#f4f2ee"
-            font.pixelSize: 27
-            font.bold: true
+            id: headerTitle
+            x: 10; y: 9; width: 224; height: 46
+            verticalAlignment: Text.AlignVCenter
+            text: "PRIME UNLIMITED MODLOADER"
+            color: "#f4f2ee"; font.pixelSize: 17; font.bold: true
         }
         Text {
-            x: 26; y: 61; color: "#aab0b8"; font.pixelSize: 12
-            text: "v" + selfUpdate.installed.version + " r" + selfUpdate.installed.revision
+            id: headerVersion
+            anchors.left: headerTitle.right
+            anchors.leftMargin: 3
+            y: 9; width: 66; height: 46
+            verticalAlignment: Text.AlignVCenter
+            color: "#aab0b8"; font.pixelSize: 10; font.bold: true
+            text: "v" + selfUpdate.installed.version + "-r" + selfUpdate.installed.revision
+            elide: Text.ElideRight
         }
-        Rectangle {
-            visible: selfUpdate.updateAvailable || selfUpdate.rollbackAvailable
-            width: 154; height: 46; radius: 10; x: 520; y: 20
-            color: selfUpdate.updateAvailable ? "#d77921" : "#5a456b"
-            Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 12; font.bold: true; text: selfUpdate.updateAvailable ? "UPDATE MODLOADER" : "ROLLBACK MODLOADER" }
-            MouseArea { anchors.fill: parent; enabled: !busy; onClicked: updaterMutation(selfUpdate.updateAvailable ? "update" : "rollback") }
-        }
-        Rectangle {
-            width: 94; height: 54; radius: 12
+        Row {
+            id: headerControls
             anchors.right: parent.right
-            anchors.rightMargin: 18
-            anchors.verticalCenter: parent.verticalCenter
-            color: "#33373c"
-            Text { anchors.centerIn: parent; text: "CLOSE"; color: "white"; font.pixelSize: 17 }
-            MouseArea { anchors.fill: parent; onClicked: modLoader.closeRequested() }
-        }
-    }
-    Text {
-        id: device
-        x: 24; y: 103
-        text: deviceText
-        color: "#aab0b8"
-        font.pixelSize: 17
-    }
-    Row {
-        x: 330; y: 101; spacing: 8
-        Repeater {
-            model: ["AVAILABLE", "INSTALLED", "ACTIVITY"]
-            delegate: Rectangle {
-                width: 116; height: 40; radius: 9
-                color: selectedTab === index ? "#ff541c" : "#33373c"
-                Text { anchors.centerIn: parent; text: modelData; color: "white"; font.pixelSize: 13; font.bold: true }
-                MouseArea { anchors.fill: parent; onClicked: selectedTab = index }
+            anchors.rightMargin: 10
+            y: 9; spacing: 4
+            Repeater {
+                model: ["AVAILABLE", "INSTALLED", "ACTIVITY"]
+                delegate: Rectangle {
+                    width: index === 1 ? 68 : 64; height: 46; radius: 9
+                    color: selectedTab === index ? "#ff541c" : "#33373c"
+                    Text { anchors.centerIn: parent; text: modelData; color: "white"; font.pixelSize: 9; font.bold: true }
+                    MouseArea { anchors.fill: parent; onClicked: selectedTab = index }
+                }
+            }
+            Rectangle {
+                width: 78; height: 46; radius: 9
+                color: developerMode ? "#d77921" : "#33373c"
+                border.width: developerMode ? 2 : 1
+                border.color: developerMode ? "#ffb15c" : "#555a60"
+                Text {
+                    anchors.centerIn: parent; color: "white"; font.pixelSize: 10; font.bold: true
+                    text: developerMode ? "DEV MODE\nON" : "DEV MODE\nOFF"
+                    horizontalAlignment: Text.AlignHCenter
+                }
+                MouseArea { anchors.fill: parent; onClicked: developerMode = !developerMode }
+            }
+            Rectangle {
+                width: 92; height: 46; radius: 9
+                color: selfUpdate.updateAvailable ? "#d77921" : "#34516b"
+                Text {
+                    anchors.centerIn: parent; width: parent.width - 6
+                    horizontalAlignment: Text.AlignHCenter
+                    color: "white"; font.pixelSize: 9; font.bold: true; text: selfUpdateButtonText()
+                }
+                MouseArea {
+                    anchors.fill: parent; enabled: !updaterBusy
+                    onClicked: updaterMutation(selfUpdate.updateAvailable ? "update" : "check")
+                }
+            }
+            Rectangle {
+                width: 56; height: 46; radius: 9; color: "#33373c"
+                Text { anchors.centerIn: parent; text: "CLOSE"; color: "white"; font.pixelSize: 11; font.bold: true }
+                MouseArea { anchors.fill: parent; onClicked: modLoader.closeRequested() }
             }
         }
     }
     Text {
+        id: device
+        x: 20; y: 77
+        text: deviceText
+        color: "#aab0b8"
+        font.pixelSize: 17
+    }
+    Text {
         id: status
-        x: 24; y: 133
-        width: 290
+        x: 20; y: 105
+        width: 410
         text: statusText
         color: "#ff541c"
-        font.pixelSize: 16
+        font.pixelSize: 14
         elide: Text.ElideRight
     }
-    Rectangle {
-        x: 330; y: 140; width: 126; height: 28; radius: 8
-        color: developerMode ? "#6d512c" : "#33373c"
-        Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 12; text: developerMode ? "DEV MODE ON" : "DEV MODE OFF" }
-        MouseArea { anchors.fill: parent; onClicked: developerMode = !developerMode }
-    }
-    Rectangle {
-        x: 464; y: 140; width: 126; height: 28; radius: 8; color: "#34516b"
-        Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 12; text: "SYNC CATALOG" }
-        MouseArea { anchors.fill: parent; enabled: !busy; onClicked: syncCatalog() }
-    }
-    Rectangle {
-        x: 600; y: 140; width: 180; height: 28; radius: 8
-        color: safety.safeMode ? "#8d2d21" : "#264536"
-        Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: safety.safeMode ? "SAFE MODE ON" : "SAFE MODE OFF" }
-        MouseArea { anchors.fill: parent; enabled: !busy; onClicked: mutation(safety.safeMode ? "safe-mode/disable" : "safe-mode/enable", "", "", null) }
+    Row {
+        anchors.right: parent.right
+        anchors.rightMargin: 20
+        y: 76; spacing: 10
+        Rectangle {
+            width: 126; height: 42; radius: 9; color: "#34516b"
+            Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 12; text: "SYNC CATALOG" }
+            MouseArea { anchors.fill: parent; enabled: !busy; onClicked: syncCatalog() }
+        }
+        Rectangle {
+            width: 180; height: 42; radius: 9
+            color: safety.safeMode ? "#8d2d21" : "#264536"
+            Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: safety.safeMode ? "SAFE MODE ON" : "SAFE MODE OFF" }
+            MouseArea { anchors.fill: parent; enabled: !busy; onClicked: mutation(safety.safeMode ? "safe-mode/disable" : "safe-mode/enable", "", "", null) }
+        }
     }
     Flickable {
         visible: selectedTab !== 2
-        x: 20; y: 174
+        x: 20; y: 132
         width: parent.width - 40
-        height: parent.height - 190
+        height: parent.height - 148
         clip: true
         contentHeight: entries.height
         Column {
@@ -267,7 +323,15 @@ Rectangle {
                     }
                     Text {
                         x: 16; y: 48
-                        text: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined ? "Quarantined after " + safety.mods[modelData.id].failureCount + " failures" : (modelData.updateAvailable ? "Update available: " + modelData.updateReason : (modelData.compatible ? "Compatible" : "Not compatible with this device"))
+                        text: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined
+                            ? "Quarantined after " + safety.mods[modelData.id].failureCount + " failures"
+                            : (modelData.updateAvailable
+                                ? "Update available: " + modelData.updateReason
+                                : (modelData.compatible
+                                    ? "Official / compatible"
+                                    : (modelData.deviceEligible && !isApprovedForDevice(modelData)
+                                        ? "Developer preview / not approved"
+                                        : "Not compatible with this device")))
                         color: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined ? "#ff9b78" : (modelData.compatible ? "#73d6a3" : "#ff9b78")
                         font.pixelSize: 16
                     }
@@ -294,7 +358,7 @@ Rectangle {
                         property bool present: installed[modelData.id] !== undefined
                         Text { anchors.centerIn: parent; color: "white"; font.bold: true
                             text: parent.present ? (installed[modelData.id].enabled ? "DISABLE" : "ENABLE") : "INSTALL" }
-                        MouseArea { anchors.fill: parent; enabled: !busy; onClicked: {
+                        MouseArea { anchors.fill: parent; enabled: !busy && (parent.present || modelData.compatible); onClicked: {
                             if (!parent.present) installVerified(modelData.id)
                             else mutation(installed[modelData.id].enabled ? "disable" : "enable", modelData.id, "", null)
                         }}
@@ -310,20 +374,9 @@ Rectangle {
                         visible: installed[modelData.id] !== undefined
                         x: 330; y: 91; spacing: 8
                         Rectangle {
-                            width: 104; height: 28; radius: 7; color: "#34516b"
-                            Text { anchors.centerIn: parent; text: "LAUNCH"; color: "white"; font.bold: true }
-                            MouseArea { anchors.fill: parent; enabled: installed[modelData.id] && installed[modelData.id].enabled && !busy; onClicked: mutation("launch-set", modelData.id, "", null) }
-                        }
-                        Rectangle {
                             width: 104; height: 28; radius: 7; color: "#5a456b"
                             Text { anchors.centerIn: parent; text: "ROLLBACK"; color: "white"; font.bold: true }
                             MouseArea { anchors.fill: parent; enabled: installed[modelData.id] && !installed[modelData.id].enabled && !busy; onClicked: mutation("rollback", modelData.id, "", function() { refresh() }) }
-                        }
-                        Rectangle {
-                            visible: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined
-                            width: 104; height: 28; radius: 7; color: "#6d512c"
-                            Text { anchors.centerIn: parent; text: "RECOVER"; color: "white"; font.bold: true }
-                            MouseArea { anchors.fill: parent; enabled: !busy; onClicked: mutation("recover", modelData.id, "", null) }
                         }
                     }
                 }
@@ -356,7 +409,7 @@ Rectangle {
     }
     Flickable {
         visible: selectedTab === 2
-        x: 20; y: 174; width: parent.width - 40; height: parent.height - 190
+        x: 20; y: 132; width: parent.width - 40; height: parent.height - 148
         clip: true; contentHeight: activityEntries.height
         Column {
             id: activityEntries; width: parent.width; spacing: 8
