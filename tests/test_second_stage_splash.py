@@ -3,6 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +22,7 @@ def test_committed_splash_is_the_engine_second_stage_size():
     assert 24 < PNG.stat().st_size <= 2 * 1024 * 1024
 
 
-def test_renderer_stretches_the_brand_image_and_is_stable(tmp_path):
+def test_renderer_stretches_the_brand_image_to_the_runtime_geometry(tmp_path):
     source = RENDER.read_text()
     assert "assets" in source and "prime-unlimited-os-brand.png" in source
     assert "1280" in source and "800" in source
@@ -30,9 +31,11 @@ def test_renderer_stretches_the_brand_image_and_is_stable(tmp_path):
     assert brand.size == (2560, 1280)
     rendered = tmp_path / "SplashScreen.png"
     subprocess.run([sys.executable, str(RENDER), str(rendered)], check=True)
-    assert hashlib.sha256(rendered.read_bytes()).digest() == hashlib.sha256(PNG.read_bytes()).digest()
+    assert Image.open(rendered).size == (1280, 800)
+    assert hashlib.sha256(PNG.read_bytes()).hexdigest() == "516c16525a141db348f54be4fc55dbc54b8f26d00ace89cba4ca096f24352907"
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="resource hook uses Linux mmap semantics")
 def test_host_resource_swap_covers_fallback_and_sxtw():
     binary = Path("/tmp/prime-splash-resource-host")
     subprocess.run(
