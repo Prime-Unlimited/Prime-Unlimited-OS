@@ -4,6 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+TRUST_ROOT="$SCRIPT_DIR/../../../modloader/catalog/trust/prime-unlimited-2026-1.json"
 PUBLIC_KEY="${1:-}"
 IMAGE="${2:-$SCRIPT_DIR/prime4-data.img}"
 SIZE_MB="${DATA_SIZE_MB:-256}"
@@ -30,7 +31,7 @@ for cmd in mke2fs debugfs; do
     }
 done
 
-for file in "$SCRIPT_DIR/alsa-boot-hook.c" "$SCRIPT_DIR/99-prime4-mod.conf" "$SCRIPT_DIR/boot-activate.sh"; do
+for file in "$SCRIPT_DIR/alsa-boot-hook.c" "$SCRIPT_DIR/99-prime4-mod.conf" "$SCRIPT_DIR/boot-activate.sh" "$TRUST_ROOT"; do
     [[ -f "$file" ]] || { echo "Missing source file: $file" >&2; exit 1; }
 done
 
@@ -51,9 +52,11 @@ fi
 cp "$SCRIPT_DIR/99-prime4-mod.conf" "$TMP_DIR/99-prime4-mod.conf"
 cp "$SCRIPT_DIR/boot-activate.sh" "$TMP_DIR/boot-activate.sh"
 cp "$PUBLIC_KEY" "$TMP_DIR/authorized_keys"
+cp "$TRUST_ROOT" "$TMP_DIR/catalog-key.json"
 chmod 0644 "$TMP_DIR/99-prime4-mod.conf" "$TMP_DIR/libalsa-boot-hook.so"
 chmod 0755 "$TMP_DIR/boot-activate.sh"
 chmod 0600 "$TMP_DIR/authorized_keys"
+chmod 0644 "$TMP_DIR/catalog-key.json"
 
 mkdir -p "$(dirname -- "$IMAGE")"
 dd if=/dev/zero of="$IMAGE" bs=1m count="$SIZE_MB"
@@ -73,6 +76,8 @@ mkdir system/var/overlay/lib/alsa
 mkdir system/var/overlay/lib/alsa/conf.d
 mkdir prime4-mod
 mkdir prime4-mod/lib
+mkdir prime-unlimited
+mkdir prime-unlimited/trust
 EOF
 
 debugfs -w "$IMAGE" <<EOF >/dev/null 2>&1
@@ -81,10 +86,14 @@ write $TMP_DIR/99-prime4-mod.conf system/var/overlay/lib/alsa/conf.d/99-prime4-m
 write $HOOK_SO prime4-mod/lib/libalsa-boot-hook.so
 write $TMP_DIR/boot-activate.sh prime4-mod/boot-activate.sh
 write $TMP_DIR/authorized_keys prime4-mod/authorized_keys
+write $TMP_DIR/catalog-key.json prime-unlimited/trust/catalog-key.json
 set_inode_field system/var/overlay/lib/alsa/conf.d/99-prime4-mod.conf mode 0100644
 set_inode_field prime4-mod/lib/libalsa-boot-hook.so mode 0100755
 set_inode_field prime4-mod/boot-activate.sh mode 0100755
 set_inode_field prime4-mod/authorized_keys mode 0100600
+set_inode_field prime-unlimited/trust/catalog-key.json uid 0
+set_inode_field prime-unlimited/trust/catalog-key.json gid 0
+set_inode_field prime-unlimited/trust/catalog-key.json mode 0100644
 EOF
 
 echo "Built image: $IMAGE (${SIZE_MB} MiB)"

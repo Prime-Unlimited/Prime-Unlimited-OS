@@ -26,3 +26,9 @@ Its small caller workflow supplies `mod-id`, `mod-dir`, `release-title`, and
 `tag-prefix`. Prime Clock is the reference caller. The reusable workflow also
 builds the 32-bit JC11S and 64-bit JP24 UI hooks, keeps artifact metadata unique
 per target, and refuses a release tag that does not match the shared `VERSION`.
+
+Building packages does not make them official. Platform approval, preserved
+catalog assembly, and protected Ed25519 signing are separate gates. Maintainers
+must follow [`docs/RELEASE_SIGNING.md`](../docs/RELEASE_SIGNING.md); production
+signing remains disabled until its GitHub Environment and ruleset checklist is
+complete on protected `main`.
