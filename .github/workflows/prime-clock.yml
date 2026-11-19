@@ -20,7 +20,7 @@ on:
 jobs:
   build-and-release:
     permissions:
-      contents: write
+      contents: read
     uses: ./.github/workflows/reusable-mod-release.yml
     with:
       mod-id: prime-clock
