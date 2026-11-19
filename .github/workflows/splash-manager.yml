@@ -1,0 +1,31 @@
+name: Splash Manager packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/prime-unlimited-mod-loader]
+    paths:
+      - 'mods/splash-manager/**'
+      - 'modloader/**'
+      - '.github/workflows/splash-manager.yml'
+      - '.github/workflows/reusable-mod-release.yml'
+    tags: ['splash-manager-v*']
+  pull_request:
+    paths:
+      - 'mods/splash-manager/**'
+      - 'modloader/**'
+      - '.github/workflows/splash-manager.yml'
+      - '.github/workflows/reusable-mod-release.yml'
+
+jobs:
+  build-and-release:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/reusable-mod-release.yml
+    with:
+      mod-id: splash-manager
+      mod-dir: mods/splash-manager
+      release-title: Splash Manager
+      tag-prefix: splash-manager-v
