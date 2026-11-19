@@ -36,6 +36,7 @@ def test_native_builder_reports_every_missing_bundled_component(tmp_path: Path):
     assert not result.ready
     assert "vendor/windows/e2fsprogs/bin/mke2fs.exe" in result.missing
     assert "bootstrap/jc11s/libprime-ssh.so" in result.missing
+    assert "modloader/catalog/trust/prime-unlimited-2026-1.json" in result.missing
 
 
 def test_native_builder_stops_before_temp_build_when_prerequisites_missing(tmp_path: Path):

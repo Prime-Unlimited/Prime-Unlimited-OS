@@ -1,0 +1,193 @@
+name: Official protected mod release
+run-name: Official ${{ inputs.tag }} from candidate ${{ inputs.candidate-run-id }}
+on:
+  workflow_dispatch:
+    inputs:
+      tag: {description: Exact release tag, required: true, type: string}
+      commit-sha: {description: Exact 40-character tagged commit SHA, required: true, type: string}
+      mod-id: {description: Stable lowercase mod ID, required: true, type: string}
+      candidate-run-id: {description: Successful candidate workflow run ID, required: true, type: string}
+      release-title: {description: Human-readable release title, required: true, type: string}
+permissions: {contents: read}
+concurrency: {group: prime-unlimited-official-catalog-release, cancel-in-progress: false}
+env: {TRUSTED_BRANCH: main}
+
+jobs:
+  draft:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions: {actions: read, attestations: read, contents: write}
+    outputs: {version: '${{ steps.prepare.outputs.version }}'}
+    steps:
+      - id: prepare
+        name: Bind candidate and create immutable draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_SHA: ${{ inputs.commit-sha }}
+          MOD_ID: ${{ inputs.mod-id }}
+          RUN_ID: ${{ inputs.candidate-run-id }}
+          RELEASE_TITLE: ${{ inputs.release-title }}
+          TRUSTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$INPUT_SHA" | grep -Eq '^[a-f0-9]{40}$'
+          work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+          git clone --filter=blob:none --branch "$TRUSTED_BRANCH" "https://github.com/$GITHUB_REPOSITORY.git" "$work/trusted"
+          test "$(git -C "$work/trusted" rev-parse HEAD)" = "$TRUSTED_SHA"
+          git -C "$work/trusted" fetch --no-tags origin "refs/tags/$INPUT_TAG:refs/tags/$INPUT_TAG"
+          test "$(git -C "$work/trusted" rev-parse "$INPUT_TAG^{commit}")" = "$INPUT_SHA"
+          git -C "$work/trusted" merge-base --is-ancestor "$INPUT_SHA" "origin/$TRUSTED_BRANCH"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" > "$work/run.json"
+          jq -e --arg sha "$INPUT_SHA" --arg tag "$INPUT_TAG" --arg repo "$GITHUB_REPOSITORY" --arg path ".github/workflows/$MOD_ID.yml" \
+            '.conclusion=="success" and .head_sha==$sha and .event=="push" and .head_branch==$tag and .head_repository.full_name==$repo and .path==$path' "$work/run.json" >/dev/null
+          name="official-candidate-$MOD_ID-$INPUT_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" > "$work/artifacts.json"
+          test "$(jq -r --arg name "$name" '[.artifacts[]|select(.name==$name and .expired==false)]|length' "$work/artifacts.json")" = 1
+          id=$(jq -er --arg name "$name" '.artifacts[]|select(.name==$name and .expired==false)|.id' "$work/artifacts.json")
+          artifact_digest=$(jq -er --arg name "$name" '.artifacts[]|select(.name==$name and .expired==false)|.digest|select(startswith("sha256:"))|ltrimstr("sha256:")' "$work/artifacts.json")
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$work/artifact.zip"
+          test "$(sha256sum "$work/artifact.zip" | cut -d' ' -f1)" = "$artifact_digest"
+          mkdir "$work/candidate"; unzip -q "$work/artifact.zip" -d "$work/candidate"
+          for subject in "$work/candidate"/*.zip "$work/candidate/release-candidate.json"; do
+            gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/reusable-mod-release.yml" \
+              --source-digest "$INPUT_SHA" --source-ref "refs/tags/$INPUT_TAG" --deny-self-hosted-runners
+          done
+          candidate="$work/candidate/release-candidate.json"
+          version=$(jq -er --arg repo "$GITHUB_REPOSITORY" --arg sha "$INPUT_SHA" --arg tag "$INPUT_TAG" --arg mod "$MOD_ID" \
+            'select(.schemaVersion==1 and .repository==$repo and .commitSha==$sha and .tag==$tag and .modId==$mod)|.version' "$candidate")
+          test "$INPUT_TAG" = "$MOD_ID-v$version"
+          approval="$work/trusted/modloader/catalog/release-approvals/$MOD_ID-$version.json"; test -f "$approval"
+          if gh release view "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            test "$(gh release view "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false
+            mkdir "$work/published"; gh release download "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" --dir "$work/published"
+            for file in "$candidate" "$work/candidate"/*.zip "$work/candidate/$MOD_ID-SHA256SUMS.txt" "$work/candidate/$MOD_ID-SIZES.txt"; do
+              cmp "$file" "$work/published/$(basename "$file")"
+            done
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh release create "$INPUT_TAG" "$work/candidate"/*.zip "$candidate" \
+            "$work/candidate/$MOD_ID-SHA256SUMS.txt" "$work/candidate/$MOD_ID-SIZES.txt" \
+            --draft --verify-tag --repo "$GITHUB_REPOSITORY" \
+            --title "$RELEASE_TITLE $version" --notes 'Protected draft; catalog signing is still pending.'
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$INPUT_TAG" > "$work/release.json"
+          jq -n '{}' > "$work/assets.json"
+          for target in jc11s jp24; do
+            filename=$(jq -er --arg t "$target" '.targets[]|select(.target==$t)|.filename' "$candidate")
+            url=$(jq -er --arg n "$filename" '.assets[]|select(.name==$n)|.url' "$work/release.json")
+            jq --arg t "$target" --arg u "$url" '.+{($t):$u}' "$work/assets.json" > "$work/next"; mv "$work/next" "$work/assets.json"
+          done
+          python3 "$work/trusted/modloader/catalog/tools/release_manifest.py" finalize --candidate "$candidate" --approval "$approval" \
+            --contracts "$work/trusted/modloader/catalog/release-targets.json" --packages "$work/candidate" \
+            --assets "$work/assets.json" --bases "$work/trusted/modloader/catalog" --output "$work/release-manifest.json"
+          gh release upload "$INPUT_TAG" "$work/release-manifest.json" --repo "$GITHUB_REPOSITORY"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  sign-and-publish:
+    needs: draft
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: prime-unlimited-release
+    permissions: {attestations: read, contents: write}
+    steps:
+      - name: Assemble, sign, verify and publish without executing mod content
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_SHA: ${{ inputs.commit-sha }}
+          MOD_ID: ${{ inputs.mod-id }}
+          VERSION: ${{ needs.draft.outputs.version }}
+          SIGNING_KEY: ${{ secrets.PRIME_UNLIMITED_CATALOG_SIGNING_KEY }}
+          TRUSTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          case "$SIGNING_KEY" in
+            (*[!0-9a-f]*|'') echo 'release signing key is missing or malformed' >&2; exit 1;;
+          esac
+          test "${#SIGNING_KEY}" = 128 || { echo 'release signing key is missing or malformed' >&2; exit 1; }
+          work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+          printf '%s\n' "$SIGNING_KEY" > "$work/key"; chmod 0600 "$work/key"; unset SIGNING_KEY
+          git clone --filter=blob:none --branch "$TRUSTED_BRANCH" "https://github.com/$GITHUB_REPOSITORY.git" "$work/trusted"
+          test "$(git -C "$work/trusted" rev-parse HEAD)" = "$TRUSTED_SHA"
+          git -C "$work/trusted" merge-base --is-ancestor "$INPUT_SHA" "origin/$TRUSTED_BRANCH"
+          mkdir "$work/assets" "$work/output"; gh release download "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" --dir "$work/assets"
+          jq -e --arg repo "$GITHUB_REPOSITORY" --arg sha "$INPUT_SHA" --arg tag "$INPUT_TAG" --arg mod "$MOD_ID" --arg version "$VERSION" \
+            'select(.schemaVersion==1 and .repository==$repo and .commitSha==$sha and .tag==$tag and .modId==$mod and .version==$version)' \
+            "$work/assets/release-candidate.json" >/dev/null
+          for subject in "$work/assets"/*.zip "$work/assets/release-candidate.json" \
+            "$work/assets/$MOD_ID-SHA256SUMS.txt" "$work/assets/$MOD_ID-SIZES.txt"; do
+            gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/reusable-mod-release.yml" \
+              --source-digest "$INPUT_SHA" --source-ref "refs/tags/$INPUT_TAG" --deny-self-hosted-runners
+          done
+          (cd "$work/assets"; sha256sum ./*.zip | sed 's# \./# #' | sort) > "$work/recomputed-SHA256SUMS.txt"
+          (cd "$work/assets"; stat --printf='%n %s bytes\n' ./*.zip | sed 's#^\./##' | sort) > "$work/recomputed-SIZES.txt"
+          cmp "$work/recomputed-SHA256SUMS.txt" "$work/assets/$MOD_ID-SHA256SUMS.txt"
+          cmp "$work/recomputed-SIZES.txt" "$work/assets/$MOD_ID-SIZES.txt"
+          jq '{jc11s:(.targets[]|select(.target=="jc11s")|.downloadUrl),jp24:(.targets[]|select(.target=="jp24")|.downloadUrl)}' "$work/assets/release-manifest.json" > "$work/assets.json"
+          python3 "$work/trusted/modloader/catalog/tools/release_manifest.py" finalize --candidate "$work/assets/release-candidate.json" \
+            --approval "$work/trusted/modloader/catalog/release-approvals/$MOD_ID-$VERSION.json" \
+            --contracts "$work/trusted/modloader/catalog/release-targets.json" --packages "$work/assets" --assets "$work/assets.json" \
+            --bases "$work/trusted/modloader/catalog" --output "$work/recomputed.json"
+          cmp "$work/recomputed.json" "$work/assets/release-manifest.json"
+          go build -o "$work/sign-catalog" "$work/trusted/modloader/catalog/tools/sign_catalog.go"
+          for target in jc11s jp24; do
+            "$work/sign-catalog" -verify -catalog "$work/trusted/modloader/catalog/$target.json" \
+              -signature "$work/trusted/modloader/catalog/$target.sig.json" \
+              -public-key "$work/trusted/modloader/catalog/trust/prime-unlimited-2026-1.json"
+          done
+          for target in jc11s jp24; do
+            python3 "$work/trusted/modloader/catalog/tools/assemble_catalog.py" --base "$work/trusted/modloader/catalog/$target.json" \
+              --manifest "$work/assets/release-manifest.json" --targets "$work/trusted/modloader/catalog/release-targets.json" \
+              --target "$target" --packages "$work/assets" --output "$work/output/$target.json"
+            "$work/sign-catalog" -catalog "$work/output/$target.json" -private-key "$work/key" -key-id prime-unlimited-2026-1 \
+              -signature-out "$work/output/$target.sig.json" -public-key-out "$work/output/$target.trust.json"
+            cmp "$work/output/$target.trust.json" "$work/trusted/modloader/catalog/trust/prime-unlimited-2026-1.json"
+            "$work/sign-catalog" -verify -catalog "$work/output/$target.json" -signature "$work/output/$target.sig.json" \
+              -public-key "$work/trusted/modloader/catalog/trust/prime-unlimited-2026-1.json"
+            rm "$work/output/$target.trust.json"
+          done
+          rm "$work/key"
+          release_is_draft=$(gh release view "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          if test "$release_is_draft" = true; then
+            gh release upload "$INPUT_TAG" "$work/output"/* --repo "$GITHUB_REPOSITORY"
+          else
+            for file in jc11s.json jc11s.sig.json jp24.json jp24.sig.json; do
+              cmp "$work/output/$file" "$work/assets/$file"
+            done
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$INPUT_TAG" > "$work/release.json"
+          for required in release-candidate.json release-manifest.json "$MOD_ID-v$VERSION-jc11s.zip" "$MOD_ID-v$VERSION-jp24.zip" "$MOD_ID-SHA256SUMS.txt" "$MOD_ID-SIZES.txt" jc11s.json jc11s.sig.json jp24.json jp24.sig.json; do
+            test "$(jq -r --arg n "$required" '[.assets[]|select(.name==$n)]|length' "$work/release.json")" = 1
+          done
+          test "$(jq '.assets|length' "$work/release.json")" = 10
+          if test "$release_is_draft" = true; then
+            test "$(jq -r .draft "$work/release.json")" = true
+          else
+            test "$(jq -r .draft "$work/release.json")" = false
+          fi
+          mkdir "$work/roundtrip"
+          gh release download "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" --dir "$work/roundtrip"
+          for file in release-candidate.json release-manifest.json "$MOD_ID-v$VERSION-jc11s.zip" "$MOD_ID-v$VERSION-jp24.zip" "$MOD_ID-SHA256SUMS.txt" "$MOD_ID-SIZES.txt"; do
+            cmp "$work/assets/$file" "$work/roundtrip/$file"
+          done
+          for file in jc11s.json jc11s.sig.json jp24.json jp24.sig.json; do
+            cmp "$work/output/$file" "$work/roundtrip/$file"
+          done
+          if test "$release_is_draft" = true; then
+            gh release edit "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+          fi
+          test "$(gh release view "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false
+          git -C "$work/trusted" fetch origin "$TRUSTED_BRANCH"
+          test "$(git -C "$work/trusted" rev-parse "origin/$TRUSTED_BRANCH")" = "$TRUSTED_SHA"
+          cp "$work/output/jc11s.json" "$work/output/jc11s.sig.json" "$work/output/jp24.json" "$work/output/jp24.sig.json" "$work/trusted/modloader/catalog/"
+          git -C "$work/trusted" diff --exit-code -- . ':!modloader/catalog/jc11s.json' ':!modloader/catalog/jc11s.sig.json' ':!modloader/catalog/jp24.json' ':!modloader/catalog/jp24.sig.json'
+          git -C "$work/trusted" config user.name 'Prime Unlimited Release Bot'
+          git -C "$work/trusted" config user.email 'actions@users.noreply.github.com'
+          git -C "$work/trusted" add modloader/catalog/jc11s.json modloader/catalog/jc11s.sig.json modloader/catalog/jp24.json modloader/catalog/jp24.sig.json
+          git -C "$work/trusted" commit -m "release(catalog): publish $INPUT_TAG"
+          gh auth setup-git
+          git -C "$work/trusted" push origin "HEAD:$TRUSTED_BRANCH"

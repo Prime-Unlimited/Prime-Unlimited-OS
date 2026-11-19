@@ -20,6 +20,7 @@ EPOCH = "1700000000"
 UUID = "914fa90d-f643-42d5-a91c-184916a58cd5"
 FEATURES = "none,has_journal,ext_attr,filetype,extent,sparse_super,large_file"
 SOURCE = Path(__file__).resolve().parents[1] / "bootstrap" / "jc11s"
+TRUST_ROOT = Path(__file__).resolve().parents[1] / "modloader" / "catalog" / "trust" / "prime-unlimited-2026-1.json"
 
 
 def run(
@@ -71,6 +72,19 @@ def validate_hook(path: Path) -> None:
         raise ValueError("Hook must be an ARM shared object.")
 
 
+def bootstrap_files(authorized: bytes, hook: Path) -> dict[str, tuple[bytes, int]]:
+    """Return the public, root-owned payload staged into the JC11S /data image."""
+    return {
+        "prime-ssh/authorized_keys": (authorized, 0o600),
+        "prime-ssh/libprime-ssh.so": (hook.read_bytes(), 0o644),
+        "prime-ssh/activate.sh": ((SOURCE / "activate.sh").read_bytes(), 0o700),
+        "prime-ssh/sshd_config": ((SOURCE / "sshd_config").read_bytes(), 0o600),
+        "system/var/overlay/lib/alsa/conf.d/99-prime-ssh.conf": ((SOURCE / "99-prime-ssh.conf").read_bytes(), 0o644),
+        "system/var-lib/alsa/conf.d/99-prime-ssh.conf": ((SOURCE / "99-prime-ssh.conf").read_bytes(), 0o644),
+        "prime-unlimited/trust/catalog-key.json": (TRUST_ROOT.read_bytes(), 0o644),
+    }
+
+
 def build(
     output: Path,
     key: Path,
@@ -91,14 +105,7 @@ def build(
     if output.exists() or manifest_path.exists():
         raise FileExistsError("Refusing to overwrite image or manifest.")
     output.parent.mkdir(parents=True, exist_ok=True)
-    files = {
-        "prime-ssh/authorized_keys": (authorized, 0o600),
-        "prime-ssh/libprime-ssh.so": (hook.read_bytes(), 0o644),
-        "prime-ssh/activate.sh": ((SOURCE / "activate.sh").read_bytes(), 0o700),
-        "prime-ssh/sshd_config": ((SOURCE / "sshd_config").read_bytes(), 0o600),
-        "system/var/overlay/lib/alsa/conf.d/99-prime-ssh.conf": ((SOURCE / "99-prime-ssh.conf").read_bytes(), 0o644),
-        "system/var-lib/alsa/conf.d/99-prime-ssh.conf": ((SOURCE / "99-prime-ssh.conf").read_bytes(), 0o644),
-    }
+    files = bootstrap_files(authorized, hook)
     # Windows checkouts may convert tracked Linux payload files to CRLF.
     # Normalize only text payloads; never alter SSH keys or the ARM ELF hook.
     for name in (

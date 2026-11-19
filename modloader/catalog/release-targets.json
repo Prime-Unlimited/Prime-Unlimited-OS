@@ -1,0 +1,20 @@
+{
+  "jc11s": {
+    "catalogId": "prime-unlimited-jc11s",
+    "model": "JC11S",
+    "architecture": "armv7l",
+    "abi": "gnueabihf",
+    "firmware": ["5.3.0"],
+    "qtQuick": "2.12",
+    "overlayHostAvailable": true
+  },
+  "jp24": {
+    "catalogId": "prime-unlimited-jp24",
+    "model": "JP24",
+    "architecture": "aarch64",
+    "abi": "gnu",
+    "firmware": ["5.3.0"],
+    "qtQuick": "2.12",
+    "overlayHostAvailable": false
+  }
+}

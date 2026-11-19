@@ -45,6 +45,32 @@ func TestCatalogSyncSignatureAndUpdateComparison(t *testing.T) {
 	}
 }
 
+func TestCatalogVerificationRejectsDuplicateSignatureAndTrustKeys(t *testing.T) {
+	encoded, err := json.Marshal(map[string]any{"schemaVersion": 2, "catalogId": "device-catalog", "mods": []mod{}, "libraries": []library{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKey := base64.StdEncoding.EncodeToString(public)
+	signed := base64.StdEncoding.EncodeToString(ed25519.Sign(private, encoded))
+	validTrust := []byte(`{"algorithm":"ed25519","keyId":"test-key","publicKey":"` + publicKey + `"}`)
+	validSignature := []byte(`{"algorithm":"ed25519","keyId":"test-key","signature":"` + signed + `"}`)
+	tests := map[string]struct{ signature, trust []byte }{
+		"signature": {[]byte(`{"algorithm":"ed25519","keyId":"test-key","signature":"` + signed + `","signature":"attacker"}`), validTrust},
+		"trust":     {validSignature, []byte(`{"algorithm":"ed25519","keyId":"test-key","publicKey":"` + publicKey + `","publicKey":"attacker"}`)},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if state := verifyCatalogData(encoded, test.signature, test.trust); state.Status != "invalid" {
+				t.Fatalf("duplicate metadata key accepted: %#v", state)
+			}
+		})
+	}
+}
+
 func TestCatalogStartupUsesOnlySignedLastGoodFallback(t *testing.T) {
 	directory := t.TempDir()
 	catalogPath := filepath.Join(directory, "catalog.json")

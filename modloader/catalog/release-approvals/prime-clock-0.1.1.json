@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "modId": "prime-clock",
+  "version": "0.1.1",
+  "targets": {
+    "jc11s": {
+      "technicallyCompatible": true,
+      "hardwareVerified": true,
+      "officialCatalogApproved": true,
+      "catalog": {
+        "id": "prime-clock-jc11s",
+        "name": "Prime Clock",
+        "version": "0.1.1",
+        "revision": 1,
+        "description": "Compact local clock and monotonic stopwatch overlay.",
+        "entrypoint": "prime-clock/start.sh",
+        "overlay": "prime-clock/ui/PrimeClock.qml",
+        "approval": {"maintainer": "Prime Unlimited", "devices": ["JC11S"]}
+      }
+    },
+    "jp24": {
+      "technicallyCompatible": false,
+      "hardwareVerified": false,
+      "officialCatalogApproved": false,
+      "catalog": {
+        "id": "prime-clock-jp24",
+        "name": "Prime Clock",
+        "version": "0.1.1",
+        "revision": 1,
+        "description": "Compact local clock and monotonic stopwatch overlay.",
+        "entrypoint": "prime-clock/start.sh",
+        "overlay": "prime-clock/ui/PrimeClock.qml",
+        "approval": {"maintainer": "Prime Unlimited", "devices": ["JP24"]}
+      }
+    }
+  }
+}

@@ -389,6 +389,8 @@ func TestLoadCatalogValidation(t *testing.T) {
 		data string
 	}{
 		{"unknown field", `{"schemaVersion":1,"mods":[],"extra":true}`},
+		{"duplicate root key", `{"schemaVersion":1,"schemaVersion":1,"mods":[]}`},
+		{"duplicate nested key", strings.Replace(mustJSON(t, valid), `"id":`, `"id":"attacker","id":`, 1)},
 		{"unsupported schema", `{"schemaVersion":2,"mods":[]}`},
 		{"duplicate id", `{"schemaVersion":1,"mods":[` + mustJSON(t, validMod()) + `,` + mustJSON(t, validMod()) + `]}`},
 		{"uppercase sha", strings.Replace(mustJSON(t, valid), strings.Repeat("0", 64), strings.Repeat("A", 64), 1)},

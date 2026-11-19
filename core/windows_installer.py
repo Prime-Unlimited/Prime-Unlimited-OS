@@ -105,6 +105,7 @@ class NativeWindowsImageBuilder:
         self.mke2fs_config = self.source_root / "vendor" / "windows" / "e2fsprogs" / "etc" / "mke2fs.conf"
         self.hook = self.source_root / "bootstrap" / "jc11s" / "libprime-ssh.so"
         self.hook_digest = self.hook.with_suffix(self.hook.suffix + ".sha256")
+        self.catalog_trust_root = self.source_root / "modloader" / "catalog" / "trust" / "prime-unlimited-2026-1.json"
 
     def prerequisites(self) -> BuildPrerequisites:
         required = [
@@ -112,6 +113,7 @@ class NativeWindowsImageBuilder:
             self.mke2fs_config,
             self.hook,
             self.hook_digest,
+            self.catalog_trust_root,
         ]
         missing = tuple(path.relative_to(self.source_root).as_posix() for path in required if not path.is_file())
         if missing:
