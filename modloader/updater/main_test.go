@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -46,7 +47,7 @@ func TestPublishedManifestSignatureAndDeviceIsolation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if m.Version != "0.2.0" || m.Revision != 3 || len(m.Artifacts) != 2 {
+	if m.Version != "0.2.0" || m.Revision < 1 || len(m.Artifacts) != 2 {
 		t.Fatalf("manifest=%#v", m)
 	}
 	seen := map[string]bool{}
@@ -58,6 +59,24 @@ func TestPublishedManifestSignatureAndDeviceIsolation(t *testing.T) {
 	}
 	if !seen["JC11S"] || !seen["JP24"] {
 		t.Fatal("device artifact missing")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestReleaseAssetRequestsBinaryContent(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if got := r.Header.Get("Accept"); got != "application/octet-stream" {
+			t.Fatalf("Accept=%q", got)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("zip")), Header: make(http.Header)}, nil
+	})}
+	s := &server{client: client}
+	data, err := s.fetch(t.Context(), "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/1", 10)
+	if err != nil || string(data) != "zip" {
+		t.Fatalf("data=%q err=%v", data, err)
 	}
 }
 

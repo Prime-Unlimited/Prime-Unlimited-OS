@@ -96,7 +96,14 @@ Rectangle {
             } catch(e) { statusText = "Invalid updater response" }
             refreshSelfUpdate()
         }
-        request.onerror = function() { updaterBusy=false; statusText="Self-updater unavailable" }
+        request.onerror = function() {
+            updaterBusy = false
+            try {
+                var payload = JSON.parse(request.responseText)
+                statusText = payload.error || "Self-update request failed"
+            } catch(e) { statusText = "Self-updater unavailable" }
+            refreshSelfUpdate()
+        }
         request.ontimeout = function() { updaterBusy=false; statusText="Self-updater timed out" }
         request.open("POST", "http://127.0.0.1:8099/api/v1/" + action)
         request.setRequestHeader("Authorization", "Bearer " + authToken); request.send()

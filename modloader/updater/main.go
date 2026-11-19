@@ -201,6 +201,9 @@ func (s *server) fetch(ctx context.Context, url string, limit int64) ([]byte, er
 	if e != nil {
 		return nil, e
 	}
+	if strings.HasPrefix(url, "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/") {
+		r.Header.Set("Accept", "application/octet-stream")
+	}
 	resp, e := s.client.Do(r)
 	if e != nil {
 		return nil, e
