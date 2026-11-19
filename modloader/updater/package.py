@@ -21,6 +21,11 @@ def build(target, output):
       ROOT/"modloader/ui/OverlayHost.qml": work/"ui/OverlayHost.template.qml",
       ROOT/"modloader/VERSION.json": work/"VERSION.json",
     }
+    # Revision 8 is the compatibility bridge: revision 7 accepts exactly the
+    # original seven entries, while the r8 updater embeds and atomically stages
+    # this payload. Revision 9+ carries the now-allowlisted file directly.
+    if version["revision"] >= 9:
+        files[ROOT/"modloader/device/jc11s/ui-hook/ControlCenterTab.qml"] = work/"ui/patches/ControlCenterTab.qml"
     for source,dest in files.items(): dest.parent.mkdir(parents=True,exist_ok=True); dest.write_bytes(source.read_bytes())
     archive=output/f"prime-unlimited-modloader-v{version['version']}-r{version['revision']}-{target}.zip"
     with zipfile.ZipFile(archive,"w",zipfile.ZIP_DEFLATED,compresslevel=9) as z:

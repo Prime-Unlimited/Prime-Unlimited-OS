@@ -94,8 +94,13 @@ var allowed = map[string]string{
 	"bin/modloader-updater-start.sh":   "bin/modloader-updater-start.sh",
 	"ui/ModLoader.template.qml":        "ui/ModLoader.template.qml",
 	"ui/OverlayHost.template.qml":      "ui/OverlayHost.template.qml",
+	"ui/patches/ControlCenterTab.qml":  "ui/patches/ControlCenterTab.qml",
 	"VERSION.json":                     "updater/version.json",
 }
+
+const controlCenterTarget = "ui/patches/ControlCenterTab.qml"
+const controlCenterMarker = "updater/control-center-r8.applied"
+const engineQMLCache = "/data/AppDataUser/AIR Music Technology/Engine/.cache/qml"
 
 func readLimited(path string, limit int64) ([]byte, error) {
 	f, e := os.Open(path)
@@ -286,14 +291,14 @@ func (s *server) check(ctx context.Context) error {
 	return nil
 }
 func digest(data []byte) string { v := sha256.Sum256(data); return hex.EncodeToString(v[:]) }
-func extract(data []byte, destination string) error {
+func extractWithAllowlist(data []byte, destination string, allowlist map[string]string) error {
 	z, e := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if e != nil {
 		return e
 	}
 	seen := map[string]bool{}
 	for _, f := range z.File {
-		target, ok := allowed[f.Name]
+		target, ok := allowlist[f.Name]
 		if !ok || seen[f.Name] || f.FileInfo().IsDir() || f.Mode()&os.ModeSymlink != 0 {
 			return errors.New("bundle contains unapproved entry")
 		}
@@ -315,10 +320,13 @@ func extract(data []byte, destination string) error {
 			return e
 		}
 	}
-	if len(seen) != len(allowed) {
+	if len(seen) != len(allowlist) {
 		return errors.New("bundle is incomplete")
 	}
 	return nil
+}
+func extract(data []byte, destination string) error {
+	return extractWithAllowlist(data, destination, allowed)
 }
 func copyFile(src, dst string) error {
 	d, e := readLimited(src, 32*1024*1024)
@@ -330,6 +338,41 @@ func copyFile(src, dst string) error {
 		return e
 	}
 	return writeAtomic(dst, d, info.Mode().Perm())
+}
+
+func installControlCenterPatch(root, cachePath string) error {
+	target := filepath.Join(root, controlCenterTarget)
+	marker := filepath.Join(root, controlCenterMarker)
+	if _, err := os.Stat(marker); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	current, err := readLimited(target, 1156)
+	if err != nil {
+		return err
+	}
+	payload := []byte(controlCenterTabPayload)
+	if len(payload) == 0 || len(payload) > 1156 {
+		return errors.New("embedded ControlCenterTab.qml is invalid")
+	}
+	backup := filepath.Join(root, "updater/backup", controlCenterTarget)
+	if _, err = os.Stat(backup); os.IsNotExist(err) {
+		if err = writeAtomic(backup, current, 0644); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	if !bytes.Equal(current, payload) {
+		if err = writeAtomic(target, payload, 0644); err != nil {
+			return err
+		}
+	}
+	if err = os.RemoveAll(cachePath); err != nil {
+		return err
+	}
+	return writeAtomic(marker, []byte("revision=8\n"), 0600)
 }
 func (s *server) backup() error {
 	base := filepath.Join(s.root, "updater/backup")
@@ -436,6 +479,8 @@ func (s *server) rollback() error {
 	if e := s.restore(); e != nil {
 		return e
 	}
+	_ = os.Remove(filepath.Join(s.root, controlCenterMarker))
+	_ = os.RemoveAll(engineQMLCache)
 	if e := restartRuntime(); e != nil {
 		return e
 	}
@@ -536,6 +581,9 @@ func main() {
 		return http.ErrUseLastResponse
 	}}
 	s := &server{root: *root, model: *model, architecture: *arch, abi: *abi, manifestURL: *manifestURL, signatureURL: *signatureURL, trustPath: *trust, tokenPath: *tokenPath, client: client}
+	if e := installControlCenterPatch(*root, engineQMLCache); e != nil {
+		s.state.Error = "Control Center tile update: " + e.Error()
+	}
 	if v, e := s.installed(); e == nil {
 		s.state.Installed = v
 	}

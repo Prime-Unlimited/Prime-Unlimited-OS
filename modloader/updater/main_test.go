@@ -106,6 +106,87 @@ func TestBundleExtractionIsAllowlisted(t *testing.T) {
 	}
 }
 
+func TestRevision8BridgeRemainsRevision7AllowlistCompatible(t *testing.T) {
+	legacy := map[string]string{
+		"bin/prime-unlimited-runtime-api":  "bin/prime-unlimited-runtime-api",
+		"bin/prime-unlimited-self-updater": "bin/prime-unlimited-self-updater",
+		"bin/modloader-api-start.sh":       "bin/modloader-api-start.sh",
+		"bin/modloader-updater-start.sh":   "bin/modloader-updater-start.sh",
+		"ui/ModLoader.template.qml":        "ui/ModLoader.template.qml",
+		"ui/OverlayHost.template.qml":      "ui/OverlayHost.template.qml",
+		"VERSION.json":                     "updater/version.json",
+	}
+	var b bytes.Buffer
+	z := zip.NewWriter(&b)
+	for name := range legacy {
+		w, _ := z.Create(name)
+		_, _ = w.Write([]byte(name))
+	}
+	if err := z.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractWithAllowlist(b.Bytes(), t.TempDir(), legacy); err != nil {
+		t.Fatal("revision 7 rejected the revision 8 bridge bundle:", err)
+	}
+}
+
+func TestEmbeddedControlCenterPayloadMatchesCanonicalHook(t *testing.T) {
+	canonical, err := os.ReadFile(filepath.Join("..", "device", "jc11s", "ui-hook", "ControlCenterTab.qml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(canonical, []byte(controlCenterTabPayload)) {
+		t.Fatal("embedded ControlCenterTab.qml differs from canonical QRC patch")
+	}
+	if len(canonical) > 1156 {
+		t.Fatalf("ControlCenterTab.qml exceeds QRC slot: %d", len(canonical))
+	}
+}
+
+func TestControlCenterMigrationBacksUpStagesAndInvalidatesCache(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, controlCenterTarget)
+	cache := filepath.Join(root, "qml-cache")
+	old := []byte("old control center")
+	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, old, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cache, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, "compiled.qmlc"), []byte("cache"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := installControlCenterPatch(root, cache); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(target)
+	if !bytes.Equal(got, []byte(controlCenterTabPayload)) {
+		t.Fatal("Control Center patch was not staged")
+	}
+	backup, _ := os.ReadFile(filepath.Join(root, "updater", "backup", controlCenterTarget))
+	if !bytes.Equal(backup, old) {
+		t.Fatalf("backup=%q", backup)
+	}
+	if _, err := os.Stat(cache); !os.IsNotExist(err) {
+		t.Fatalf("QML cache still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, controlCenterMarker)); err != nil {
+		t.Fatal("migration marker missing", err)
+	}
+	s := &server{root: root}
+	if err := s.restore(); err != nil {
+		t.Fatal(err)
+	}
+	restored, _ := os.ReadFile(target)
+	if !bytes.Equal(restored, old) {
+		t.Fatalf("restored=%q", restored)
+	}
+}
+
 func TestUpdaterMutationAuthorization(t *testing.T) {
 	root := t.TempDir()
 	tokenPath := filepath.Join(root, "token")

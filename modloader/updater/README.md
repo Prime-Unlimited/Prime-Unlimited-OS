@@ -23,9 +23,20 @@ Endpoints:
 The service checks automatically at startup. Mutation endpoints use the same
 device-owned bearer token as the main runtime; it is never stored in GitHub.
 
-Current signed channel: Modloader `0.2.0` revision `7`. Revision 7 moves the
-version beside the device/firmware identity and dedicates the full header height
-to the larger title. The manifest pins the
+Current release candidate: Modloader `0.2.0` revision `8`. Revision 8 extends
+the signed update and rollback boundary to the QRC-backed Control Center tile.
+The manifest pins the
 immutable GitHub assets for JC11S and JP24 by asset ID, byte size and SHA-256.
 Earlier r1/r2 build-validation releases are not referenced by a signed manifest
 and therefore cannot be installed by the updater.
+
+Revision 8 is the compatibility bridge for QRC-backed Control Center updates.
+The revision 7 updater accepts exactly seven archive entries, so r8 embeds the
+canonical, 1156-byte-slot-checked `ControlCenterTab.qml` in the signed updater
+binary. On first r8 start it backs up the installed patch under
+`updater/backup/ui/patches/`, stages the replacement atomically, and removes the
+regenerable Engine QML cache. Rollback restores the previous patch and clears
+the cache again. Revision 9 and later include the now-allowlisted QML path as a
+normal eighth bundle entry. The live QRC resource adopts a staged tile change
+on the next controlled Engine/device restart; the updater never restarts Engine
+during a set.

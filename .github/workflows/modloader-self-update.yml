@@ -34,11 +34,16 @@ jobs:
         run: |
           cmp dist/a/*.zip dist/b/*.zip
           python3 - <<'PY'
-          import glob, zipfile
+          import glob, json, zipfile
           expected={"VERSION.json","bin/modloader-api-start.sh","bin/modloader-updater-start.sh","bin/prime-unlimited-runtime-api","bin/prime-unlimited-self-updater","ui/ModLoader.template.qml","ui/OverlayHost.template.qml"}
+          revision=json.load(open("modloader/VERSION.json"))["revision"]
+          if revision >= 9:
+              expected.add("ui/patches/ControlCenterTab.qml")
           package=glob.glob("dist/a/*.zip")[0]
           with zipfile.ZipFile(package) as archive:
               assert set(archive.namelist()) == expected, archive.namelist()
+              if revision == 8:
+                  assert "ui/patches/ControlCenterTab.qml" not in archive.namelist(), "r7 compatibility bridge gained an eighth entry"
               for name in ("bin/prime-unlimited-runtime-api","bin/prime-unlimited-self-updater"):
                   assert archive.read(name).startswith(b"\x7fELF")
           PY
