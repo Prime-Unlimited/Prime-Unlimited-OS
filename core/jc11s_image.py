@@ -14,6 +14,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
+from core.jc11s_bootstrap import payload as modloader_payload
 from core.processes import run_process
 
 EPOCH = "1700000000"
@@ -80,6 +81,8 @@ def build(
     *,
     tool_directory: Path | None = None,
     mke2fs_config: Path | None = None,
+    modloader_archive: Path | None = None,
+    ui_hook: Path | None = None,
 ) -> dict:
     """Explicit size is experimental, never inferred from USB ID or mount path."""
     if size < 64 * 1024**2 or size > 0xFFFFFFFF * 512 or size % 512:
@@ -99,6 +102,8 @@ def build(
         "system/var/overlay/lib/alsa/conf.d/99-prime-ssh.conf": ((SOURCE / "99-prime-ssh.conf").read_bytes(), 0o644),
         "system/var-lib/alsa/conf.d/99-prime-ssh.conf": ((SOURCE / "99-prime-ssh.conf").read_bytes(), 0o644),
     }
+    bootstrap_files, bootstrap_pin = modloader_payload(modloader_archive, ui_hook)
+    files.update(bootstrap_files)
     # Windows checkouts may convert tracked Linux payload files to CRLF.
     # Normalize only text payloads; never alter SSH keys or the ARM ELF hook.
     for name in (
@@ -163,7 +168,8 @@ def build(
         )
         commands = []
         modes = {"/": 0o40755, "lost+found": 0o40700}
-        modes.update({name: 0o40700 if name.startswith("prime-ssh") else 0o40755 for name in directories})
+        private = ("prime-ssh", "prime-unlimited/catalog", "prime-unlimited/trust")
+        modes.update({name: 0o40700 if name.startswith(private) else 0o40755 for name in directories})
         modes.update({name: 0o100000 | mode for name, (_, mode) in files.items()})
         for name, mode in sorted(modes.items()):
             path = "/" + name.lstrip("/")
@@ -197,6 +203,7 @@ def build(
         "sha256": digest(output),
         "format": "raw-ext4",
         "device_geometry": device_geometry,
+        "modloader_bootstrap": bootstrap_pin,
         "files": {name: hashlib.sha256(data).hexdigest() for name, (data, _) in files.items()},
     }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")

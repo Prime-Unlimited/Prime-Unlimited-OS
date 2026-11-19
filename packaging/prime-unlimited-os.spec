@@ -7,10 +7,11 @@ project_root = os.path.abspath(os.path.join(SPECPATH, ".."))
 datas = collect_data_files("app")
 # Bundle the JC11S bootstrap sources and JP24 firmware-update helper sources.
 # Compiled ARMv7 hook and Windows e2fsprogs must be supplied by a verified build step.
-for folder in ("bootstrap/jc11s", "devices/jp24/ssh-bootstrap", "assets", "vendor/windows/e2fsprogs"):
+for folder in ("bootstrap/jc11s", "devices/jp24/ssh-bootstrap", "assets", "vendor/windows/e2fsprogs", "modloader", "os"):
     source = os.path.join(project_root, folder)
     if os.path.isdir(source):
         datas.append((source, folder))
+datas.append((os.path.join(project_root, "VERSION"), "."))
 
 a = Analysis(
     [os.path.join(project_root, "app", "main.py")],
@@ -38,4 +39,3 @@ exe = EXE(
 
 if os.name == "posix" and __import__("sys").platform == "darwin":
     app = BUNDLE(exe, name="Prime-Unlimited-OS.app", bundle_identifier="org.primeunlimited.os")
-

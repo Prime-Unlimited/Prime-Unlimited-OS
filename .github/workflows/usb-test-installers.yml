@@ -2,9 +2,6 @@ name: USB regression test installers
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - fix/isolated-usb-backends-jc11s-jp24
 
 permissions:
   contents: read

@@ -4,11 +4,30 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feat/desktop-installer-foundation
-      - feat/integrate-jc11s-jp24
+      - main
+    paths:
+      - 'app/**'
+      - 'core/**'
+      - 'bootstrap/jc11s/**'
+      - 'devices/jp24/**'
+      - 'packaging/**'
+      - 'tools/build-jc11s-hook.sh'
+      - 'vendor/**'
+      - 'pyproject.toml'
+      - '.github/workflows/desktop-installers.yml'
   pull_request:
     branches:
-      - feat/desktop-installer-foundation
+      - main
+    paths:
+      - 'app/**'
+      - 'core/**'
+      - 'bootstrap/jc11s/**'
+      - 'devices/jp24/**'
+      - 'packaging/**'
+      - 'tools/build-jc11s-hook.sh'
+      - 'vendor/**'
+      - 'pyproject.toml'
+      - '.github/workflows/desktop-installers.yml'
 
 permissions:
   contents: read
@@ -27,6 +46,10 @@ jobs:
           sh tools/build-jc11s-hook.sh bootstrap/jc11s/libprime-ssh.so
           cd bootstrap/jc11s
           sha256sum libprime-ssh.so > libprime-ssh.so.sha256
+      - name: Verify pinned Modloader bootstrap
+        run: |
+          python -m pip install cryptography
+          python -c "from core.jc11s_bootstrap import payload; files,pin=payload(); print(pin); assert len(files) >= 20"
       - uses: actions/upload-artifact@v4
         with:
           name: jc11s-hook-${{ github.sha }}
