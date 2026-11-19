@@ -32,7 +32,8 @@ def test_renderer_stretches_the_brand_image_to_the_runtime_geometry(tmp_path):
     rendered = tmp_path / "SplashScreen.png"
     subprocess.run([sys.executable, str(RENDER), str(rendered)], check=True)
     assert Image.open(rendered).size == (1280, 800)
-    assert hashlib.sha256(PNG.read_bytes()).hexdigest() == "516c16525a141db348f54be4fc55dbc54b8f26d00ace89cba4ca096f24352907"
+    expected = "516c16525a141db348f54be4fc55dbc54b8f26d00ace89cba4ca096f24352907"
+    assert hashlib.sha256(PNG.read_bytes()).hexdigest() == expected
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="resource hook uses Linux mmap semantics")
