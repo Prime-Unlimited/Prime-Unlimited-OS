@@ -48,7 +48,6 @@ class QmlContractTests(unittest.TestCase):
         header = text[text.index("id: header") : text.index("id: device")]
         expected = [
             "PRIME UNLIMITED MODLOADER",
-            'selfUpdate.installed.version',
             'model: ["AVAILABLE", "INSTALLED", "ACTIVITY"]',
             'developerMode ? "DEV MODE',
             "selfUpdateButtonText()",
@@ -56,6 +55,9 @@ class QmlContractTests(unittest.TestCase):
         ]
         positions = [header.index(value) for value in expected]
         self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("headerVersion", header)
+        device = text[text.index("id: device") : text.index("id: status")]
+        self.assertIn('deviceText + "   MODLOADER v" + selfUpdate.installed.version', device)
         self.assertNotIn('text: "LAUNCH"', text)
         self.assertNotIn('text: "RECOVER"', text)
         self.assertNotIn('mutation("launch-set"', text)

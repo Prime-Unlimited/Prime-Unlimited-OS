@@ -237,18 +237,10 @@ Rectangle {
         color: "#191c20"
         Text {
             id: headerTitle
-            x: 10; y: 2; width: 330; height: 38
+            x: 10; y: 4; width: 370; height: 56
             verticalAlignment: Text.AlignVCenter
             text: "PRIME UNLIMITED MODLOADER"
-            color: "#f4f2ee"; font.pixelSize: 26; font.bold: true; font.letterSpacing: -0.8
-        }
-        Text {
-            id: headerVersion
-            x: 12; y: 39; width: 190; height: 20
-            verticalAlignment: Text.AlignVCenter
-            color: "#aab0b8"; font.pixelSize: 11; font.bold: true
-            text: "MODLOADER v" + selfUpdate.installed.version + "-r" + selfUpdate.installed.revision
-            elide: Text.ElideRight
+            color: "#f4f2ee"; font.pixelSize: 30; font.bold: true; font.letterSpacing: -1.5
         }
         Row {
             id: headerControls
@@ -258,14 +250,14 @@ Rectangle {
             Repeater {
                 model: ["AVAILABLE", "INSTALLED", "ACTIVITY"]
                 delegate: Rectangle {
-                    width: index === 1 ? 68 : 64; height: 46; radius: 9
+                    width: index === 1 ? 62 : 58; height: 46; radius: 9
                     color: selectedTab === index ? "#ff541c" : "#33373c"
                     Text { anchors.centerIn: parent; text: modelData; color: "white"; font.pixelSize: 9; font.bold: true }
                     MouseArea { anchors.fill: parent; onClicked: selectedTab = index }
                 }
             }
             Rectangle {
-                width: 78; height: 46; radius: 9
+                width: 70; height: 46; radius: 9
                 color: developerMode ? "#d77921" : "#33373c"
                 border.width: developerMode ? 2 : 1
                 border.color: developerMode ? "#ffb15c" : "#555a60"
@@ -277,7 +269,7 @@ Rectangle {
                 MouseArea { anchors.fill: parent; onClicked: developerMode = !developerMode }
             }
             Rectangle {
-                width: 92; height: 46; radius: 9
+                width: 82; height: 46; radius: 9
                 color: selfUpdate.updateAvailable ? "#d77921" : "#34516b"
                 Text {
                     anchors.centerIn: parent; width: parent.width - 6
@@ -290,7 +282,7 @@ Rectangle {
                 }
             }
             Rectangle {
-                width: 56; height: 46; radius: 9; color: "#33373c"
+                width: 52; height: 46; radius: 9; color: "#33373c"
                 Text { anchors.centerIn: parent; text: "CLOSE"; color: "white"; font.pixelSize: 11; font.bold: true }
                 MouseArea { anchors.fill: parent; onClicked: modLoader.closeRequested() }
             }
@@ -299,7 +291,7 @@ Rectangle {
     Text {
         id: device
         x: 20; y: 77
-        text: deviceText
+        text: deviceText + "   MODLOADER v" + selfUpdate.installed.version + "-r" + selfUpdate.installed.revision
         color: "#aab0b8"
         font.pixelSize: 17
     }
