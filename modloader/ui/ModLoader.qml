@@ -203,19 +203,17 @@ Rectangle {
         color: "#191c20"
         Text {
             id: headerTitle
-            x: 10; y: 9; width: 224; height: 46
+            x: 10; y: 4; width: 330; height: 34
             verticalAlignment: Text.AlignVCenter
             text: "PRIME UNLIMITED MODLOADER"
-            color: "#f4f2ee"; font.pixelSize: 17; font.bold: true
+            color: "#f4f2ee"; font.pixelSize: 21; font.bold: true
         }
         Text {
             id: headerVersion
-            anchors.left: headerTitle.right
-            anchors.leftMargin: 3
-            y: 9; width: 66; height: 46
+            x: 12; y: 39; width: 190; height: 20
             verticalAlignment: Text.AlignVCenter
-            color: "#aab0b8"; font.pixelSize: 10; font.bold: true
-            text: "v" + selfUpdate.installed.version + "-r" + selfUpdate.installed.revision
+            color: "#aab0b8"; font.pixelSize: 11; font.bold: true
+            text: "MODLOADER v" + selfUpdate.installed.version + "-r" + selfUpdate.installed.revision
             elide: Text.ElideRight
         }
         Row {
