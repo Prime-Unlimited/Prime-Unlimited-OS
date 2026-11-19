@@ -124,6 +124,17 @@ Engine, the systemd-managed SSH listener, and the runtime API were active;
 repeat activation remained connected and returned success; the Engine UI,
 LEDs, Mod Loader tile, and Mod Loader screen all worked normally.
 
+On 2026-11-19 the JP24 installation was upgraded to Modloader 0.2.0 revision 8.
+The prior installation did not yet have the independent updater. The installer
+staged the new hook, runtime, updater, catalog and trust root successfully;
+the existing Engine and API processes then needed a controlled restart to load
+the replaced binaries. After restarting, `verify-device.sh` returned 0,
+Engine loaded the current hook (without a deleted mapping), SSH remained
+systemd-managed, and the runtime reported a valid signed JP24 catalog with
+key ID `prime-unlimited-2026-1`. The updater reported installed and available
+revision 8. The installer now retains executable mode on the hook library,
+which `activate-jp24.sh` checks before writing the preload drop-in.
+
 The additional `EmbeddedMain.qml` overlay injection is build-verified for
 aarch64 but remains a separate hardware-verification step. Do not publish a
 JP24 overlay catalog entry until the injection log, Engine UI, LEDs, overlay
