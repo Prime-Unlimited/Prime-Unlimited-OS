@@ -23,7 +23,7 @@ Endpoints:
 The service checks automatically at startup. Mutation endpoints use the same
 device-owned bearer token as the main runtime; it is never stored in GitHub.
 
-Current release candidate: Modloader `0.2.0` revision `6`. Revision 6 checks
+Current signed channel: Modloader `0.2.0` revision `6`. Revision 6 checks
 for updates whenever the tile opens, confirms an available update in the UI,
 and reloads the Modloader component after a successful installation. The manifest pins the
 immutable GitHub assets for JC11S and JP24 by asset ID, byte size and SHA-256.
