@@ -19,3 +19,5 @@ prime_unlimited_ed25519*
 *.egg-info/
 work/
 output/
+*_private.uu
+catalog_ed25519_private.uu
