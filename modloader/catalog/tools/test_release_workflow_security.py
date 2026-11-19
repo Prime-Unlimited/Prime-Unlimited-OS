@@ -54,6 +54,8 @@ class ReleaseWorkflowSecurityTests(unittest.TestCase):
             r"actions/attest-build-provenance@[0-9a-f]{40}",
         )
         self.assertIn("contents: read", self.prime_clock)
+        self.assertIn("id-token: write", self.prime_clock)
+        self.assertIn("attestations: write", self.prime_clock)
         mutable = re.findall(r"(?m)^\s*- uses:\s*([^\s]+)@([^\s]+)", self.reusable)
         self.assertTrue(mutable)
         for action, ref in mutable:
