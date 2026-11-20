@@ -30,6 +30,14 @@ func TestSignedManifestAndTamperDetection(t *testing.T) {
 	}
 }
 
+func TestRevision8DetectsRevision9Update(t *testing.T) {
+	installed := versionState{Version: "0.2.0", Revision: 8}
+	available := versionState{Version: "0.2.0", Revision: 9}
+	if compare(installed, available) >= 0 {
+		t.Fatal("revision 9 was not detected as newer than revision 8")
+	}
+}
+
 func TestPublishedManifestSignatureAndDeviceIsolation(t *testing.T) {
 	manifestData, e := os.ReadFile(filepath.Join("..", "update", "manifest.json"))
 	if e != nil {
