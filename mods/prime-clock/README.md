@@ -1,4 +1,4 @@
-# Prime Clock v0.1.1
+# Prime Clock v0.1.2
 
 Prime Clock is a compact Engine OS overlay and the reference implementation for
 Prime Unlimited overlay mods. A tap switches between local `HH:MM` time and a
@@ -26,8 +26,8 @@ successful package build is not a hardware result.
 ```sh
 python3 mods/prime-clock/scripts/package.py --target jc11s --output dist
 python3 mods/prime-clock/scripts/package.py --target jp24 --output dist
-python3 mods/prime-clock/scripts/validate_package.py dist/prime-clock-v0.1.1-jc11s.zip --target jc11s
-python3 mods/prime-clock/scripts/validate_package.py dist/prime-clock-v0.1.1-jp24.zip --target jp24
+python3 mods/prime-clock/scripts/validate_package.py dist/prime-clock-v0.1.2-jc11s.zip --target jc11s
+python3 mods/prime-clock/scripts/validate_package.py dist/prime-clock-v0.1.2-jp24.zip --target jp24
 ```
 
 Packages are deterministic ZIPs. They contain only QML/JavaScript, an inert

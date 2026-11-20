@@ -5,8 +5,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_qml_touch_drag_and_monotonic_contract():
     qml = (ROOT / "src/ui/PrimeClock.qml").read_text()
-    for value in ("pressAndHoldInterval: 600", "onPressAndHold", "mapToItem(overlay", "clampX", "clampY", "positionSaveRequested", "/api/v1/monotonic"):
+    for value in ("pressAndHoldInterval: 600", "onPressAndHold", "drag.target: overlay.dragging ? panel : null", "drag.axis: Drag.XAndYAxis", "drag.minimumX: 0", "drag.maximumX: Math.max(0, overlay.width - panel.width)", "drag.minimumY: 0", "drag.maximumY: Math.max(0, overlay.height - panel.height)", "drag.threshold: 0", "clampX", "clampY", "positionSaveRequested", "/api/v1/monotonic"):
         assert value in qml
+    assert "mapToItem(overlay" not in qml
+    assert "originPointer" not in qml
 
 def test_stopwatch_logic_with_monotonic_inputs():
     source = (ROOT / "src/common/Stopwatch.js").read_text().replace(".pragma library", "")
