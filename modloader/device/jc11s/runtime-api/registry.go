@@ -26,6 +26,7 @@ type installedMod struct {
 	ABI           string       `json:"abi"`
 	Entrypoint    string       `json:"entrypoint"`
 	Overlay       string       `json:"overlay,omitempty"`
+	Service       *serviceSpec `json:"service,omitempty"`
 	Root          string       `json:"root"`
 	Enabled       bool         `json:"enabled"`
 	InstalledAt   int64        `json:"installedAt"`
@@ -117,47 +118,6 @@ func ensurePrivateDirectory(path string) error {
 	return nil
 }
 
-// migratePrivateDirectory tightens permissions left by early installers. It
-// never follows links or changes ownership, so an unexpected object still
-// fails closed instead of being repaired in place.
-func migratePrivateDirectory(path string) error {
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return err
-	}
-	info, err := os.Lstat(path)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return errors.New("private state directory is unsafe")
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != uint32(os.Geteuid()) {
-		return errors.New("private state directory has wrong owner")
-	}
-	if info.Mode().Perm() != 0o700 {
-		if err := os.Chmod(path, 0o700); err != nil {
-			return err
-		}
-	}
-	return ensurePrivateDirectory(path)
-}
-
-func migratePrivateFile(path string) error {
-	info, err := os.Lstat(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return errors.New("private state file is unsafe")
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != uint32(os.Geteuid()) {
-		return errors.New("private state file has wrong owner")
-	}
-	if info.Mode().Perm() != 0o600 {
-		return os.Chmod(path, 0o600)
-	}
-	return nil
-}
-
 func syncDirectory(path string) error {
 	directory, err := os.Open(path)
 	if err != nil {
@@ -236,6 +196,9 @@ func validateRegistryState(state registryState) error {
 		if id != item.ID || !modIDPattern.MatchString(id) || !versionPattern.MatchString(item.Version) || item.Revision < 0 || len(item.PackageSHA256) != 64 {
 			return errors.New("invalid installed registry entry")
 		}
+		if err := validateServiceSpec(item.Service); err != nil {
+			return err
+		}
 		expectedRoot := filepath.ToSlash(filepath.Join("mods", "installed", item.ID, item.Version))
 		if item.Root != expectedRoot {
 			return errors.New("invalid installed registry root")
@@ -308,6 +271,16 @@ func setModEnabled(id string, enabled bool, root string) (activationResult, erro
 		return result, err
 	}
 	result.Affected = affected
+	if !enabled {
+		for _, affectedID := range affected {
+			if state.Mods[affectedID].Service != nil {
+				if err := stopManagedService(root, affectedID); err != nil {
+					return result, err
+				}
+			}
+		}
+	}
+
 	txid, err := randomTransactionID()
 	if err != nil {
 		return result, err
@@ -354,6 +327,9 @@ func setModEnabled(id string, enabled bool, root string) (activationResult, erro
 		return result, err
 	}
 	if err := syncDirectory(registryRoot); err != nil {
+		return result, err
+	}
+	if err := reconcileServices(root); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -456,6 +432,15 @@ func planActivation(state registryState, id string, enabled bool, root string) (
 			item.Enabled = true
 			next.Mods[selectedID] = item
 			affected = append(affected, selectedID)
+		}
+	}
+	owner := ""
+	for selectedID, entry := range next.Mods {
+		if entry.Enabled && entry.Service != nil {
+			if owner != "" {
+				return registryState{}, nil, errors.New("exclusive service capability conflict")
+			}
+			owner = selectedID
 		}
 	}
 	return next, affected, nil
@@ -597,7 +582,7 @@ func installDisabledMod(item mod, catalogID, cacheRoot, stagingRoot, root string
 	}
 	relativeTarget := filepath.ToSlash(filepath.Join("mods", "installed", item.ID, item.Version))
 	next.Mods[item.ID] = installedMod{ID: item.ID, Version: item.Version, Revision: item.Revision, PackageSHA256: item.SHA256, CatalogID: catalogID,
-		Architecture: item.Architecture, ABI: item.ABI, Entrypoint: item.Entrypoint, Overlay: item.Overlay, Root: relativeTarget, Enabled: false, InstalledAt: time.Now().Unix(), Dependencies: item.Dependencies, Conflicts: item.Conflicts}
+		Architecture: item.Architecture, ABI: item.ABI, Entrypoint: item.Entrypoint, Overlay: item.Overlay, Service: item.Service, Root: relativeTarget, Enabled: false, InstalledAt: time.Now().Unix(), Dependencies: item.Dependencies, Conflicts: item.Conflicts}
 	journal := installJournal{SchemaVersion: 1, Operation: "install", Phase: "prepared", TransactionID: txid, Target: relativeTarget, Previous: state, Next: next}
 	if err := writeAtomicJSON(journalPath, journal); err != nil {
 		return result, err
@@ -681,6 +666,11 @@ func uninstallDisabledMod(id, root string) (uninstallResult, error) {
 	}
 	result.TransactionID = txid
 	versionRoot := filepath.Dir(target)
+	if installed.Service != nil {
+		if err := stopManagedService(root, id); err != nil {
+			return result, err
+		}
+	}
 	quarantine := filepath.Join(versionRoot, ".uninstall-"+txid)
 	relativeQuarantine, err := filepath.Rel(root, quarantine)
 	if err != nil {

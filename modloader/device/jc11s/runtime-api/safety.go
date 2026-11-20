@@ -56,7 +56,10 @@ func setSafeMode(root string, enabled bool) (safetyState, error) {
 		return state, err
 	}
 	state.SafeMode = enabled
-	return state, writeSafetyState(root, state)
+	if err := writeSafetyState(root, state); err != nil {
+		return state, err
+	}
+	return state, reconcileServices(root)
 }
 
 func recoverQuarantinedMod(root, id string) (safetyState, error) {
@@ -68,7 +71,10 @@ func recoverQuarantinedMod(root, id string) (safetyState, error) {
 		return state, errors.New("invalid mod id")
 	}
 	delete(state.Mods, id)
-	return state, writeSafetyState(root, state)
+	if err := writeSafetyState(root, state); err != nil {
+		return state, err
+	}
+	return state, reconcileServices(root)
 }
 
 func recordRunOutcome(root, id string, succeeded bool) (modSafetyState, error) {
@@ -88,5 +94,8 @@ func recordRunOutcome(root, id string, succeeded bool) (modSafetyState, error) {
 		state.Mods[id] = item
 	}
 	item := state.Mods[id]
-	return item, writeSafetyState(root, state)
+	if err := writeSafetyState(root, state); err != nil {
+		return item, err
+	}
+	return item, reconcileServices(root)
 }

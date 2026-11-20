@@ -1,0 +1,45 @@
+name: Splash Manager packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/prime-unlimited-mod-loader]
+    paths:
+      - 'mods/splash-manager/**'
+      - 'modloader/**'
+      - '.github/workflows/splash-manager.yml'
+      - '.github/workflows/reusable-mod-release.yml'
+      - '.github/scripts/compare-mod-payload.py'
+    tags: ['splash-manager-v*']
+  pull_request:
+    paths:
+      - 'mods/splash-manager/**'
+      - 'modloader/**'
+      - '.github/workflows/splash-manager.yml'
+      - '.github/workflows/reusable-mod-release.yml'
+      - '.github/scripts/compare-mod-payload.py'
+
+jobs:
+  build-and-release:
+    permissions:
+      contents: write
+    uses: ./.github/workflows/reusable-mod-release.yml
+    with:
+      mod-id: splash-manager
+      mod-dir: mods/splash-manager
+      release-title: Splash Manager
+      tag-prefix: splash-manager-v
+      prerelease: true
+      release-notes: |
+        Public developer preview of Splash Manager 1.1.2.
+
+        - PNG splash upload with a visible 1280 x 800 px (16:10) image-size hint and a 10 MiB file limit.
+        - HTTPS access and a six-digit, single-use pairing code (two-minute expiry; five-attempt limit).
+        - JP24 live service/upload/lifecycle tests passed; the maintainer reported a successful reboot/splash test.
+        - Separate JC11S and JP24 packages are available below. JC11S hardware compatibility is not verified.
+
+        IMPORTANT: Requires the trusted Modloader runtime with the native service adapter from this tag/PR #22. Existing stock Modloader versions cannot install/run this service correctly. These ZIPs do not update the Modloader itself.
+
+        These are unsigned developer-test packages, not an approved entry in the official signed Modloader catalog. Download/build success and a user-reported splash reboot test do not establish service autostart on every device. Follow modloader/SERVICE_MOD_DEVELOPMENT.md and mods/splash-manager/HARDWARE_TEST_JP24.md in the tagged source for setup, test scope and remaining release gates.
+
+      native-files: '{"jc11s":["splash-manager/bin/splash-server-armhf"],"jp24":["splash-manager/bin/splash-server-aarch64"]}'

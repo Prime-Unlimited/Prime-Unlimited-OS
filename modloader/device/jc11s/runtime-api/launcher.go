@@ -119,6 +119,13 @@ func launchEnabledMod(id, root string) (launchStatus, error) {
 	if !item.Enabled {
 		return status, errors.New("mod is not enabled")
 	}
+	if item.Service != nil {
+		if err := reconcileServices(root); err != nil {
+			return status, err
+		}
+		status.State, status.ExitCode, status.CompletedAt = "completed", 0, time.Now().Unix()
+		return status, writeAtomicJSON(filepath.Join(root, "runtime", "status", id+".json"), status)
+	}
 	entrypoint := filepath.Join(root, filepath.FromSlash(item.Root), filepath.FromSlash(item.Entrypoint))
 	script, err := readLaunchScript(entrypoint)
 	if err != nil {

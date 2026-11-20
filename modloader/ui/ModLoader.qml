@@ -18,10 +18,22 @@ Rectangle {
     property bool showUpdatePrompt: false
     property var selfUpdate: ({"installed":{"version":"?","revision":0},"available":{"version":"?","revision":0},"updateAvailable":false,"rollbackAvailable":false})
     property int selectedTab: 0
+    property var serviceAccess: null
+    property string serviceAccessID: ""
+    property int servicePairingSeconds: 0
     property string pendingUninstall: ""
     property string statusText: "Connecting..."
     property string deviceText: "Device not detected"
     signal closeRequested()
+
+    function showServiceAccess(id) {
+        serviceAccessID = id
+        mutation("service-access", id, "", function(ok, payload) {
+            if (ok) { serviceAccess = payload; servicePairingSeconds = payload.expiresIn || 120 }
+        })
+    }
+    Timer { interval: 1000; repeat: true; running: serviceAccess !== null && servicePairingSeconds > 0
+        onTriggered: servicePairingSeconds-- }
 
     function refresh() {
         var request = new XMLHttpRequest()
@@ -394,6 +406,13 @@ Rectangle {
                         Text { anchors.centerIn: parent; text: "REMOVE"; color: "#ffb29a"; font.bold: true }
                         MouseArea { anchors.fill: parent; enabled: !busy; onClicked: pendingUninstall = modelData.id }
                     }
+                    Rectangle {
+                        visible: modelData.service !== undefined && installed[modelData.id] !== undefined
+                        x: 445; y: 91; width: 110; height: 28; radius: 7; color: "#ff541c"
+                        Text { anchors.centerIn: parent; text: "WEB ACCESS"; color: "white"; font.bold: true }
+                        MouseArea { anchors.fill: parent; enabled: !busy && installed[modelData.id] && installed[modelData.id].enabled
+                            onClicked: showServiceAccess(modelData.id) }
+                    }
                     Row {
                         visible: installed[modelData.id] !== undefined
                         x: 330; y: 91; spacing: 8
@@ -404,6 +423,28 @@ Rectangle {
                         }
                     }
                 }
+            }
+        }
+    }
+    Rectangle {
+        visible: serviceAccess !== null
+        anchors.fill: parent; color: "#ed101215"; z: 30
+        Rectangle {
+            anchors.centerIn: parent; width: 720; height: 395; radius: 14; color: "#22262b"
+            Text { x: 24; y: 20; text: "SERVICE WEB ACCESS"; color: "#ff541c"; font.pixelSize: 22; font.bold: true }
+            Text { x: 24; y: 58; width: 672; color: "white"; font.pixelSize: 17; wrapMode: Text.WrapAnywhere
+                text: serviceAccess ? "Open on your phone or computer:\n" + (serviceAccess.urls || []).join("\n") : "" }
+            Text { x: 24; y: 140; width: 672; color: "white"; font.pixelSize: 28; wrapMode: Text.WrapAnywhere
+                text: serviceAccess ? (servicePairingSeconds > 0 ? "Pairing code: " + serviceAccess.pairingCode + "\nValid for " + servicePairingSeconds + " s" : "Code expired. Tap NEW CODE.") : "" }
+            Text { x: 24; y: 220; width: 672; color: "#bfc3c9"; font.pixelSize: 14; wrapMode: Text.WrapAnywhere
+                text: serviceAccess ? "Device certificate is self-signed. Compare its SHA-256 fingerprint before accepting it:\n" + serviceAccess.certificateSHA256 : "" }
+            Rectangle { x: 160; y: 325; width: 180; height: 48; radius: 8; color: "#ff541c"
+                Text { anchors.centerIn: parent; text: "NEW CODE"; color: "white" }
+                MouseArea { anchors.fill: parent; enabled: !busy; onClicked: showServiceAccess(serviceAccessID) }
+            }
+            Rectangle { x: 380; y: 325; width: 180; height: 48; radius: 8; color: "#33373c"
+                Text { anchors.centerIn: parent; text: "CLOSE"; color: "white" }
+                MouseArea { anchors.fill: parent; onClicked: serviceAccess = null }
             }
         }
     }
