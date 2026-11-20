@@ -29,7 +29,7 @@ type updateResult struct {
 func installedFromCatalog(item mod, catalogID, root string, enabled bool) installedMod {
 	return installedMod{ID: item.ID, Version: item.Version, Revision: item.Revision, PackageSHA256: item.SHA256,
 		CatalogID: catalogID, Architecture: item.Architecture, ABI: item.ABI, Entrypoint: item.Entrypoint,
-		Overlay: item.Overlay, Root: root, Enabled: enabled, InstalledAt: time.Now().Unix(),
+		Overlay: item.Overlay, Service: item.Service, Root: root, Enabled: enabled, InstalledAt: time.Now().Unix(),
 		Dependencies: item.Dependencies, Conflicts: item.Conflicts}
 }
 

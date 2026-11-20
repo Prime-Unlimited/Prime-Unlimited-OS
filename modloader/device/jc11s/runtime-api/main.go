@@ -59,6 +59,7 @@ type mod struct {
 	ABI          string       `json:"abi,omitempty"`
 	Entrypoint   string       `json:"entrypoint,omitempty"`
 	Overlay      string       `json:"overlay,omitempty"`
+	Service      *serviceSpec `json:"service,omitempty"`
 	Approval     *approval    `json:"approval,omitempty"`
 	Dependencies []dependency `json:"dependencies,omitempty"`
 	Libraries    []dependency `json:"libraries,omitempty"`
@@ -196,7 +197,7 @@ func (s *server) authorizationStatus() string {
 
 func isMutationPath(path string) bool {
 	switch path {
-	case "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/update", "/api/v1/catalog/sync", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve", "/api/v1/launch", "/api/v1/launch-set", "/api/v1/safe-mode/enable", "/api/v1/safe-mode/disable", "/api/v1/recover":
+	case "/api/v1/service-access", "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/update", "/api/v1/catalog/sync", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve", "/api/v1/launch", "/api/v1/launch-set", "/api/v1/safe-mode/enable", "/api/v1/safe-mode/disable", "/api/v1/recover":
 		return true
 	default:
 		return false
@@ -405,6 +406,29 @@ func (s *server) handleActivation(w http.ResponseWriter, r *http.Request, enable
 	}
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
+	if enabled {
+		registry, err := loadRegistry(filepath.Join(s.root, "registry", "state.json"))
+		if err != nil {
+			writeJSON(w, 503, map[string]string{"error": "registry unavailable"})
+			return
+		}
+		if _, exists := registry.Mods[request.ID]; !exists {
+			writeJSON(w, 404, map[string]string{"error": "mod is not installed"})
+			return
+		}
+		_, affected, planErr := planActivation(registry, request.ID, true, s.root)
+		if planErr != nil {
+			writeJSON(w, 409, map[string]string{"error": planErr.Error()})
+			return
+		}
+		for _, id := range affected {
+			item := registry.Mods[id]
+			if item.Service != nil && !s.serviceApproved(item) {
+				writeJSON(w, 409, map[string]string{"error": "service lacks a current signed catalog approval"})
+				return
+			}
+		}
+	}
 	result, err := setModEnabled(request.ID, enabled, s.root)
 	if errors.Is(err, errNotInstalled) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -522,6 +546,15 @@ func (s *server) handleRecover(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/v1/service-pair" {
+		s.handleServicePair(w, r)
+		return
+	}
+	if r.URL.Path == "/api/v1/service-splash" {
+		s.handleServiceSplash(w, r)
+		return
+	}
+
 	if r.URL.RawQuery != "" || r.URL.Fragment != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query parameters are not supported"})
 		return
@@ -543,6 +576,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !s.authorized(r) {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "mutation authorization required"})
+			return
+		}
+		if r.URL.Path == "/api/v1/service-access" {
+			s.handleServiceAccess(w, r)
 			return
 		}
 		if r.URL.Path == "/api/v1/cache" {
@@ -809,7 +846,7 @@ func validateMod(item mod) error {
 	if len(item.Description) > 2000 {
 		return errors.New("description exceeds 2000 bytes")
 	}
-	if item.Architecture != "" || item.ABI != "" || item.Entrypoint != "" || item.Overlay != "" || item.Approval != nil || item.Dependencies != nil || item.Libraries != nil || item.Conflicts != nil || item.Revoked {
+	if item.Architecture != "" || item.ABI != "" || item.Entrypoint != "" || item.Overlay != "" || item.Service != nil || item.Approval != nil || item.Dependencies != nil || item.Libraries != nil || item.Conflicts != nil || item.Revoked {
 		return errors.New("schema v2 fields are not allowed in schema v1")
 	}
 	return nil
@@ -841,6 +878,9 @@ func validateDependencies(name string, values []dependency) error {
 }
 
 func validateV2Mod(item mod) error {
+	if err := validateServiceSpec(item.Service); err != nil {
+		return err
+	}
 	if err := validatePackageFields(item.ID, item.Name, item.Version, item.DownloadURL, item.SHA256, item.Size, item.Models, item.Firmware); err != nil {
 		return err
 	}
@@ -1401,6 +1441,7 @@ func main() {
 		catalogPath: *catalogPath, catalogSignaturePath: *catalogSignaturePath, catalogTrustKeyPath: *catalogTrustKeyPath,
 		catalogURL: *catalogURL, catalogSignatureURL: *catalogSignatureURL, catalogSource: "offline-cache",
 		cacheRoot: *cacheRoot, stagingRoot: *stagingRoot, httpClient: newPackageHTTPClient()}
+
 	if usedFallback {
 		runtimeServer.catalogSource = "offline-last-good"
 	}
@@ -1412,6 +1453,21 @@ func main() {
 		}
 		cancel()
 	}
+	if err := reconcileServicesPolicy(*root, runtimeServer.serviceApproved); err != nil {
+		log.Printf("service reconciliation: %v", err)
+	}
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			runtimeServer.cacheMu.Lock()
+			err := reconcileServicesPolicy(*root, runtimeServer.serviceApproved)
+			runtimeServer.cacheMu.Unlock()
+			if err != nil {
+				log.Printf("service reconciliation: %v", err)
+			}
+		}
+	}()
 	httpServer := &http.Server{
 		Addr:              *listen,
 		Handler:           runtimeServer,

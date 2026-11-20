@@ -352,6 +352,12 @@ func inspectStagedPackage(item mod, catalogID, cacheRoot, stagingRoot string) (i
 			return result, errors.New("declared overlay is missing or unsafe")
 		}
 	}
+	if item.Service != nil {
+		probe := installedMod{Architecture: item.Architecture, Service: item.Service}
+		if _, err := verifiedServiceBinary(stageRoot, probe); err != nil {
+			return result, err
+		}
+	}
 	result.Eligible = true
 	return result, nil
 }

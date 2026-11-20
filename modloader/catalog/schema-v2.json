@@ -64,10 +64,19 @@
         "revision": {"type": "integer", "minimum": 0},
         "description": {"type": "string"}, "models": {}, "firmware": {}, "firmwareConstraint": {}, "architecture": {}, "abi": {},
         "downloadUrl": {}, "sha256": {}, "size": {}, "entrypoint": {"type": "string", "pattern": "^[^/\\\\][^\\\\]*$"},
-        "approval": {"$ref": "#/$defs/approval"}, "overlay": {"type": "string", "pattern": "^[^/\\\\][^\\\\]*\\.qml$"}, "dependencies": {"type": "array", "items": {"$ref": "#/$defs/dependency"}},
+        "service": {"$ref": "#/$defs/service"}, "approval": {"$ref": "#/$defs/approval"}, "overlay": {"type": "string", "pattern": "^[^/\\\\][^\\\\]*\\.qml$"}, "dependencies": {"type": "array", "items": {"$ref": "#/$defs/dependency"}},
         "libraries": {"type": "array", "items": {"$ref": "#/$defs/dependency"}},
         "conflicts": {"type": "array", "items": {"$ref": "#/$defs/id"}}, "revoked": {"type": "boolean"},
         "update": {"type": "object", "properties": {"channel": {"type": "string"}, "replaces": {"type": "array", "items": {"type": "string"}}}}
+      }
+    },
+    "service": {
+      "type": "object", "additionalProperties": false,
+      "required": ["binary", "sha256", "capability"],
+      "properties": {
+        "binary": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "capability": {"const": "splash-image"}
       }
     },
     "library": {

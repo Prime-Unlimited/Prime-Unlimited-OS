@@ -1,0 +1,9 @@
+{
+  "model": "JP24",
+  "architecture": "aarch64",
+  "abi": "gnu",
+  "firmware": [],
+  "hardwareVerified": false,
+  "binaryName": "splash-server-aarch64",
+  "integrationStatus": "service-adapter-awaiting-hardware-verification"
+}
