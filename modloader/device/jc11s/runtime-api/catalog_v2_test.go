@@ -19,7 +19,7 @@ func validV2Mod() mod {
 }
 
 func TestReleasedPrimeClockCatalogSignatureAndCompatibility(t *testing.T) {
-	catalogPath := filepath.Join("..", "..", "..", "catalog", "prime-clock-v0.1.1-jc11s.json")
+	catalogPath := filepath.Join("..", "..", "..", "catalog", "prime-clock-v0.1.2-jc11s.json")
 	state := loadVerifiedCatalog(catalogPath, strings.TrimSuffix(catalogPath, ".json")+".sig.json", filepath.Join("..", "..", "..", "catalog", "trust", "prime-unlimited-2026-1.json"))
 	if state.Status != "valid" || !state.Trusted || len(state.Catalog.Mods) != 1 {
 		t.Fatalf("released Prime Clock catalog invalid: %#v", state)
