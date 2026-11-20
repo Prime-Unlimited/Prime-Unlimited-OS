@@ -1,0 +1,37 @@
+{
+  "status": "pending-verification",
+  "catalogEntry": false,
+  "id": "splash-manager",
+  "name": "Splash Manager",
+  "version": "1.1.2",
+  "sourceBranch": "feat/splash-manager-mod",
+  "sourcePath": "mods/splash-manager",
+  "targetCatalogSchema": 2,
+  "targets": [
+    {
+      "model": "JC11S",
+      "architecture": "armv7l",
+      "abi": "gnueabihf",
+      "firmware": [
+        "5.3.0"
+      ],
+      "hardwareVerified": false
+    },
+    {
+      "model": "JP24",
+      "architecture": "aarch64",
+      "abi": "gnu",
+      "firmware": [],
+      "hardwareVerified": false,
+      "observedTestFirmware": "5.3.0"
+    }
+  ],
+  "releaseRequirements": [
+    "Integrate and verify trusted native service adapter on target branch",
+    "Build immutable target-specific ZIP assets",
+    "Verify package sizes, SHA-256 and service binary SHA-256",
+    "Confirm target-specific firmware and hardware approval",
+    "Sign production catalog with off-device maintainer key"
+  ],
+  "notes": "Discovery record only. Never consumed as an approved or installable catalog entry. No cross-branch merge or hardware activation."
+}
