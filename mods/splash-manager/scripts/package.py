@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, hashlib, json, stat, zipfile
+import argparse, hashlib, json, os, stat, subprocess, tempfile, zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,9 +17,17 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     destination = args.output / name
     binary_name = BINARY[args.target]
+    with tempfile.TemporaryDirectory(prefix="splash-build-") as build_dir:
+        binary = Path(build_dir) / binary_name
+        env = dict(os.environ, CGO_ENABLED="0", GOOS="linux",
+                   GOARCH="arm" if args.target == "jc11s" else "arm64", GOARM="7")
+        subprocess.run(["go", "build", "-trimpath", "-buildvcs=false",
+                        "-ldflags=-s -w -buildid=", "-o", str(binary), "."],
+                       cwd=ROOT / "src/server", env=env, check=True)
+        binary_data = binary.read_bytes()
     files = {
         "splash-manager/start.sh": (ROOT / "src/entrypoint.sh").read_bytes(),
-        f"splash-manager/bin/{binary_name}": (ROOT / f"src/bin/{binary_name}").read_bytes(),
+        f"splash-manager/bin/{binary_name}": binary_data,
         "splash-manager/platform.json": (json.dumps(profile, sort_keys=True, separators=(",", ":")) + "\n").encode(),
     }
     with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:

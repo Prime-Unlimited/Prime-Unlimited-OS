@@ -1,9 +1,9 @@
 {
   "model": "JP24",
   "architecture": "aarch64",
-  "abi": "aarch64-linux-gnu.2.17",
+  "abi": "gnu",
   "firmware": [],
   "hardwareVerified": false,
   "binaryName": "splash-server-aarch64",
-  "integrationStatus": "modloader-runtime-values-unconfirmed"
+  "integrationStatus": "blocked-service-adapter-required"
 }

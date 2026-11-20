@@ -20,6 +20,12 @@ on:
         required: true
         type: string
 
+      native-files:
+        description: JSON map of exact target-specific native ELF paths; shared files remain identical
+        required: false
+        type: string
+        default: '{}'
+
 permissions:
   contents: read
 
@@ -110,6 +116,8 @@ jobs:
             bits: 64
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.24.x'}
       - name: Build the target package twice
         env:
           MOD_DIR: ${{ inputs.mod-dir }}
@@ -141,33 +149,16 @@ jobs:
     needs: [prepare, package]
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: ${{ inputs.mod-id }}-v${{ needs.prepare.outputs.version }}-*
           path: packages
           merge-multiple: true
       - name: Compare shared files in 32- and 64-bit packages
-        run: |
-          python3 - <<'PY'
-          import glob, hashlib, zipfile
-
-          packages = sorted(glob.glob("packages/*.zip"))
-          if len(packages) != 2:
-              raise SystemExit(f"expected two target packages, found {packages}")
-
-          shared = {}
-          for package in packages:
-              with zipfile.ZipFile(package) as archive:
-                  payload = {
-                      name: hashlib.sha256(archive.read(name)).hexdigest()
-                      for name in archive.namelist()
-                      if not name.endswith("/platform.json")
-                  }
-              if shared and payload != shared:
-                  raise SystemExit("target packages contain different mod source payloads")
-              shared = payload
-          print("shared mod payload is identical across 32- and 64-bit targets")
-          PY
+        env:
+          NATIVE_FILES: ${{ inputs.native-files }}
+        run: python3 .github/scripts/compare-mod-payload.py packages
 
   release:
     if: startsWith(github.ref, format('refs/tags/{0}', inputs.tag-prefix))

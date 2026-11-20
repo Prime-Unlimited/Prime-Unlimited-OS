@@ -1,4 +1,9 @@
 #!/bin/sh
+# The current restricted launcher cannot supervise privileged services.
+if [ -n "${PRIME_UNLIMITED_MOD_ID:-}" ]; then
+    echo "Splash Manager requires a trusted service adapter; Modloader launch is not supported yet." >&2
+    exit 1
+fi
 MOD_DIR="$(cd "$(dirname "$0")" && pwd)"
 PU_DIR=/data/prime-unlimited
 STATE_DIR="$PU_DIR/state"

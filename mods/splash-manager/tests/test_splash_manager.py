@@ -36,5 +36,16 @@ def test_profiles_do_not_overclaim_hardware():
     jc = json.loads((ROOT / "src/platform/jc11s.json").read_text())
     jp = json.loads((ROOT / "src/platform/jp24.json").read_text())
     assert (jc["architecture"], jc["abi"]) == ("armv7l", "gnueabihf")
-    assert (jp["architecture"], jp["abi"]) == ("aarch64", "aarch64-linux-gnu.2.17")
+    assert (jp["architecture"], jp["abi"]) == ("aarch64", "gnu")
     assert not jc["hardwareVerified"] and not jp["hardwareVerified"]
+
+
+def test_restricted_launcher_fails_before_any_service_action():
+    import os
+    result = subprocess.run(
+        ['sh', '-s'], input=(ROOT / 'src/entrypoint.sh').read_text(),
+        env=dict(os.environ, PRIME_UNLIMITED_MOD_ID='splash-manager'),
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert 'trusted service adapter' in result.stderr

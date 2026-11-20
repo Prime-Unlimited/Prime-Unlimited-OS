@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, json, stat, zipfile
+import argparse, json, stat, struct, zipfile
 from pathlib import Path, PurePosixPath
 
 BINARY = {"jc11s": "splash-server-armhf", "jp24": "splash-server-aarch64"}
@@ -29,6 +29,13 @@ def main():
             assert info.file_size <= 10 * 1024 * 1024
         profile = json.loads(archive.read("splash-manager/platform.json"))
         assert profile["model"].lower() == args.target
+        binary = archive.read(f"splash-manager/bin/{binary_name}")
+        expected_class, expected_machine = (1, 40) if args.target == "jc11s" else (2, 183)
+        assert len(binary) >= 52 and binary[:4] == b"\x7fELF"
+        assert binary[4] == expected_class and binary[5] == 1
+        assert struct.unpack_from("<H", binary, 18)[0] == expected_machine
+        assert profile["binaryName"] == binary_name
+        assert profile["hardwareVerified"] is False
     print(f"validated {args.package}")
 
 if __name__ == "__main__":

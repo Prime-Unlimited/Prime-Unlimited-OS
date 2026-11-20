@@ -9,6 +9,7 @@ on:
       - 'modloader/**'
       - '.github/workflows/splash-manager.yml'
       - '.github/workflows/reusable-mod-release.yml'
+      - '.github/scripts/compare-mod-payload.py'
     tags: ['splash-manager-v*']
   pull_request:
     paths:
@@ -16,6 +17,7 @@ on:
       - 'modloader/**'
       - '.github/workflows/splash-manager.yml'
       - '.github/workflows/reusable-mod-release.yml'
+      - '.github/scripts/compare-mod-payload.py'
 
 jobs:
   build-and-release:
@@ -29,3 +31,4 @@ jobs:
       mod-dir: mods/splash-manager
       release-title: Splash Manager
       tag-prefix: splash-manager-v
+      native-files: '{"jc11s":["splash-manager/bin/splash-server-armhf"],"jp24":["splash-manager/bin/splash-server-aarch64"]}'
