@@ -22,9 +22,7 @@ on:
 jobs:
   build-and-release:
     permissions:
-      contents: read
-      id-token: write
-      attestations: write
+      contents: write
     uses: ./.github/workflows/reusable-mod-release.yml
     with:
       mod-id: splash-manager

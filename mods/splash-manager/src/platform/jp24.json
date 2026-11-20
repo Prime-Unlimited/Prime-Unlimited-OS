@@ -5,5 +5,5 @@
   "firmware": [],
   "hardwareVerified": false,
   "binaryName": "splash-server-aarch64",
-  "integrationStatus": "blocked-service-adapter-required"
+  "integrationStatus": "service-adapter-awaiting-hardware-verification"
 }

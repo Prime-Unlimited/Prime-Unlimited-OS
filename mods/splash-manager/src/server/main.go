@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -26,10 +29,36 @@ const (
 )
 
 var authToken string
+var managedCredentials *serviceCredentials
+
+type serviceTLS struct {
+	Certificate string `json:"certificate"`
+	PrivateKey  string `json:"privateKey"`
+}
+
+type serviceCredentials struct {
+	TLS         serviceTLS `json:"tls"`
+	BrokerURL   string     `json:"brokerUrl"`
+	BrokerToken string     `json:"brokerToken"`
+	WebToken    string     `json:"webToken"`
+}
 
 func main() {
+	managed := flag.Bool("managed", false, "read trusted service configuration from stdin")
+	flag.Parse()
 	var err error
-	authToken, err = loadOrCreateToken(tokenPath)
+	if *managed {
+		var config serviceCredentials
+		decoder := json.NewDecoder(io.LimitReader(os.Stdin, 8192))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&config); err != nil || config.BrokerURL != "http://127.0.0.1:8098/api/v1/service-splash" || len(config.BrokerToken) != 64 || len(config.WebToken) != 64 {
+			log.Fatal("invalid trusted service configuration")
+		}
+		managedCredentials = &config
+		authToken = config.WebToken
+	} else {
+		authToken, err = loadOrCreateToken(tokenPath)
+	}
 	if err != nil {
 		log.Fatalf("initialize upload authentication: %v", err)
 	}
@@ -49,8 +78,20 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    16 << 10,
 	}
-	log.Printf("Splash Manager listening on %s", listenAddr)
-	log.Printf("Password is stored in %s (read it over authenticated SSH)", tokenPath)
+	if managedCredentials == nil {
+		log.Printf("Access token is stored in %s", tokenPath)
+	}
+	if managedCredentials != nil {
+		certificate, err := tls.X509KeyPair([]byte(managedCredentials.TLS.Certificate), []byte(managedCredentials.TLS.PrivateKey))
+		if err != nil {
+			log.Fatal("invalid managed TLS certificate")
+		}
+		server.Addr = "0.0.0.0:8443"
+		log.Printf("Managed Splash Manager serving HTTPS on %s", server.Addr)
+		server.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}}
+		log.Fatal(server.ListenAndServeTLS("", ""))
+	}
+	log.Printf("Development Splash Manager listening on %s", listenAddr)
 	log.Fatal(server.ListenAndServe())
 }
 
@@ -125,6 +166,7 @@ func requireToken(next http.Handler) http.Handler {
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cache-Control", "no-store")
 		next.ServeHTTP(w, r)
@@ -147,6 +189,10 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 func handleCurrent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if managedCredentials != nil {
+		proxySplash(w, r, nil)
 		return
 	}
 	data, err := os.ReadFile(splashPath)
@@ -192,6 +238,10 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if managedCredentials != nil {
+		proxySplash(w, r, data)
+		return
+	}
 	if err := writeSplashAtomically(splashPath, data); err != nil {
 		log.Printf("splash write failed: %v", err)
 		http.Error(w, "could not save splash image", http.StatusInternalServerError)
@@ -233,3 +283,27 @@ func writeSplashAtomically(path string, data []byte) error {
 }
 
 const indexHTML = `<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Splash Manager</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#1a1a1a;color:#e0e0e0;font-family:-apple-system,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:auto;padding:24px}.c{max-width:600px;width:100%;z-index:1}.t{font-size:.7em;color:#777;letter-spacing:2px;text-transform:uppercase;margin-bottom:1em}.h{font-size:2.2em;font-weight:900;color:#fff;line-height:1.1;margin-bottom:.15em}.h span{color:#ff6b1a}.sub{color:#888;margin-bottom:1.8em}.box{border:2px solid #333;border-radius:12px;padding:24px;margin-bottom:16px}.drop{border:2px dashed #444;border-radius:12px;padding:40px 20px;cursor:pointer;transition:.3s;text-align:center}.drop:hover,.drop.ov{border-color:#ff6b1a;background:rgba(255,107,26,.05)}.drop p{color:#aaa}.drop b{font-size:2.5em;display:block;margin-bottom:.4em}input[type=password]{width:100%;margin:12px 0;background:#111;border:1px solid #444;color:#fff;padding:12px;border-radius:6px;font-size:1em}button{background:#ff6b1a;color:#fff;border:0;padding:12px 22px;border-radius:7px;font-size:1em;cursor:pointer;font-weight:700}button:hover{background:#e55b10}button:disabled{opacity:.5;cursor:wait}.pv,.cu{margin-top:16px;text-align:center}.pv img,.cu img{max-width:100%;border-radius:8px;box-shadow:0 4px 20px #0008}.st{margin-top:12px;padding:10px;border-radius:7px;display:none}.ok{display:block;background:#1a2e1a;color:#4caf50}.er{display:block;background:#2e1a1a;color:#f77}.up{display:block;background:#2e2010;color:#ff6b1a}.muted{color:#777;font-size:.85em;margin-top:8px}</style></head><body><main class='c'><div class='t'>Prime Unlimited OS</div><h1 class='h'>Splash <span>Manager</span></h1><p class='sub'>Upload a custom boot splash</p><section class='box' id='auth'><b>Unlock Splash Manager</b><p class='muted'>Enter the access token stored on the device.</p><input id='token' type='password' autocomplete='current-password' placeholder='Access token'><button id='unlock'>Unlock</button></section><section id='app' hidden><div class='drop' id='drop'><b>&#x1F3A8;</b><p>Drop a PNG here or tap to select<br><small class='muted'>PNG, up to 10 MiB</small></p><input type='file' id='file' accept='image/png' hidden></div><input type='file' id='picker' accept='image/png' hidden><div class='pv' id='preview' hidden><img id='previewImg'><br><button id='apply'>Apply as Boot Splash</button></div><div class='cu' id='current'></div></section><div class='st' id='status'></div></main><script>let key='',data=null;const $=id=>document.getElementById(id),status=(c,m)=>{let s=$('status');s.className='st';if(c){s.classList.add(c);s.textContent=m}},request=(url,opts={})=>fetch(url,{...opts,headers:{...(opts.headers||{}),Authorization:'Bearer '+key}});$('unlock').onclick=async()=>{key=$('token').value.trim();if(!key){status('er','Enter the access token');return}try{let a=await request('/auth');if(a.status===401){status('er','Access token rejected');return}if(!a.ok)throw Error('Authentication failed');let r=await request('/current.png');if(r.status===401){status('er','Access token rejected');return}if(r.ok){let img=document.createElement('img');img.src=URL.createObjectURL(await r.blob());$('current').replaceChildren(img)}$('auth').hidden=true;$('app').hidden=false;status('','')}catch(e){status('er','Could not connect to the device')}};const drop=$('drop'),picker=$('file');drop.onclick=()=>picker.click();drop.ondragover=e=>{e.preventDefault();drop.classList.add('ov')};drop.ondragleave=()=>drop.classList.remove('ov');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('ov');handle(e.dataTransfer.files[0])};picker.onchange=()=>handle(picker.files[0]);function handle(f){if(!f||!f.name.match(/\.png$/i)){status('er','Select a PNG file');return}if(f.size>10*1024*1024){status('er','PNG exceeds the 10 MiB limit');return}data=f;let img=$('previewImg');img.src=URL.createObjectURL(f);$('preview').hidden=false;status('','')}$('apply').onclick=async()=>{if(!data)return;let b=$('apply');b.disabled=true;status('up','Uploading...');try{let r=await request('/upload',{method:'POST',headers:{'Content-Type':'image/png'},body:data});if(!r.ok)throw Error(await r.text());status('ok','Splash saved. Reboot the device to apply it.');}catch(e){status('er','Upload failed: '+e.message)}finally{b.disabled=false}};</script></body></html>`
+
+// The service can access only its scoped broker endpoint; it never receives
+// the runtime API mutation token or direct write access to the data partition.
+func proxySplash(w http.ResponseWriter, r *http.Request, data []byte) {
+	request, err := http.NewRequestWithContext(r.Context(), r.Method, managedCredentials.BrokerURL, bytes.NewReader(data))
+	if err != nil {
+		http.Error(w, "broker unavailable", 503)
+		return
+	}
+	request.Header.Set("Authorization", "Bearer "+managedCredentials.BrokerToken)
+	if r.Method == http.MethodPost {
+		request.Header.Set("Content-Type", "image/png")
+	}
+	client := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	response, err := client.Do(request)
+	if err != nil {
+		http.Error(w, "broker unavailable", 503)
+		return
+	}
+	defer response.Body.Close()
+	w.Header().Set("Content-Type", response.Header.Get("Content-Type"))
+	w.WriteHeader(response.StatusCode)
+	_, _ = io.Copy(w, io.LimitReader(response.Body, maxUpload))
+}

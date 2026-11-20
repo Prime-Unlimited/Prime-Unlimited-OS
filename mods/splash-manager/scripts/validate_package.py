@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, json, stat, struct, zipfile
+import argparse, hashlib, json, stat, struct, zipfile
 from pathlib import Path, PurePosixPath
 
 BINARY = {"jc11s": "splash-server-armhf", "jp24": "splash-server-aarch64"}
@@ -35,6 +35,9 @@ def main():
         assert binary[4] == expected_class and binary[5] == 1
         assert struct.unpack_from("<H", binary, 18)[0] == expected_machine
         assert profile["binaryName"] == binary_name
+        assert profile["service"] == {"binary": f"splash-manager/bin/{binary_name}",
+                                      "sha256": hashlib.sha256(binary).hexdigest(),
+                                      "capability": "splash-image"}
         assert profile["hardwareVerified"] is False
     print(f"validated {args.package}")
 

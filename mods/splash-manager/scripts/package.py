@@ -25,6 +25,11 @@ def main():
                         "-ldflags=-s -w -buildid=", "-o", str(binary), "."],
                        cwd=ROOT / "src/server", env=env, check=True)
         binary_data = binary.read_bytes()
+    # Candidate signed catalog metadata. The runtime trusts only the signed
+    # catalog service declaration, never platform.json alone.
+    profile["service"] = {"binary": f"splash-manager/bin/{binary_name}",
+                          "sha256": hashlib.sha256(binary_data).hexdigest(),
+                          "capability": "splash-image"}
     files = {
         "splash-manager/start.sh": (ROOT / "src/entrypoint.sh").read_bytes(),
         f"splash-manager/bin/{binary_name}": binary_data,

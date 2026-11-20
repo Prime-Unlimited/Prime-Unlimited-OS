@@ -49,3 +49,7 @@ def test_restricted_launcher_fails_before_any_service_action():
     )
     assert result.returncode != 0
     assert 'trusted service adapter' in result.stderr
+
+
+def test_managed_server_security_contract():
+    subprocess.run(["go", "test", "./..."], cwd=ROOT / "src/server", check=True)
