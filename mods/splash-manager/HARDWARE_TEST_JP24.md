@@ -47,3 +47,21 @@ with the on-device WEB ACCESS dialog and browser UI still needs confirmation.
 JC11S is untested. Both committed hardwareVerified flags remain false, and no
 production catalog approval/signature was generated. These results establish
 JP24 service/API operation, not an official release decision.
+
+## Pairing update 1.1.1
+
+The manual 64-character entry was replaced with a six-digit pairing code.
+A fresh isolated test installation on the same JP24 confirmed:
+
+- The management endpoint returns a six-digit code, not the long web token.
+- HTTPS pairing returns HTTP 200; the resulting session logs in with HTTP 204.
+- Authenticated preview returns HTTP 200.
+- Reusing a consumed code is rejected with HTTP 429.
+- Isolated Go tests on the JP24 confirmed two-minute expiry and the five-attempt
+  limit as well as single use and separation from management/broker tokens.
+
+The temporary upgrade attempt failed in the bind-mounted test layout and
+restored the original runtime. To avoid cross-mount renames, the replacement
+test setup bind-mounts the whole private mods tree so installed and rollback
+paths share a mount. A fresh 1.1.1 install/enable and HTTPS pairing succeeded;
+this run does not claim to have verified an in-place 1.1.0-to-1.1.1 device update.

@@ -546,6 +546,10 @@ func (s *server) handleRecover(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/v1/service-pair" {
+		s.handleServicePair(w, r)
+		return
+	}
 	if r.URL.Path == "/api/v1/service-splash" {
 		s.handleServiceSplash(w, r)
 		return

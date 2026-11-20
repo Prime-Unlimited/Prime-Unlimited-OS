@@ -37,9 +37,12 @@ type serviceCredentials struct {
 }
 
 type serviceRecord struct {
-	ID            string             `json:"id"`
-	PackageSHA256 string             `json:"packageSha256"`
-	Credentials   serviceCredentials `json:"credentials"`
+	PairingCode     string             `json:"pairingCode,omitempty"`
+	PairingExpires  int64              `json:"pairingExpires,omitempty"`
+	PairingAttempts int                `json:"pairingAttempts,omitempty"`
+	ID              string             `json:"id"`
+	PackageSHA256   string             `json:"packageSha256"`
+	Credentials     serviceCredentials `json:"credentials"`
 }
 
 var serviceProvisioningAllowed = func() bool { return os.Geteuid() == 0 }

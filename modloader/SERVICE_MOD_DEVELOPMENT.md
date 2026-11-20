@@ -55,8 +55,11 @@ The service has no general filesystem write capability.
 
 The managed Splash Manager serves HTTPS on port 8443. Its web token authorizes
 browser upload/preview, but cannot authorize runtime mutations or broker writes.
-The authenticated `POST /api/v1/service-access` endpoint returns only the web
-token, LAN URLs and SHA-256 certificate fingerprint to the trusted Modloader UI.
+The authenticated `POST /api/v1/service-access` endpoint returns a six-digit, single-use pairing
+code, LAN URLs and SHA-256 certificate fingerprint to the trusted Modloader UI.
+Codes expire after two minutes and lock after five incorrect attempts.
+The service exchanges the code at its scoped `/api/v1/service-pair` endpoint;
+the browser receives the 256-bit web token automatically over HTTPS.
 The WEB ACCESS dialog displays those values on the device, so SSH is not needed
 for routine browser use. The browser must verify the displayed fingerprint
 before accepting the self-signed certificate. Credentials are revoked at stop;

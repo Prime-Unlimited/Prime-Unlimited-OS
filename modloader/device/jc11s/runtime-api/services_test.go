@@ -221,7 +221,7 @@ func TestServiceAccessRequiresManagementAuthorization(t *testing.T) {
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, r)
 		if token == s.authToken {
-			if w.Code != 200 || !strings.Contains(w.Body.String(), record.Credentials.WebToken) || strings.Contains(w.Body.String(), record.Credentials.BrokerToken) {
+			if w.Code != 200 || !strings.Contains(w.Body.String(), "pairingCode") || strings.Contains(w.Body.String(), record.Credentials.WebToken) || strings.Contains(w.Body.String(), record.Credentials.BrokerToken) {
 				t.Fatalf("invalid management response: %d", w.Code)
 			}
 		} else if w.Code != 401 {
@@ -270,5 +270,73 @@ func TestServiceRejectsUnsafeCapabilityDeclarations(t *testing.T) {
 		if validateServiceSpec(spec) == nil {
 			t.Fatal("unsafe service metadata accepted")
 		}
+	}
+}
+
+func TestServicePairingCodeExpiryAttemptsAndSingleUse(t *testing.T) {
+	s, root, item, record := serviceAPIFixture(t)
+	issue := func() string {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/service-access", strings.NewReader(`{"id":"`+item.ID+`"}`))
+		r.Header.Set("Authorization", "Bearer "+s.authToken)
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		if w.Code != 200 {
+			t.Fatalf("code issuance: %d", w.Code)
+		}
+		value, err := loadServiceRecord(root, item.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(value.PairingCode) != 6 {
+			t.Fatal("not a six-digit code")
+		}
+		return value.PairingCode
+	}
+	pair := func(code, token string) int {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/service-pair", strings.NewReader(`{"code":"`+code+`"}`))
+		r.Header.Set("Authorization", "Bearer "+token)
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		if w.Code == 200 && (!strings.Contains(w.Body.String(), record.Credentials.WebToken) || strings.Contains(w.Body.String(), record.Credentials.BrokerToken)) {
+			t.Fatal("wrong pairing credential returned")
+		}
+		return w.Code
+	}
+	code := issue()
+	if pair(code, s.authToken) != 401 || pair(code, record.Credentials.WebToken) != 401 {
+		t.Fatal("unscoped pairing allowed")
+	}
+	if pair(code, record.Credentials.BrokerToken) != 200 {
+		t.Fatal("valid code rejected")
+	}
+	if pair(code, record.Credentials.BrokerToken) != 429 {
+		t.Fatal("code reused")
+	}
+	code = issue()
+	wrong := "000000"
+	if code == wrong {
+		wrong = "999999"
+	}
+	for i := 0; i < 5; i++ {
+		if pair(wrong, record.Credentials.BrokerToken) != 401 {
+			t.Fatal("wrong code status")
+		}
+	}
+	if pair(code, record.Credentials.BrokerToken) != 429 {
+		t.Fatal("attempt limit bypassed")
+	}
+	code = issue()
+	value, err := loadServiceRecord(root, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value.PairingExpires = 1
+	if err := writeAtomicJSON(serviceRecordPath(root, item.ID), value); err != nil {
+		t.Fatal(err)
+	}
+	if pair(code, record.Credentials.BrokerToken) != 429 {
+		t.Fatal("expired code accepted")
 	}
 }

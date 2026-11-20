@@ -7,10 +7,12 @@ runtime capability broker. It runs as a sandboxed systemd DynamicUser service.
 ## Device use after approval
 
 Install the signed catalog package and activate it in Modloader. Tap **WEB
-ACCESS** to display the HTTPS address, access token and certificate fingerprint.
+ACCESS** to display the HTTPS address, six-digit pairing code and certificate fingerprint.
 Open the address on a computer/phone on the same network, compare the device
 certificate fingerprint before accepting the self-signed certificate, then
-enter the token. No SSH tunnel is required for this managed mode.
+enter the code. It expires after two minutes, is single-use and locks after
+five incorrect attempts. The long session token is exchanged automatically.
+No SSH tunnel is required for this managed mode.
 
 Uploads are decoded as PNG, limited to 10 MiB and 16 megapixels, and committed
 atomically. Reboot the device to see the new splash. Disable stops the service;
