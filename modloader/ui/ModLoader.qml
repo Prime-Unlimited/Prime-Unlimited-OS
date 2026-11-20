@@ -220,7 +220,7 @@ Rectangle {
     function visibleMods() {
         if (selectedTab === 0) {
             var available = []
-            if (developerMode && deviceText.indexOf("JC11S /") === 0) {
+            if (deviceText.indexOf("JC11S /") === 0) {
                 for (var previewIndex = 0; previewIndex < adminTestPreviews.length; ++previewIndex) {
                     var preview = adminTestPreviews[previewIndex]
                     var alreadyListed = false
