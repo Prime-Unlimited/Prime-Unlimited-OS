@@ -45,6 +45,70 @@ func TestCatalogSyncSignatureAndUpdateComparison(t *testing.T) {
 	}
 }
 
+func TestCatalogPermissionMigrationTightensLegacyInstall(t *testing.T) {
+	root := t.TempDir()
+	catalogDirectory := filepath.Join(root, "catalog")
+	trustDirectory := filepath.Join(root, "trust")
+	if err := os.Mkdir(catalogDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(trustDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	catalogPath := filepath.Join(catalogDirectory, "catalog.json")
+	signaturePath := filepath.Join(catalogDirectory, "catalog.sig.json")
+	trustPath := filepath.Join(trustDirectory, "catalog-key.json")
+	for _, path := range []string{catalogPath, signaturePath, catalogPath + ".last-good", signaturePath + ".last-good", trustPath} {
+		if err := os.WriteFile(path, []byte("unchanged"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := migrateCatalogPermissions(catalogPath, signaturePath, trustPath); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{catalogDirectory, trustDirectory} {
+		info, err := os.Lstat(path)
+		if err != nil || info.Mode().Perm() != 0o700 {
+			t.Fatalf("directory %s mode=%v err=%v", path, info.Mode(), err)
+		}
+	}
+	for _, path := range []string{catalogPath, signaturePath, catalogPath + ".last-good", signaturePath + ".last-good", trustPath} {
+		info, err := os.Lstat(path)
+		data, readErr := os.ReadFile(path)
+		if err != nil || readErr != nil || info.Mode().Perm() != 0o600 || string(data) != "unchanged" {
+			t.Fatalf("file %s mode=%v data=%q err=%v/%v", path, info.Mode(), data, err, readErr)
+		}
+	}
+}
+
+func TestCatalogPermissionMigrationRejectsSymlinks(t *testing.T) {
+	root := t.TempDir()
+	catalogDirectory := filepath.Join(root, "catalog")
+	trustDirectory := filepath.Join(root, "trust")
+	if err := os.Mkdir(catalogDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(trustDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "outside")
+	if err := os.WriteFile(target, []byte("do not touch"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalogPath := filepath.Join(catalogDirectory, "catalog.json")
+	if err := os.Symlink(target, catalogPath); err != nil {
+		t.Fatal(err)
+	}
+	err := migrateCatalogPermissions(catalogPath, filepath.Join(catalogDirectory, "catalog.sig.json"), filepath.Join(trustDirectory, "catalog-key.json"))
+	if err == nil || !strings.Contains(err.Error(), "unsafe") {
+		t.Fatalf("unsafe link accepted: %v", err)
+	}
+	info, statErr := os.Stat(target)
+	if statErr != nil || info.Mode().Perm() != 0o644 {
+		t.Fatalf("link target changed: %v %v", info, statErr)
+	}
+}
+
 func TestCatalogStartupUsesOnlySignedLastGoodFallback(t *testing.T) {
 	directory := t.TempDir()
 	catalogPath := filepath.Join(directory, "catalog.json")

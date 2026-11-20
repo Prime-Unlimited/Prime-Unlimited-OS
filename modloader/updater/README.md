@@ -23,7 +23,7 @@ Endpoints:
 The service checks automatically at startup. Mutation endpoints use the same
 device-owned bearer token as the main runtime; it is never stored in GitHub.
 
-Current signed channel: Modloader `0.2.0` revision `8`. Revision 8 extends
+Current signed channel: Modloader `0.2.0` revision `9`. Revision 8 extended
 the signed update and rollback boundary to the QRC-backed Control Center tile.
 The manifest pins the
 immutable GitHub assets for JC11S and JP24 by asset ID, byte size and SHA-256.
@@ -40,3 +40,10 @@ the cache again. Revision 9 and later include the now-allowlisted QML path as a
 normal eighth bundle entry. The live QRC resource adopts a staged tile change
 on the next controlled Engine/device restart; the updater never restarts Engine
 during a set.
+
+Revision 9 safely migrates catalog and trust directories created by early
+installers from `0755` to `0700`, and their regular root-owned metadata files
+from `0644` to `0600`. Symlinks, unexpected file types and wrong ownership are
+rejected. The migration runs in the shared runtime before its automatic signed
+catalog sync, so both JC11S and JP24 recover during the verified self-update
+without changing installed mods, registry state, settings or trust material.

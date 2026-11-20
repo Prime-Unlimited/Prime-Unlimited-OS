@@ -117,6 +117,47 @@ func ensurePrivateDirectory(path string) error {
 	return nil
 }
 
+// migratePrivateDirectory tightens permissions left by early installers. It
+// never follows links or changes ownership, so an unexpected object still
+// fails closed instead of being repaired in place.
+func migratePrivateDirectory(path string) error {
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("private state directory is unsafe")
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat.Uid != uint32(os.Geteuid()) {
+		return errors.New("private state directory has wrong owner")
+	}
+	if info.Mode().Perm() != 0o700 {
+		if err := os.Chmod(path, 0o700); err != nil {
+			return err
+		}
+	}
+	return ensurePrivateDirectory(path)
+}
+
+func migratePrivateFile(path string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("private state file is unsafe")
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat.Uid != uint32(os.Geteuid()) {
+		return errors.New("private state file has wrong owner")
+	}
+	if info.Mode().Perm() != 0o600 {
+		return os.Chmod(path, 0o600)
+	}
+	return nil
+}
+
 func syncDirectory(path string) error {
 	directory, err := os.Open(path)
 	if err != nil {

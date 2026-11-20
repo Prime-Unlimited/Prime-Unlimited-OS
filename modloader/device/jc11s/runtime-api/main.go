@@ -1376,6 +1376,9 @@ func main() {
 	if filepath.Clean(*root) != "/data/prime-unlimited" || !filepath.IsAbs(*root) {
 		log.Fatal("refusing runtime root outside /data/prime-unlimited")
 	}
+	if err := migrateCatalogPermissions(*catalogPath, *catalogSignaturePath, *catalogTrustKeyPath); err != nil {
+		log.Fatalf("catalog permission migration failed: %v", err)
+	}
 	if err := recoverInstall(*root); err != nil {
 		log.Fatalf("install recovery failed: %v", err)
 	}

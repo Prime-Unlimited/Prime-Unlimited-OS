@@ -26,6 +26,25 @@ type catalogSyncResult struct {
 	OfflineFallback bool   `json:"offlineFallback"`
 }
 
+func migrateCatalogPermissions(catalogPath, signaturePath, trustPath string) error {
+	seen := map[string]bool{}
+	for _, directory := range []string{filepath.Dir(catalogPath), filepath.Dir(signaturePath), filepath.Dir(trustPath)} {
+		if seen[directory] {
+			continue
+		}
+		seen[directory] = true
+		if err := migratePrivateDirectory(directory); err != nil {
+			return err
+		}
+	}
+	for _, path := range []string{catalogPath, signaturePath, catalogPath + ".last-good", signaturePath + ".last-good", trustPath} {
+		if err := migratePrivateFile(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func verifyCatalogData(catalogData, signatureData, trustData []byte) catalogState {
 	var trust catalogTrustKey
 	var signature catalogSignature
