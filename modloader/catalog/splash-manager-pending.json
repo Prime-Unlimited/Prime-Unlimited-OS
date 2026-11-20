@@ -1,5 +1,5 @@
 {
-  "status": "pending-verification",
+  "status": "admin-test-authorized-awaiting-package-and-adapter",
   "catalogEntry": false,
   "id": "splash-manager",
   "name": "Splash Manager",
@@ -33,5 +33,20 @@
     "Confirm target-specific firmware and hardware approval",
     "Sign production catalog with off-device maintainer key"
   ],
-  "notes": "Discovery record only. Never consumed as an approved or installable catalog entry. No cross-branch merge or hardware activation."
+  "notes": "Admin authorized a scoped JC11S test, not a bypass of cryptographic integrity or runtime prerequisites. Not consumed as installable catalog metadata.",
+  "requestedTarget": "JC11S",
+  "testAuthorization": {
+    "scope": "JC11S only",
+    "version": "1.1.2",
+    "type": "administrator-directed pre-release test",
+    "productionApproval": false,
+    "packageVerificationRequired": true,
+    "catalogSignatureRequired": true
+  },
+  "blockers": [
+    "JC11S package artifact URL, SHA-256 and exact size not verified",
+    "JC11S service binary digest not verified",
+    "Native service adapter services.go and service_access.go absent from target branch",
+    "JC11S hardware compatibility not verified; testing authorized only after fail-closed installation prerequisites"
+  ]
 }
