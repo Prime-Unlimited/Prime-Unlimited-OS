@@ -15,6 +15,8 @@ Rectangle {
     property bool busy: false
     property bool updaterBusy: false
     property bool developerMode: false
+    // Local admin-test discovery only; installation still requires a trusted signed catalog.
+    property var adminTestPreviews: [{"id":"splash-manager-jc11s","name":"Splash Manager [ADMIN TEST]","version":"1.1.2","revision":1,"models":["JC11S"],"deviceEligible":true,"compatible":false,"adminTestPreview":true,"description":"JC11S native service test candidate; awaiting signed catalog approval."}]
     property bool showUpdatePrompt: false
     property var selfUpdate: ({"installed":{"version":"?","revision":0},"available":{"version":"?","revision":0},"updateAvailable":false,"rollbackAvailable":false})
     property int selectedTab: 0
@@ -218,6 +220,15 @@ Rectangle {
     function visibleMods() {
         if (selectedTab === 0) {
             var available = []
+            if (developerMode && deviceText.indexOf("JC11S /") === 0) {
+                for (var previewIndex = 0; previewIndex < adminTestPreviews.length; ++previewIndex) {
+                    var preview = adminTestPreviews[previewIndex]
+                    var alreadyListed = false
+                    for (var candidateIndex = 0; candidateIndex < mods.length; ++candidateIndex)
+                        if (mods[candidateIndex].id === preview.id) alreadyListed = true
+                    if (!alreadyListed) available.push(preview)
+                }
+            }
             for (var index = 0; index < mods.length; ++index) {
                 var approved = isApprovedForDevice(mods[index])
                 if ((approved && mods[index].compatible) || (developerMode && mods[index].deviceEligible))
@@ -359,7 +370,7 @@ Rectangle {
                     }
                     Text {
                         x: 16; y: 48
-                        text: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined
+                        text: modelData.adminTestPreview ? "ADMIN TEST / awaiting signed catalog – install unavailable" : safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined
                             ? "Quarantined after " + safety.mods[modelData.id].failureCount + " failures"
                             : (modelData.updateAvailable
                                 ? "Update available: " + modelData.updateReason
@@ -393,8 +404,8 @@ Rectangle {
                         color: "#ff541c"
                         property bool present: installed[modelData.id] !== undefined
                         Text { anchors.centerIn: parent; color: "white"; font.bold: true
-                            text: parent.present ? (installed[modelData.id].enabled ? "DISABLE" : "ENABLE") : "INSTALL" }
-                        MouseArea { anchors.fill: parent; enabled: !busy && (parent.present || modelData.compatible); onClicked: {
+                            text: modelData.adminTestPreview ? "PENDING" : (parent.present ? (installed[modelData.id].enabled ? "DISABLE" : "ENABLE") : "INSTALL") }
+                        MouseArea { anchors.fill: parent; enabled: !busy && !modelData.adminTestPreview && (parent.present || modelData.compatible); onClicked: {
                             if (!parent.present) installVerified(modelData.id)
                             else mutation(installed[modelData.id].enabled ? "disable" : "enable", modelData.id, "", null)
                         }}
