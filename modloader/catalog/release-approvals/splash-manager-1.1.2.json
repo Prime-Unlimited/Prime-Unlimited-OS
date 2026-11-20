@@ -25,13 +25,13 @@
     "jp24": {
       "technicallyCompatible": false,
       "hardwareVerified": false,
-      "officialCatalogApproved": false,
+      "officialCatalogApproved": true,
       "catalog": {
         "id": "splash-manager-jp24",
         "name": "Splash Manager",
         "version": "1.1.2",
         "revision": 1,
-        "description": "JP24 candidate; independent production approval pending.",
+        "description": "Administrator-approved JP24 release; hardware validation pending.",
         "entrypoint": "splash-manager/start.sh",
         "approval": {
           "maintainer": "Prime Unlimited",
