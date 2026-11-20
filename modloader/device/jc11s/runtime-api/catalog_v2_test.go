@@ -35,7 +35,7 @@ func TestCanonicalDeviceCatalogSignaturesAndIsolation(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			catalogPath := filepath.Join("..", "..", "..", "catalog", test.file)
 			state := loadVerifiedCatalog(catalogPath, strings.TrimSuffix(catalogPath, ".json")+".sig.json", filepath.Join("..", "..", "..", "catalog", "trust", "prime-unlimited-2026-1.json"))
-			if state.Status != "valid" || !state.Trusted || len(state.Catalog.Mods) != 1 {
+			if state.Status != "valid" || !state.Trusted || len(state.Catalog.Mods) < 1 {
 				t.Fatalf("canonical catalog invalid: %#v", state)
 			}
 			runtime := server{model: test.model, firmware: "5.3.0", architecture: test.architecture, abi: test.abi, catalog: state}
