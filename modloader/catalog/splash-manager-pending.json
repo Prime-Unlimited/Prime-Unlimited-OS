@@ -1,5 +1,5 @@
 {
-  "status": "admin-test-authorized-awaiting-package-and-adapter",
+  "status": "admin-test-authorized-release-verified-service-digest-and-signature-pending",
   "catalogEntry": false,
   "id": "splash-manager",
   "name": "Splash Manager",
@@ -27,11 +27,10 @@
     }
   ],
   "releaseRequirements": [
-    "Integrate and verify trusted native service adapter on target branch",
-    "Build immutable target-specific ZIP assets",
-    "Verify package sizes, SHA-256 and service binary SHA-256",
-    "Confirm target-specific firmware and hardware approval",
-    "Sign production catalog with off-device maintainer key"
+    "Extract exact release ZIP and verify its SHA-256 against release digest",
+    "Compute service binary SHA-256 and match it to packaged platform.json",
+    "Verify integrated service adapter tests and hardware-specific prerequisites",
+    "Generate and sign JC11S-only v2 test catalog using off-device trusted key"
   ],
   "notes": "Admin authorized a scoped JC11S test, not a bypass of cryptographic integrity or runtime prerequisites. Not consumed as installable catalog metadata.",
   "requestedTarget": "JC11S",
@@ -44,9 +43,21 @@
     "catalogSignatureRequired": true
   },
   "blockers": [
-    "JC11S package artifact URL, SHA-256 and exact size not verified",
-    "JC11S service binary digest not verified",
-    "Native service adapter services.go and service_access.go absent from target branch",
-    "JC11S hardware compatibility not verified; testing authorized only after fail-closed installation prerequisites"
-  ]
+    "Service executable SHA-256 from exact release ZIP not independently verified",
+    "Catalog needs signature using deployment-owned Ed25519 private key",
+    "JC11S hardware behavior remains unverified (test is explicitly authorized)"
+  ],
+  "release": {
+    "tag": "splash-manager-v1.1.2",
+    "asset": "splash-manager-v1.1.2-jc11s.zip",
+    "url": "https://github.com/Prime-Unlimited/Prime-Unlimited-OS/releases/download/splash-manager-v1.1.2/splash-manager-v1.1.2-jc11s.zip",
+    "sha256": "bc799ab68329fab99c27ba0066d26d39795e6af1683dc2350948a826ea23c658",
+    "size": 2683439,
+    "verification": "GitHub release asset digest and size; local byte-for-byte download verification unavailable"
+  },
+  "adapter": {
+    "integrated": true,
+    "commit": "bae640c7bb716481ebf65414731ad5393bd2b76c",
+    "testStatus": "not executed"
+  }
 }
