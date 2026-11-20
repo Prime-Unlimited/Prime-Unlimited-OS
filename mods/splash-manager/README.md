@@ -14,6 +14,7 @@ enter the code. It expires after two minutes, is single-use and locks after
 five incorrect attempts. The long session token is exchanged automatically.
 No SSH tunnel is required for this managed mode.
 
+Use a **1280 × 800 px (16:10) PNG** for the splash screen.
 Uploads are decoded as PNG, limited to 10 MiB and 16 megapixels, and committed
 atomically. Reboot the device to see the new splash. Disable stops the service;
 uninstall removes its executable and credentials while preserving the splash.

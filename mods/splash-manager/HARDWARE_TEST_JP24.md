@@ -42,7 +42,9 @@ fixture correction, not a relaxation of ownership checks.
 
 ## Remaining release gates
 
-No reboot or visual boot-splash verification was performed. Human interaction
+The maintainer subsequently reported a successful reboot/splash test on
+2026-11-20. This is a user-reported result; persistent service autostart after
+reboot was not independently verified in the temporary test setup. Human interaction
 with the on-device WEB ACCESS dialog and browser UI still needs confirmation.
 JC11S is untested. Both committed hardwareVerified flags remain false, and no
 production catalog approval/signature was generated. These results establish

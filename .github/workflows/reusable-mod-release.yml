@@ -26,6 +26,17 @@ on:
         type: string
         default: '{}'
 
+      prerelease:
+        description: Publish as a public prerelease rather than a stable release
+        required: false
+        type: boolean
+        default: false
+      release-notes:
+        description: Release notes describing prerequisites and approval status
+        required: false
+        type: string
+        default: Unsigned 32- and 64-bit device packages built from one shared mod source. Trusted catalog signing is a separate authorized step.
+
 permissions:
   contents: read
 
@@ -180,13 +191,21 @@ jobs:
           sha256sum *.zip | sort > "${{ inputs.mod-id }}-SHA256SUMS.txt"
           stat --printf='%n %s bytes\n' *.zip | sort > "${{ inputs.mod-id }}-SIZES.txt"
       - name: Publish immutable tag assets
-        env: {GH_TOKEN: '${{ github.token }}'}
-        run: >-
-          gh release create "$GITHUB_REF_NAME"
-          release/*.zip
-          "release/${{ inputs.mod-id }}-SHA256SUMS.txt"
-          "release/${{ inputs.mod-id }}-SIZES.txt"
-          --repo "$GITHUB_REPOSITORY"
-          --verify-tag
-          --title "${{ inputs.release-title }} ${GITHUB_REF_NAME#${{ inputs.tag-prefix }}}"
-          --notes "Unsigned 32- and 64-bit device packages built from one shared mod source. Trusted catalog signing is a separate authorized step."
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TITLE: ${{ inputs.release-title }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          RELEASE_NOTES: ${{ inputs.release-notes }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          printf '%s\n' "$RELEASE_NOTES" > release-notes.md
+          extra=()
+          if [ "$PRERELEASE" = true ]; then extra+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" \
+            release/*.zip \
+            "release/${{ inputs.mod-id }}-SHA256SUMS.txt" \
+            "release/${{ inputs.mod-id }}-SIZES.txt" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "$RELEASE_TITLE ${GITHUB_REF_NAME#"$TAG_PREFIX"}" \
+            --notes-file release-notes.md "${extra[@]}"
