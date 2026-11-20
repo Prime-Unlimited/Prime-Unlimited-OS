@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "modId": "splash-manager",
+  "version": "1.1.2",
+  "targets": {
+    "jc11s": {
+      "technicallyCompatible": false,
+      "hardwareVerified": false,
+      "officialCatalogApproved": false,
+      "catalog": {
+        "id": "splash-manager-jc11s",
+        "name": "Splash Manager",
+        "version": "1.1.2",
+        "revision": 1,
+        "description": "Administrator-requested JC11S test candidate; native splash-image service. Requires reviewed native service adapter.",
+        "entrypoint": "splash-manager/start.sh",
+        "approval": {
+          "maintainer": "Prime Unlimited",
+          "devices": [
+            "JC11S"
+          ]
+        }
+      }
+    },
+    "jp24": {
+      "technicallyCompatible": false,
+      "hardwareVerified": false,
+      "officialCatalogApproved": false,
+      "catalog": {
+        "id": "splash-manager-jp24",
+        "name": "Splash Manager",
+        "version": "1.1.2",
+        "revision": 1,
+        "description": "JP24 candidate; independent production approval pending.",
+        "entrypoint": "splash-manager/start.sh",
+        "approval": {
+          "maintainer": "Prime Unlimited",
+          "devices": [
+            "JP24"
+          ]
+        }
+      }
+    }
+  }
+}
