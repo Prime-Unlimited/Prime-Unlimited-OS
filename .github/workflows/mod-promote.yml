@@ -36,7 +36,6 @@ jobs:
     environment: mod-release
     permissions:
       contents: write
-      administration: read
     if: github.repository == 'Prime-Unlimited/Prime-Unlimited-OS'
     steps:
       - uses: actions/checkout@v4
@@ -45,10 +44,6 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - run: python -m pip install cryptography
-      - name: Require administrator reviewers
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python -m tools.mod_release check-environment --root . --environment mod-release
       - name: Promote the confirmed artifact and re-sign catalogs
         env:
           CATALOG_ED25519_PRIVATE: ${{ secrets.CATALOG_ED25519_PRIVATE }}

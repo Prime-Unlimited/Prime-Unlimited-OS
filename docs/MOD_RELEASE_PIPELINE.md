@@ -77,7 +77,7 @@ Die Environment ist die Administratorbestätigung. Vor dem ersten Development-La
 
 1. Environment `mod-sign` anlegen. Deployment branch nur `feat/prime-unlimited-mod-loader`. Keine Required reviewers. Secret `CATALOG_ED25519_PRIVATE`: der bestehende Schlüssel `prime-unlimited-2026-1`, Hex der 32-Byte-Seed oder der 64-Byte-Go-Schlüssel. Keinen neuen Schlüssel erzeugen.
 2. Environment `mod-release` anlegen. Deployment branch nur `feat/prime-unlimited-mod-loader`. Required reviewers setzen. Dasselbe Secret `CATALOG_ED25519_PRIVATE` auch hier hinterlegen.
-3. Der Workflow liest die Environment-Regeln und bricht ab, wenn der Branch nicht exakt gesperrt ist oder `mod-release` keine Reviewer hat. Er umgeht die Prüfung nicht.
+3. GitHub startet den Job erst, wenn die Environment-Regel passt. `mod-sign` bleibt auf den einen Branch begrenzt. `mod-release` wartet auf den Required reviewer. Die Prüfung `python -m tools.mod_release check-environment` kann davor lokal laufen. Der Workflow-Token darf diese Environments-API nicht lesen.
 
 Der Signierlauf bricht zusätzlich ab, wenn der öffentliche Schlüssel nicht zu `modloader/catalog/trust/prime-unlimited-2026-1.json` passt.
 
