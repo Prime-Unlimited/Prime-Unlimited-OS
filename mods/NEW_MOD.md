@@ -51,12 +51,13 @@ The reusable workflow builds both JC11S and JP24 packages, checks they are ident
 
 ## 3. Catalog entries
 
-Edit both files:
+Do not edit `modloader/catalog/jc11s.json` or `jp24.json` by hand. Put the
+finished package under `mods/development/<mod-id>/<version>/` and follow
+`docs/MOD_RELEASE_PIPELINE.md`. The pipeline writes the signed catalog and a
+download URL of the form
+`https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/<id>`.
 
-- `modloader/catalog/jc11s.json`
-- `modloader/catalog/jp24.json`
-
-Add one entry per device. Example for an overlay mod:
+Historical shape of one generated entry:
 
 ```json
 {
@@ -67,7 +68,7 @@ Add one entry per device. Example for an overlay mod:
   "description": "Short description.",
   "models": ["JC11S"],
   "firmware": ["5.3.0"],
-  "downloadUrl": "https://github.com/Prime-Unlimited/Prime-Unlimited-OS/releases/download/example-v0.1.0/example-v0.1.0-jc11s.zip",
+  "downloadUrl": "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/1",
   "sha256": "<sha256 of the zip>",
   "size": 1234,
   "architecture": "armv7l",

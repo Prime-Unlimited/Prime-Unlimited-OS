@@ -1,1 +1,73 @@
-{"schemaVersion":2,"catalogId":"prime-unlimited-jp24","mods":[{"id":"prime-clock-jp24","name":"Prime Clock","version":"0.1.2","revision":1,"description":"Compact local clock and monotonic stopwatch overlay with stable native touch dragging (JP24 hardware test).","models":["JP24"],"firmware":["5.3.0"],"downloadUrl":"https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/770107451","sha256":"6e3884644734590d522ab5df54e43de88f15efe1a48a8a5e142323a48bf92756","size":2634,"architecture":"aarch64","abi":"gnu","entrypoint":"prime-clock/start.sh","overlay":"prime-clock/ui/PrimeClock.qml","approval":{"maintainer":"Prime Unlimited","devices":["JP24"]}},{"id":"splash-manager-jp24","name":"Splash Manager","version":"1.1.2","revision":1,"description":"Administrator-approved JP24 release; hardware validation not yet completed.","models":["JP24"],"firmware":["5.3.0"],"downloadUrl":"https://github.com/Prime-Unlimited/Prime-Unlimited-OS/releases/download/splash-manager-v1.1.2/splash-manager-v1.1.2-jp24.zip","sha256":"849fde1d2253081a3fa8d59b2d50d0178588923d7d9027f7de0daa7d6fbe91e6","size":2566523,"architecture":"aarch64","abi":"gnu","entrypoint":"splash-manager/start.sh","service":{"binary":"splash-manager/bin/splash-server-aarch64","sha256":"4803c2b9d7194ebdd2ade26d212440fb5f55f5175d44fc0207ce0cf91a042992","capability":"splash-image"},"approval":{"maintainer":"Prime Unlimited","devices":["JP24"]}}],"libraries":[]}
+{
+  "catalogId": "prime-unlimited-jp24",
+  "libraries": [],
+  "mods": [
+    {
+      "abi": "gnu",
+      "approval": {
+        "devices": [
+          "JP24"
+        ],
+        "maintainer": "Prime Unlimited"
+      },
+      "architecture": "aarch64",
+      "description": "Compact local clock and monotonic stopwatch overlay with stable native touch dragging (JP24 hardware test).",
+      "downloadUrl": "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/770107451",
+      "entrypoint": "prime-clock/start.sh",
+      "firmware": [
+        "5.3.0"
+      ],
+      "id": "prime-clock-jp24",
+      "models": [
+        "JP24"
+      ],
+      "name": "Prime Clock",
+      "overlay": "prime-clock/ui/PrimeClock.qml",
+      "release": {
+        "artifactSha256": "6e3884644734590d522ab5df54e43de88f15efe1a48a8a5e142323a48bf92756",
+        "hardwareVerification": "recorded-separately"
+      },
+      "revision": 1,
+      "sha256": "6e3884644734590d522ab5df54e43de88f15efe1a48a8a5e142323a48bf92756",
+      "size": 2634,
+      "status": "ready",
+      "version": "0.1.2"
+    },
+    {
+      "abi": "gnu",
+      "approval": {
+        "devices": [
+          "JP24"
+        ],
+        "maintainer": "Prime Unlimited"
+      },
+      "architecture": "aarch64",
+      "description": "Administrator-approved JP24 release; hardware validation not yet completed.",
+      "downloadUrl": "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/773325282",
+      "entrypoint": "splash-manager/start.sh",
+      "firmware": [
+        "5.3.0"
+      ],
+      "id": "splash-manager-jp24",
+      "models": [
+        "JP24"
+      ],
+      "name": "Splash Manager",
+      "release": {
+        "artifactSha256": "849fde1d2253081a3fa8d59b2d50d0178588923d7d9027f7de0daa7d6fbe91e6",
+        "hardwareVerification": "not-performed"
+      },
+      "revision": 1,
+      "service": {
+        "binary": "splash-manager/bin/splash-server-aarch64",
+        "capability": "splash-image",
+        "sha256": "4803c2b9d7194ebdd2ade26d212440fb5f55f5175d44fc0207ce0cf91a042992"
+      },
+      "sha256": "849fde1d2253081a3fa8d59b2d50d0178588923d7d9027f7de0daa7d6fbe91e6",
+      "size": 2566523,
+      "status": "ready",
+      "version": "1.1.2"
+    }
+  ],
+  "schemaVersion": 2
+}

@@ -1,0 +1,17 @@
+{
+  "tag": "prime-clock-v0.1.2",
+  "assets": {
+    "jc11s": {
+      "id": 770107450,
+      "name": "prime-clock-v0.1.2-jc11s.zip",
+      "sha256": "2ce60eb2e999cfeee17cf1a1eab5283636e73b81ac75efe462ff64e29ee00136",
+      "size": 2608
+    },
+    "jp24": {
+      "id": 770107451,
+      "name": "prime-clock-v0.1.2-jp24.zip",
+      "sha256": "6e3884644734590d522ab5df54e43de88f15efe1a48a8a5e142323a48bf92756",
+      "size": 2634
+    }
+  }
+}

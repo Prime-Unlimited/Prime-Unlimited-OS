@@ -19,3 +19,5 @@ prime_unlimited_ed25519*
 *.egg-info/
 work/
 output/
+modloader/catalog/.publish.lock
+modloader/catalog/*.new

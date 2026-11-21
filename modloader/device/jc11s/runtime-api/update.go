@@ -220,9 +220,8 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	item, ok := s.catalogMod(request.ID)
+	item, ok := s.requireInstallable(w, request.ID)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "compatible catalog mod not found"})
 		return
 	}
 	s.cacheMu.Lock()

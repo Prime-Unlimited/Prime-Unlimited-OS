@@ -1,0 +1,15 @@
+{
+  "modId": "prime-clock",
+  "version": "0.1.2",
+  "confirmedBy": "migrated-existing-signed-catalog",
+  "targets": {
+    "jc11s": {
+      "sha256": "2ce60eb2e999cfeee17cf1a1eab5283636e73b81ac75efe462ff64e29ee00136",
+      "assetId": 770107450
+    },
+    "jp24": {
+      "sha256": "6e3884644734590d522ab5df54e43de88f15efe1a48a8a5e142323a48bf92756",
+      "assetId": 770107451
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "id": "prime-clock",
+  "name": "Prime Clock",
+  "version": "0.1.2",
+  "revision": 1,
+  "firmware": ["5.3.0"],
+  "entrypoint": "prime-clock/start.sh",
+  "overlay": "prime-clock/ui/PrimeClock.qml",
+  "hardwareVerification": "recorded-separately",
+  "approval": {"maintainer": "Prime Unlimited", "devices": ["JC11S", "JP24"]},
+  "targets": {
+    "jc11s": {
+      "description": "Compact local clock and monotonic stopwatch overlay with stable native touch dragging."
+    },
+    "jp24": {
+      "description": "Compact local clock and monotonic stopwatch overlay with stable native touch dragging (JP24 hardware test)."
+    }
+  }
+}

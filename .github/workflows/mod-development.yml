@@ -1,0 +1,104 @@
+name: Mod development
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "mods/development/**"
+      - "mods/ready/**"
+      - "tools/mod_release/**"
+      - "modloader/catalog/jc11s.json"
+      - "modloader/catalog/jp24.json"
+      - "modloader/catalog/schema-v2.json"
+      - "modloader/device/jc11s/runtime-api/**"
+      - "modloader/ui/ModLoader.qml"
+      - ".github/workflows/mod-development.yml"
+  push:
+    branches: [feat/prime-unlimited-mod-loader]
+    paths:
+      - "mods/development/**"
+      - "mods/ready/**"
+      - "tools/mod_release/**"
+      - "modloader/catalog/jc11s.json"
+      - "modloader/catalog/jp24.json"
+      - "modloader/catalog/schema-v2.json"
+      - "modloader/device/jc11s/runtime-api/**"
+      - "modloader/ui/ModLoader.qml"
+      - ".github/workflows/mod-development.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prime-unlimited-mod-catalog
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: actions/setup-go@v5
+        with: {go-version: "1.26.x"}
+      - run: python -m pip install cryptography
+      - name: Validate mod metadata and run pipeline tests
+        run: |
+          python -m tools.mod_release validate --root .
+          python -m unittest tools.mod_release.tests.test_pipeline modloader/ui/test_qml_contract.py
+      - name: Test the device runtime
+        working-directory: modloader/device/jc11s/runtime-api
+        env: {GO111MODULE: "off"}
+        run: go test ./...
+
+  publish:
+    needs: test
+    if: github.event_name != 'pull_request' && github.repository == 'Prime-Unlimited/Prime-Unlimited-OS' && github.ref == 'refs/heads/feat/prime-unlimited-mod-loader'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: mod-sign
+    permissions:
+      contents: write
+      administration: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/prime-unlimited-mod-loader
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: python -m pip install cryptography
+      - name: Require the branch-locked signing environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m tools.mod_release check-environment --root . --environment mod-sign
+      - name: Publish validated development catalogs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CATALOG_ED25519_PRIVATE: ${{ secrets.CATALOG_ED25519_PRIVATE }}
+        run: |
+          if [ -z "$CATALOG_ED25519_PRIVATE" ]; then
+            echo "CATALOG_ED25519_PRIVATE is not configured."
+            echo "Store the existing prime-unlimited-2026-1 key as an environment secret on mod-sign. Do not generate a replacement key and do not store it as a repository secret."
+            exit 1
+          fi
+          python -m tools.mod_release publish-development --root .
+      - name: Commit the signed catalogs
+        run: |
+          git config user.name "prime-unlimited-mod-pipeline"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add mods/development mods/ready \
+            modloader/catalog/jc11s.json modloader/catalog/jc11s.sig.json \
+            modloader/catalog/jp24.json modloader/catalog/jp24.sig.json
+          if git diff --cached --quiet; then
+            echo "No catalog change."
+            exit 0
+          fi
+          git commit -m "chore(mods): publish validated development catalog"
+          git push
+          {
+            echo "### Development catalog published"
+            echo "Catalogs and detached signatures were verified before this commit."
+            echo "Development mods stay hidden until Developer Mode is enabled on the device."
+          } >> "$GITHUB_STEP_SUMMARY"

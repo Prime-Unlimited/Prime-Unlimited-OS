@@ -1,0 +1,28 @@
+{
+  "id": "splash-manager",
+  "name": "Splash Manager",
+  "version": "1.1.2",
+  "revision": 1,
+  "firmware": ["5.3.0"],
+  "entrypoint": "splash-manager/start.sh",
+  "hardwareVerification": "not-performed",
+  "approval": {"maintainer": "Prime Unlimited", "devices": ["JC11S", "JP24"]},
+  "targets": {
+    "jc11s": {
+      "description": "Administrator-approved JC11S release; hardware validation not yet completed.",
+      "service": {
+        "binary": "splash-manager/bin/splash-server-armhf",
+        "sha256": "c80dc37e978de7f85897bcfaa2c3da26bdfc583f9089f576675531a7c7939546",
+        "capability": "splash-image"
+      }
+    },
+    "jp24": {
+      "description": "Administrator-approved JP24 release; hardware validation not yet completed.",
+      "service": {
+        "binary": "splash-manager/bin/splash-server-aarch64",
+        "sha256": "4803c2b9d7194ebdd2ade26d212440fb5f55f5175d44fc0207ce0cf91a042992",
+        "capability": "splash-image"
+      }
+    }
+  }
+}
