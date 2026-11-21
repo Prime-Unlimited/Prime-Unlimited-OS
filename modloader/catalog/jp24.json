@@ -23,14 +23,9 @@
       ],
       "name": "Prime Clock",
       "overlay": "prime-clock/ui/PrimeClock.qml",
-      "release": {
-        "artifactSha256": "6e3884644734590d522ab5df54e43de88f15efe1a48a8a5e142323a48bf92756",
-        "hardwareVerification": "recorded-separately"
-      },
       "revision": 1,
       "sha256": "6e3884644734590d522ab5df54e43de88f15efe1a48a8a5e142323a48bf92756",
       "size": 2634,
-      "status": "ready",
       "version": "0.1.2"
     },
     {
@@ -53,10 +48,6 @@
         "JP24"
       ],
       "name": "Splash Manager",
-      "release": {
-        "artifactSha256": "849fde1d2253081a3fa8d59b2d50d0178588923d7d9027f7de0daa7d6fbe91e6",
-        "hardwareVerification": "not-performed"
-      },
       "revision": 1,
       "service": {
         "binary": "splash-manager/bin/splash-server-aarch64",
@@ -65,7 +56,6 @@
       },
       "sha256": "849fde1d2253081a3fa8d59b2d50d0178588923d7d9027f7de0daa7d6fbe91e6",
       "size": 2566523,
-      "status": "ready",
       "version": "1.1.2"
     }
   ],
