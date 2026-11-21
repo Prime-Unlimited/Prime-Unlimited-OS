@@ -273,6 +273,89 @@ func TestServiceRejectsUnsafeCapabilityDeclarations(t *testing.T) {
 	}
 }
 
+func installServiceMod(t *testing.T, root, id, packageDigest string) installedMod {
+	t.Helper()
+	binary := make([]byte, 64)
+	copy(binary, []byte{0x7f, 'E', 'L', 'F', 1, 1})
+	binary[18] = 40
+	digest := sha256.Sum256(binary)
+	item := installedMod{
+		ID: id, Version: "1.0.0", PackageSHA256: packageDigest, CatalogID: "test",
+		Architecture: "armv7l", ABI: "gnueabihf", Entrypoint: "mod/start.sh",
+		Root: "mods/installed/" + id + "/1.0.0", Enabled: true,
+		Service: &serviceSpec{Binary: "mod/server", SHA256: hex.EncodeToString(digest[:]), Capability: "splash-image"},
+	}
+	entrypoint := filepath.Join(root, filepath.FromSlash(item.Root), "mod", "start.sh")
+	if err := os.MkdirAll(filepath.Dir(entrypoint), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entrypoint, []byte("#!/bin/sh\nexit 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(entrypoint), "server"), binary, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return item
+}
+
+func TestTwoServicesStartWithDistinctTokens(t *testing.T) {
+	calls := mockServices(t)
+	root := t.TempDir()
+	first := installServiceMod(t, root, "service-one", strings.Repeat("a", 64))
+	second := installServiceMod(t, root, "service-two", strings.Repeat("b", 64))
+	if err := writeAtomicJSON(filepath.Join(root, "registry/state.json"), registryState{SchemaVersion: 1, Mods: map[string]installedMod{first.ID: first, second.ID: second}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := planActivation(registryState{SchemaVersion: 1, Mods: map[string]installedMod{first.ID: first, second.ID: second}}, second.ID, true, root); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileServices(root); err != nil {
+		t.Fatal(err)
+	}
+	command := strings.Join(*calls, "\n")
+	for _, id := range []string{first.ID, second.ID} {
+		if !strings.Contains(command, "--unit="+serviceName(id)) {
+			t.Fatalf("unit for %s was not started", id)
+		}
+	}
+	left, err := loadServiceRecord(root, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := loadServiceRecord(root, second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left.Credentials.BrokerToken == right.Credentials.BrokerToken || left.Credentials.WebToken == right.Credentials.WebToken {
+		t.Fatal("service tokens were shared")
+	}
+}
+
+func TestServiceStartFailureDoesNotBlockTheOther(t *testing.T) {
+	calls := mockServices(t)
+	root := t.TempDir()
+	first := installServiceMod(t, root, "aaa-fail", strings.Repeat("a", 64))
+	second := installServiceMod(t, root, "zzz-ok", strings.Repeat("b", 64))
+	if err := writeAtomicJSON(filepath.Join(root, "registry/state.json"), registryState{SchemaVersion: 1, Mods: map[string]installedMod{first.ID: first, second.ID: second}}); err != nil {
+		t.Fatal(err)
+	}
+	failedUnit := serviceName(first.ID)
+	serviceCommand = func(name string, args ...string) error {
+		line := name + " " + strings.Join(args, " ")
+		*calls = append(*calls, line)
+		if name == "systemd-run" && strings.Contains(line, failedUnit) {
+			return errors.New("start failed")
+		}
+		return nil
+	}
+	if err := reconcileServices(root); err == nil || !strings.Contains(err.Error(), "start failed") {
+		t.Fatalf("expected the failed start, got %v", err)
+	}
+	if !strings.Contains(strings.Join(*calls, "\n"), "--unit="+serviceName(second.ID)) {
+		t.Fatal("the other service was not started")
+	}
+}
+
 func TestServicePairingCodeExpiryAttemptsAndSingleUse(t *testing.T) {
 	s, root, item, record := serviceAPIFixture(t)
 	issue := func() string {

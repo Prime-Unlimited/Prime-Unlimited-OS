@@ -29,7 +29,8 @@ Disable stops the service before committing registry changes. Uninstall stops
 any residual unit before removing the disabled package. Safe mode, quarantine
 and signed catalog revocation stop services and revoke their scoped credentials.
 Three failed starts/crashes quarantine the service; recovery uses the existing
-maintainer-authorized recovery endpoint. Only one splash-image owner can be enabled.
+maintainer-authorized recovery endpoint. Any number of service mods may be
+enabled together. Each keeps its own unit, tokens and TLS material.
 
 This requires a systemd system manager supporting DynamicUser, Type=exec,
 StandardInput=file, BindsTo and the listed sandbox properties (systemd 240+

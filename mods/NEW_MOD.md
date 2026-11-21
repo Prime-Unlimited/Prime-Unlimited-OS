@@ -217,7 +217,7 @@ Service-Eintrag, SHA-256 ist die ELF-Datei in der ZIP, nicht die ZIP selbst:
 }
 ```
 
-`capability` ist derzeit nur `splash-image`.
+`capability` ist derzeit nur `splash-image`. Mehrere Service-Mods dürfen gleichzeitig aktiv sein.
 JC11S-Binary und JP24-Binary haben verschiedene Pfade und verschiedene SHA-256.
 Architektur und ABI schreibt der Workflow aus der Gerätezuordnung. Nicht in `mod.json` setzen.
 

@@ -434,15 +434,6 @@ func planActivation(state registryState, id string, enabled bool, root string) (
 			affected = append(affected, selectedID)
 		}
 	}
-	owner := ""
-	for selectedID, entry := range next.Mods {
-		if entry.Enabled && entry.Service != nil {
-			if owner != "" {
-				return registryState{}, nil, errors.New("exclusive service capability conflict")
-			}
-			owner = selectedID
-		}
-	}
 	return next, affected, nil
 }
 

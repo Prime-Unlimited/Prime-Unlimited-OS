@@ -46,7 +46,7 @@ Die Katalog-ID eines Ziels ist fest `<mod-id>-<gerät>`, also `prime-clock-jc11s
 | jc11s | JC11S | armv7l | gnueabihf |
 | jp24 | JP24 | aarch64 | gnu |
 
-Optionale Felder: `description`, `overlay`, `dependencies`, `conflicts`, `hardwareVerification`, und pro Ziel `service` mit `binary`, `sha256`, `capability`. `capability` ist derzeit `splash-image`.
+Optionale Felder: `description`, `overlay`, `dependencies`, `conflicts`, `hardwareVerification`, und pro Ziel `service` mit `binary`, `sha256`, `capability`. `capability` ist derzeit `splash-image`. Mehrere Service-Mods dürfen gleichzeitig aktiv sein.
 
 `release.json` und `promotion.json` schreibt die Pipeline. Sie werden nicht von Hand gepflegt, außer bei der einmaligen Übernahme der bereits signierten Versionen Prime Clock 0.1.2 und Splash Manager 1.1.2.
 

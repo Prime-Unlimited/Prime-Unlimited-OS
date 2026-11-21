@@ -303,8 +303,7 @@ func reconcileServicesPolicy(root string, approve func(installedMod) bool) error
 		}
 	}
 	sort.Strings(ids)
-	// Exactly one writer for each exclusive capability; never race two splash servers.
-	owner := ""
+	running := map[string]installedMod{}
 	for _, id := range ids {
 		item := state.Mods[id]
 		if !item.Enabled || safety.SafeMode || safety.Mods[id].Quarantined || (approve != nil && !approve(item)) {
@@ -313,34 +312,35 @@ func reconcileServicesPolicy(root string, approve func(installedMod) bool) error
 			}
 			continue
 		}
-		if owner != "" {
-			return errors.New("exclusive service capability conflict")
-		}
-		owner = id
+		running[id] = item
 	}
+	var firstErr error
 	for _, id := range ids {
-		item := state.Mods[id]
-		if item.Enabled && !safety.SafeMode && !safety.Mods[id].Quarantined && (approve == nil || approve(item)) {
-			if err := startManagedService(root, item); err != nil {
-				stopErr := stopManagedService(root, id)
-				failure := safety.Mods[id]
-				if failure.FailureCount < failureQuarantineThreshold {
-					failure.FailureCount++
-				}
-				failure.Quarantined = failure.FailureCount >= failureQuarantineThreshold
-				failure.LastFailure = time.Now().Unix()
-				safety.Mods[id] = failure
-				if writeErr := writeSafetyState(root, safety); writeErr != nil {
-					return writeErr
-				}
-				if stopErr != nil {
-					return stopErr
-				}
-				return err
+		item, ok := running[id]
+		if !ok {
+			continue
+		}
+		if err := startManagedService(root, item); err != nil {
+			stopErr := stopManagedService(root, id)
+			failure := safety.Mods[id]
+			if failure.FailureCount < failureQuarantineThreshold {
+				failure.FailureCount++
+			}
+			failure.Quarantined = failure.FailureCount >= failureQuarantineThreshold
+			failure.LastFailure = time.Now().Unix()
+			safety.Mods[id] = failure
+			if writeErr := writeSafetyState(root, safety); writeErr != nil {
+				return writeErr
+			}
+			if stopErr != nil {
+				return stopErr
+			}
+			if firstErr == nil {
+				firstErr = err
 			}
 		}
 	}
-	return nil
+	return firstErr
 }
 
 func (s *server) handleServiceSplash(w http.ResponseWriter, r *http.Request) {
