@@ -136,9 +136,10 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(promoted["targets"]["jc11s"]["asset"]["id"], 1000)
             self.assertFalse((root / "mods" / "development" / "demo").exists())
             entry = build_catalogs(root)["jc11s"]["mods"][0]
-            self.assertEqual(entry["status"], "ready")
+            self.assertNotIn("status", entry)
+            self.assertNotIn("release", entry)
             self.assertEqual(entry["id"], "demo-jc11s")
-            self.assertEqual(entry["release"]["artifactSha256"], sha)
+            self.assertEqual(entry["sha256"], sha)
 
     def test_invalid_zip_wrong_hash_and_architecture_are_rejected(self):
         import tempfile

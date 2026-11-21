@@ -300,7 +300,8 @@ Nach der Freigabe macht der Workflow von allein:
 
 1. Verschiebt `mods/development/<mod-id>/<version>/` nach `mods/ready/<mod-id>/<version>/`.
 2. Schreibt `promotion.json` mit `confirmedBy` `github-environment:mod-release`, der Workflow-Run-ID und den Asset-IDs.
-3. Setzt den Katalogstatus von `development` auf `ready`.
+3. Nimmt `status` und `release` aus dem Ready-Eintrag. Ein fehlendes `status` bedeutet ready.
+   Revision 10 auf dem JP24 kann den Katalog dann laden. Ein Development-Eintrag behält beide Felder.
 4. Signiert beide Kataloge neu und committet sie.
 5. Die Mod-ID, Version, Revision, SHA-256 und Asset-ID bleiben gleich.
    Eine schon installierte Development-Fassung bleibt dieselbe Installation.

@@ -380,12 +380,17 @@ def _entry(mod: dict, device: str) -> dict:
         "abi": spec["abi"],
         "entrypoint": target["entrypoint"],
         "approval": {"maintainer": mod["approval"]["maintainer"], "devices": [spec["model"]]},
-        "status": mod["channel"],
-        "release": {
+    }
+    # Revision 10 rejects unknown JSON fields and keeps its last-good catalog.
+    # That last-good Splash Manager URL is the legacy GitHub download URL, which
+    # revision 10 does not follow. Ready entries therefore omit status and release.
+    # A missing status means ready. Development entries still carry both fields.
+    if mod["channel"] != "ready":
+        entry["status"] = mod["channel"]
+        entry["release"] = {
             "hardwareVerification": mod["hardwareVerification"],
             "artifactSha256": target["sha256"],
-        },
-    }
+        }
     if target["overlay"]:
         entry["overlay"] = target["overlay"]
     if target["service"]:
@@ -437,7 +442,7 @@ def merge_device_catalog(previous: dict | None, entries: list[dict], catalog_id:
         if not _url_change_allowed(old.get("downloadUrl", ""), new["downloadUrl"]):
             if old.get("version") == new["version"]:
                 raise ModReleaseError(f"download URL for {old.get('id')} is immutable")
-        if _previous_status(old) == "ready" and new["status"] != "ready":
+        if _previous_status(old) == "ready" and _previous_status(new) != "ready":
             raise ModReleaseError(f"refusing to return {old.get('id')} to development")
         if old.get("version") == new["version"] and int(old.get("revision") or 0) != int(new["revision"]):
             raise ModReleaseError(f"revision for {old.get('id')} {old.get('version')} is immutable")

@@ -107,4 +107,4 @@ Weitere Fehlermeldungen der Installation: `release asset unreachable`, `package 
 - Falsche Version freigegeben: eine bereits veröffentlichte Version wird nicht überschrieben. Eine Korrektur ist eine neue Version unter `mods/development/`.
 - Secret oder Environment fehlt: der Workflow endet mit dem Namen des fehlenden Schritts. Er umgeht die Signierung nicht.
 
-Die Runtime, die das Feld `status` versteht, muss auf dem Gerät installiert sein, bevor ein Katalog mit diesem Feld dort ausgewertet wird. Bis dahin bleibt der letzte gültige Katalog aktiv. Diese Änderung wird nicht von hier aus auf ein Gerät ausgerollt.
+Ready-Einträge enthalten `status` und `release` nicht. Ein fehlendes `status` bedeutet ready, und Revision 10 kann diesen Katalog laden. Ein Development-Eintrag trägt beide Felder. Ein Katalog mit mindestens einem solchen Eintrag bleibt auf Revision 10 beim letzten gültigen Katalog, bis die Runtime installiert ist, die `status` versteht. Diese Runtime wird nicht von hier aus auf ein Gerät ausgerollt.
