@@ -15,8 +15,9 @@ Rectangle {
     property bool busy: false
     property bool updaterBusy: false
     property bool developerMode: false
-    // Local admin-test discovery only; installation still requires a trusted signed catalog.
-    property var adminTestPreviews: [{"id":"splash-manager-jc11s","name":"Splash Manager [ADMIN TEST]","version":"1.1.2","revision":1,"models":["JC11S"],"deviceEligible":true,"compatible":false,"adminTestPreview":true,"description":"JC11S native service test candidate; awaiting signed catalog approval."}]
+    property bool developerConfigured: false
+    property bool developerPrompt: false
+    property string developerToken: ""
     property bool showUpdatePrompt: false
     property var selfUpdate: ({"installed":{"version":"?","revision":0},"available":{"version":"?","revision":0},"updateAvailable":false,"rollbackAvailable":false})
     property int selectedTab: 0
@@ -49,6 +50,7 @@ Rectangle {
             try {
                 var payload = JSON.parse(request.responseText)
                 mods = payload.mods || []
+                developerMode = payload.developerMode === true
                 deviceText = payload.model + " / " + payload.firmware
                 statusText = mods.length + " mods in catalog"
                 refreshState()
@@ -217,21 +219,51 @@ Rectangle {
         mutation("catalog/sync", "", "", function() { refresh() })
     }
 
+    function setDeveloperMode(enabled) {
+        if (!authToken || !developerToken) {
+            statusText = "Developer authorization is not configured on this device"
+            developerPrompt = true
+            return
+        }
+        var request = new XMLHttpRequest()
+        request.timeout = 4000
+        request.onreadystatechange = function() {
+            if (request.readyState !== XMLHttpRequest.DONE) return
+            try {
+                var payload = JSON.parse(request.responseText)
+                if (request.status === 200) {
+                    developerMode = payload.enabled === true
+                    developerPrompt = false
+                    refresh()
+                } else statusText = payload.error || "Developer mode was refused"
+            } catch (e) { statusText = "Developer mode was refused" }
+        }
+        request.open("POST", apiBase + "/api/v1/developer-mode")
+        request.setRequestHeader("Content-Type", "application/json")
+        request.setRequestHeader("Authorization", "Bearer " + authToken)
+        request.setRequestHeader("X-Prime-Developer-Token", developerToken)
+        request.send(JSON.stringify({"enabled": enabled}))
+    }
+
+    function rowLabel(modelData) {
+        if (modelData.status === "development")
+            return modelData.compatible ? "DEVELOPMENT" : "DEVELOPMENT — not compatible with this device"
+        if (modelData.adminTestPreview) return "ADMIN TEST / awaiting signed catalog – install unavailable"
+        if (safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined)
+            return "Quarantined after " + safety.mods[modelData.id].failureCount + " failures"
+        if (modelData.updateAvailable) return "Update available: " + modelData.updateReason
+        if (modelData.compatible) return "Official / compatible"
+        if (modelData.deviceEligible && !isApprovedForDevice(modelData)) return "Developer preview / not approved"
+        return "Not compatible with this device"
+    }
+
     function visibleMods() {
         if (selectedTab === 0) {
             var available = []
-            if (deviceText.indexOf("JC11S /") === 0) {
-                for (var previewIndex = 0; previewIndex < adminTestPreviews.length; ++previewIndex) {
-                    var preview = adminTestPreviews[previewIndex]
-                    var alreadyListed = false
-                    for (var candidateIndex = 0; candidateIndex < mods.length; ++candidateIndex)
-                        if (mods[candidateIndex].id === preview.id) alreadyListed = true
-                    if (!alreadyListed) available.push(preview)
-                }
-            }
             for (var index = 0; index < mods.length; ++index) {
+                if (mods[index].status === "development" && !developerMode) continue
                 var approved = isApprovedForDevice(mods[index])
-                if ((approved && mods[index].compatible) || (developerMode && mods[index].deviceEligible))
+                if ((approved && mods[index].compatible) || (developerMode && mods[index].deviceEligible) || mods[index].status === "development")
                     available.push(mods[index])
             }
             return available
@@ -289,7 +321,7 @@ Rectangle {
                     text: developerMode ? "DEV MODE\nON" : "DEV MODE\nOFF"
                     horizontalAlignment: Text.AlignHCenter
                 }
-                MouseArea { anchors.fill: parent; onClicked: developerMode = !developerMode }
+                MouseArea { anchors.fill: parent; onClicked: developerPrompt = true }
             }
             Rectangle {
                 width: 82; height: 46; radius: 9
@@ -325,7 +357,8 @@ Rectangle {
         text: statusText
         color: "#ff541c"
         font.pixelSize: 14
-        elide: Text.ElideRight
+        wrapMode: Text.WordWrap
+        maximumLineCount: 2
     }
     Row {
         anchors.right: parent.right
@@ -370,15 +403,7 @@ Rectangle {
                     }
                     Text {
                         x: 16; y: 48
-                        text: modelData.adminTestPreview ? "ADMIN TEST / awaiting signed catalog – install unavailable" : safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined
-                            ? "Quarantined after " + safety.mods[modelData.id].failureCount + " failures"
-                            : (modelData.updateAvailable
-                                ? "Update available: " + modelData.updateReason
-                                : (modelData.compatible
-                                    ? "Official / compatible"
-                                    : (modelData.deviceEligible && !isApprovedForDevice(modelData)
-                                        ? "Developer preview / not approved"
-                                        : "Not compatible with this device")))
+                        text: rowLabel(modelData)
                         color: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined ? "#ff9b78" : (modelData.compatible ? "#73d6a3" : "#ff9b78")
                         font.pixelSize: 16
                     }
@@ -504,6 +529,46 @@ Rectangle {
                     width: 170; height: 52; radius: 10; color: "#ff541c"
                     Text { anchors.centerIn: parent; text: "YES"; color: "white"; font.bold: true }
                     MouseArea { anchors.fill: parent; onClicked: { showUpdatePrompt = false; updaterMutation("update", false) } }
+                }
+            }
+        }
+    }
+    Rectangle {
+        visible: developerPrompt
+        anchors.fill: parent; color: "#d9101215"; z: 25
+        Rectangle {
+            width: 560; height: 250; radius: 14; anchors.centerIn: parent; color: "#22262b"
+            Text {
+                x: 24; y: 18; width: 512; wrapMode: Text.WordWrap
+                color: "white"; font.pixelSize: 18; font.bold: true
+                text: developerMode ? "Developer Mode ausschalten" : "Developer Mode einschalten"
+            }
+            Text {
+                x: 24; y: 58; width: 512; wrapMode: Text.WordWrap
+                color: "#bfc3c9"; font.pixelSize: 13
+                text: "Lokales Developer-Token. Ein normaler API-Aufruf schaltet den Modus nicht um. Development heißt testbar, nicht hardwaregeprüft."
+            }
+            Rectangle {
+                x: 24; y: 118; width: 512; height: 42; radius: 8; color: "#101215"
+                TextInput {
+                    id: developerTokenInput
+                    anchors.fill: parent; anchors.margins: 8
+                    color: "white"; font.pixelSize: 16; echoMode: TextInput.Password
+                    text: developerToken
+                    onTextChanged: developerToken = text
+                }
+            }
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter; y: 180; spacing: 16
+                Rectangle {
+                    width: 150; height: 46; radius: 10; color: "#33373c"
+                    Text { anchors.centerIn: parent; text: "CANCEL"; color: "white"; font.bold: true }
+                    MouseArea { anchors.fill: parent; onClicked: developerPrompt = false }
+                }
+                Rectangle {
+                    width: 180; height: 46; radius: 10; color: "#d77921"
+                    Text { anchors.centerIn: parent; text: developerMode ? "AUSSCHALTEN" : "EINSCHALTEN"; color: "white"; font.bold: true }
+                    MouseArea { anchors.fill: parent; onClicked: setDeveloperMode(!developerMode) }
                 }
             }
         }

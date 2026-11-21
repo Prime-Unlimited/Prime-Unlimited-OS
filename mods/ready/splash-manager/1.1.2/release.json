@@ -1,0 +1,17 @@
+{
+  "tag": "splash-manager-v1.1.2",
+  "assets": {
+    "jc11s": {
+      "id": 773325277,
+      "name": "splash-manager-v1.1.2-jc11s.zip",
+      "sha256": "bc799ab68329fab99c27ba0066d26d39795e6af1683dc2350948a826ea23c658",
+      "size": 2683439
+    },
+    "jp24": {
+      "id": 773325282,
+      "name": "splash-manager-v1.1.2-jp24.zip",
+      "sha256": "849fde1d2253081a3fa8d59b2d50d0178588923d7d9027f7de0daa7d6fbe91e6",
+      "size": 2566523
+    }
+  }
+}

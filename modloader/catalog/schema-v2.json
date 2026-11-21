@@ -67,7 +67,17 @@
         "service": {"$ref": "#/$defs/service"}, "approval": {"$ref": "#/$defs/approval"}, "overlay": {"type": "string", "pattern": "^[^/\\\\][^\\\\]*\\.qml$"}, "dependencies": {"type": "array", "items": {"$ref": "#/$defs/dependency"}},
         "libraries": {"type": "array", "items": {"$ref": "#/$defs/dependency"}},
         "conflicts": {"type": "array", "items": {"$ref": "#/$defs/id"}}, "revoked": {"type": "boolean"},
+        "status": {"enum": ["development", "ready"]},
+        "release": {"$ref": "#/$defs/release"},
         "update": {"type": "object", "properties": {"channel": {"type": "string"}, "replaces": {"type": "array", "items": {"type": "string"}}}}
+      }
+    },
+    "release": {
+      "type": "object", "additionalProperties": false,
+      "required": ["hardwareVerification", "artifactSha256"],
+      "properties": {
+        "hardwareVerification": {"enum": ["not-performed", "recorded-separately"]},
+        "artifactSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
       }
     },
     "service": {

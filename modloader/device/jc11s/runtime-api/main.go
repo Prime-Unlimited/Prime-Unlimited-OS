@@ -65,6 +65,15 @@ type mod struct {
 	Libraries    []dependency `json:"libraries,omitempty"`
 	Conflicts    []string     `json:"conflicts,omitempty"`
 	Revoked      bool         `json:"revoked,omitempty"`
+	Status       string       `json:"status,omitempty"`
+	Release      *releaseInfo `json:"release,omitempty"`
+}
+
+// releaseInfo records publication facts that are not hardware verification.
+// hardwareVerification is "not-performed" or "recorded-separately".
+type releaseInfo struct {
+	HardwareVerification string `json:"hardwareVerification"`
+	ArtifactSHA256       string `json:"artifactSha256"`
 }
 
 type approval struct {
@@ -147,6 +156,8 @@ type server struct {
 	cacheRoot            string
 	stagingRoot          string
 	root                 string
+	developerModePath    string
+	developerTokenPath   string
 	httpClient           *http.Client
 	cacheMu              sync.Mutex
 	catalogMu            sync.RWMutex
@@ -167,6 +178,13 @@ func contains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func (item mod) publicationStatus() string {
+	if item.Status == "" {
+		return "ready"
+	}
+	return item.Status
 }
 
 func (s *server) compatible(item mod) bool {
@@ -197,7 +215,7 @@ func (s *server) authorizationStatus() string {
 
 func isMutationPath(path string) bool {
 	switch path {
-	case "/api/v1/service-access", "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/update", "/api/v1/catalog/sync", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve", "/api/v1/launch", "/api/v1/launch-set", "/api/v1/safe-mode/enable", "/api/v1/safe-mode/disable", "/api/v1/recover":
+	case "/api/v1/service-access", "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/update", "/api/v1/catalog/sync", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve", "/api/v1/launch", "/api/v1/launch-set", "/api/v1/safe-mode/enable", "/api/v1/safe-mode/disable", "/api/v1/recover", "/api/v1/developer-mode":
 		return true
 	default:
 		return false
@@ -216,18 +234,29 @@ type cacheResult struct {
 	Cached  bool   `json:"cached"`
 }
 
-func (s *server) catalogMod(id string) (mod, bool) {
+func (s *server) lookupMod(id string) (mod, bool) {
 	s.catalogMu.RLock()
 	defer s.catalogMu.RUnlock()
 	if s.catalog.Status != "valid" || !s.catalog.Trusted {
 		return mod{}, false
 	}
 	for _, item := range s.catalog.Catalog.Mods {
-		if item.ID == id && s.compatible(item) {
+		if item.ID == id {
 			return item, true
 		}
 	}
 	return mod{}, false
+}
+
+func (s *server) catalogMod(id string) (mod, bool) {
+	item, ok := s.lookupMod(id)
+	if !ok || !s.compatible(item) {
+		return mod{}, false
+	}
+	if item.publicationStatus() == "development" && !s.developerEnabled() {
+		return mod{}, false
+	}
+	return item, true
 }
 
 func decodeCacheRequest(r *http.Request) (cacheRequest, error) {
@@ -264,9 +293,8 @@ func (s *server) handleCache(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	item, ok := s.catalogMod(request.ID)
+	item, ok := s.requireInstallable(w, request.ID)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "compatible catalog mod not found"})
 		return
 	}
 	s.cacheMu.Lock()
@@ -274,7 +302,7 @@ func (s *server) handleCache(w http.ResponseWriter, r *http.Request) {
 	result, err := downloadPackage(r.Context(), s.httpClient, item, s.cacheRoot)
 	if err != nil {
 		log.Printf("package cache failed for %s", item.ID)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "package download or verification failed"})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": publicInstallError(err, "package download or verification failed")})
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -290,9 +318,8 @@ func (s *server) handleStage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	item, ok := s.catalogMod(request.ID)
+	item, ok := s.requireInstallable(w, request.ID)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "compatible catalog mod not found"})
 		return
 	}
 	s.cacheMu.Lock()
@@ -300,7 +327,7 @@ func (s *server) handleStage(w http.ResponseWriter, r *http.Request) {
 	result, err := stagePackage(item, s.cacheRoot, s.stagingRoot, defaultStageLimits)
 	if err != nil {
 		log.Printf("package staging failed for %s", item.ID)
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "cached package missing, invalid, or unsafe"})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": publicInstallError(err, "cached package missing, invalid, or unsafe")})
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -320,16 +347,15 @@ func (s *server) handleInspect(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "trusted install metadata unavailable"})
 		return
 	}
-	item, ok := s.catalogMod(request.ID)
+	item, ok := s.requireInstallable(w, request.ID)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "compatible approved catalog mod not found"})
 		return
 	}
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 	result, err := inspectStagedPackage(item, s.catalog.Catalog.CatalogID, s.cacheRoot, s.stagingRoot)
 	if err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "verified staged package is unavailable or ineligible"})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": publicInstallError(err, "verified staged package is unavailable or ineligible")})
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -349,9 +375,8 @@ func (s *server) handleInstall(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "trusted install metadata unavailable"})
 		return
 	}
-	item, ok := s.catalogMod(request.ID)
+	item, ok := s.requireInstallable(w, request.ID)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "compatible approved catalog mod not found"})
 		return
 	}
 	s.cacheMu.Lock()
@@ -363,7 +388,7 @@ func (s *server) handleInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		log.Printf("disabled install failed for %s", item.ID)
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "verified package installation failed"})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": publicInstallError(err, "verified package installation failed")})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, result)
@@ -646,6 +671,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.handleRecover(w, r)
 			return
 		}
+		if r.URL.Path == "/api/v1/developer-mode" {
+			s.handleDeveloperMode(w, r)
+			return
+		}
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "mutation engine unavailable"})
 		return
 	}
@@ -718,6 +747,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"catalogKeyId": s.catalog.KeyID, "catalogKeyFingerprint": s.catalog.KeyFingerprint,
 			"catalogSchemaVersion": s.catalog.Catalog.SchemaVersion, "catalogId": s.catalog.Catalog.CatalogID,
 			"authorizationStatus": s.authorizationStatus(),
+			"developerMode":       s.developerEnabled(),
 			"catalogSource":       s.catalogSource, "catalogLastSync": s.catalogLastSync,
 			"catalogSyncError": s.catalogSyncError,
 		})
@@ -735,8 +765,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if registryErr != nil {
 			registry = emptyRegistry()
 		}
+		developerMode := s.developerEnabled()
 		mods := make([]modResponse, 0, len(s.catalog.Catalog.Mods))
 		for _, item := range s.catalog.Catalog.Mods {
+			if item.publicationStatus() == "development" && !developerMode {
+				continue
+			}
 			response := modResponse{mod: item, Compatible: s.compatible(item), DeviceEligible: contains(item.Models, s.model)}
 			if installed, exists := registry.Mods[item.ID]; exists {
 				response.InstalledVersion, response.InstalledRevision, response.InstalledSHA256 = installed.Version, installed.Revision, installed.PackageSHA256
@@ -745,7 +779,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			mods = append(mods, response)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"model": s.model, "firmware": s.firmware, "mods": mods,
+			"model": s.model, "firmware": s.firmware, "developerMode": developerMode, "mods": mods,
 			"catalogStatus": s.catalog.Status, "catalogSha256": s.catalog.SHA256,
 			"catalogTrust":         map[bool]string{true: "verified", false: "unverified"}[s.catalog.Trusted],
 			"catalogKeyId":         s.catalog.KeyID,
@@ -784,6 +818,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]int64{"milliseconds": time.Since(runtimeStarted).Milliseconds()})
 	case "/api/v1/libraries":
 		writeJSON(w, http.StatusOK, map[string]any{"libraries": []any{}})
+	case "/api/v1/developer-mode":
+		writeJSON(w, http.StatusOK, map[string]any{
+			"enabled": s.developerEnabled(), "configured": s.developerConfigured(),
+		})
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
@@ -846,7 +884,7 @@ func validateMod(item mod) error {
 	if len(item.Description) > 2000 {
 		return errors.New("description exceeds 2000 bytes")
 	}
-	if item.Architecture != "" || item.ABI != "" || item.Entrypoint != "" || item.Overlay != "" || item.Service != nil || item.Approval != nil || item.Dependencies != nil || item.Libraries != nil || item.Conflicts != nil || item.Revoked {
+	if item.Architecture != "" || item.ABI != "" || item.Entrypoint != "" || item.Overlay != "" || item.Service != nil || item.Approval != nil || item.Dependencies != nil || item.Libraries != nil || item.Conflicts != nil || item.Revoked || item.Status != "" || item.Release != nil {
 		return errors.New("schema v2 fields are not allowed in schema v1")
 	}
 	return nil
@@ -917,6 +955,20 @@ func validateV2Mod(item mod) error {
 	}
 	if err := validateListOptional("conflicts", item.Conflicts); err != nil {
 		return err
+	}
+	if item.Status != "" && item.Status != "ready" && item.Status != "development" {
+		return errors.New("invalid publication status")
+	}
+	if item.Release != nil {
+		if item.Status == "" {
+			return errors.New("release metadata requires status")
+		}
+		if item.Release.HardwareVerification != "not-performed" && item.Release.HardwareVerification != "recorded-separately" {
+			return errors.New("invalid hardware verification record")
+		}
+		if item.Release.ArtifactSHA256 != item.SHA256 {
+			return errors.New("release artifact binding does not match sha256")
+		}
 	}
 	return nil
 }
@@ -1169,15 +1221,9 @@ func newPackageHTTPClient() *http.Client {
 		return dialer.DialContext(ctx, network, net.JoinHostPort(addresses[0].IP.String(), port))
 	}
 	return &http.Client{
-		Transport: transport,
-		Timeout:   10 * time.Minute,
-		CheckRedirect: func(request *http.Request, via []*http.Request) error {
-			if len(via) == 1 && via[0].URL.Scheme == "https" && via[0].URL.Hostname() == "api.github.com" &&
-				request.URL.Scheme == "https" && request.URL.Hostname() == "release-assets.githubusercontent.com" {
-				return nil
-			}
-			return http.ErrUseLastResponse
-		},
+		Transport:     transport,
+		Timeout:       10 * time.Minute,
+		CheckRedirect: allowPackageRedirect,
 	}
 }
 
@@ -1228,6 +1274,9 @@ func downloadPackage(ctx context.Context, client *http.Client, item mod, cacheRo
 		return result, err
 	}
 
+	if err := classifyPackageURL(item.DownloadURL); err != nil {
+		return result, err
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, item.DownloadURL, nil)
 	if err != nil {
 		return result, err
@@ -1236,14 +1285,20 @@ func downloadPackage(ctx context.Context, client *http.Client, item mod, cacheRo
 	request.Header.Set("User-Agent", "Prime-Unlimited-Runtime/1")
 	response, err := client.Do(request)
 	if err != nil {
+		if errors.Is(err, errRedirectBlocked) {
+			return result, errRedirectBlocked
+		}
 		return result, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return result, fmt.Errorf("unexpected package HTTP status %d", response.StatusCode)
+		if response.StatusCode >= 300 && response.StatusCode < 400 {
+			return result, errRedirectBlocked
+		}
+		return result, errors.New("release asset unreachable")
 	}
 	if response.ContentLength >= 0 && response.ContentLength != item.Size {
-		return result, errors.New("package Content-Length mismatch")
+		return result, errors.New("package size mismatch")
 	}
 	temporary, err := os.CreateTemp(cacheRoot, ".download-*")
 	if err != nil {
@@ -1263,11 +1318,11 @@ func downloadPackage(ctx context.Context, client *http.Client, item mod, cacheRo
 	}
 	if written != item.Size {
 		temporary.Close()
-		return result, errors.New("downloaded package size mismatch")
+		return result, errors.New("package size mismatch")
 	}
 	if hex.EncodeToString(digest.Sum(nil)) != item.SHA256 {
 		temporary.Close()
-		return result, errors.New("downloaded package SHA-256 mismatch")
+		return result, errors.New("package SHA-256 mismatch")
 	}
 	if err := temporary.Sync(); err != nil {
 		temporary.Close()
@@ -1437,7 +1492,8 @@ func main() {
 	runtimeServer := &server{model: *model, firmware: *firmware, architecture: *architecture, abi: *abi, catalog: state, authToken: authToken, root: *root,
 		catalogPath: *catalogPath, catalogSignaturePath: *catalogSignaturePath, catalogTrustKeyPath: *catalogTrustKeyPath,
 		catalogURL: *catalogURL, catalogSignatureURL: *catalogSignatureURL, catalogSource: "offline-cache",
-		cacheRoot: *cacheRoot, stagingRoot: *stagingRoot, httpClient: newPackageHTTPClient()}
+		cacheRoot: *cacheRoot, stagingRoot: *stagingRoot, httpClient: newPackageHTTPClient(),
+		developerModePath: filepath.Join(*root, "auth", "developer.mode"), developerTokenPath: filepath.Join(*root, "auth", "developer.token")}
 
 	if usedFallback {
 		runtimeServer.catalogSource = "offline-last-good"

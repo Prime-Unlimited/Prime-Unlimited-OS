@@ -1,0 +1,15 @@
+{
+  "modId": "splash-manager",
+  "version": "1.1.2",
+  "confirmedBy": "migrated-existing-signed-catalog",
+  "targets": {
+    "jc11s": {
+      "sha256": "bc799ab68329fab99c27ba0066d26d39795e6af1683dc2350948a826ea23c658",
+      "assetId": 773325277
+    },
+    "jp24": {
+      "sha256": "849fde1d2253081a3fa8d59b2d50d0178588923d7d9027f7de0daa7d6fbe91e6",
+      "assetId": 773325282
+    }
+  }
+}

@@ -245,8 +245,20 @@ func TestPackageNetworkPolicy(t *testing.T) {
 		t.Fatalf("redirect policy returned %v", err)
 	}
 	githubAsset, _ := http.NewRequest(http.MethodGet, "https://release-assets.githubusercontent.com/path", nil)
-	if err := client.CheckRedirect(githubAsset, []*http.Request{{URL: mustURL(t, "https://api.github.com/repos/example/releases/assets/1")}}); err != nil {
+	if err := client.CheckRedirect(githubAsset, []*http.Request{{URL: mustURL(t, "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/1")}}); err != nil {
 		t.Fatalf("immutable GitHub asset redirect rejected: %v", err)
+	}
+	legacy, _ := http.NewRequest(http.MethodGet, "https://release-assets.githubusercontent.com/path", nil)
+	if err := client.CheckRedirect(legacy, []*http.Request{{URL: mustURL(t, "https://github.com/Prime-Unlimited/Prime-Unlimited-OS/releases/download/splash-manager-v1.1.2/splash-manager-v1.1.2-jc11s.zip")}}); err != nil {
+		t.Fatalf("legacy GitHub download redirect rejected: %v", err)
+	}
+	otherRepo, _ := http.NewRequest(http.MethodGet, "https://release-assets.githubusercontent.com/path", nil)
+	if err := client.CheckRedirect(otherRepo, []*http.Request{{URL: mustURL(t, "https://api.github.com/repos/example/releases/assets/1")}}); err != http.ErrUseLastResponse {
+		t.Fatalf("unrelated asset redirect returned %v", err)
+	}
+	secondHop, _ := http.NewRequest(http.MethodGet, "https://release-assets.githubusercontent.com/path", nil)
+	if err := client.CheckRedirect(secondHop, []*http.Request{{URL: mustURL(t, "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/1")}, {URL: mustURL(t, "https://release-assets.githubusercontent.com/first")}}); err != http.ErrUseLastResponse {
+		t.Fatalf("second redirect returned %v", err)
 	}
 }
 
