@@ -38,6 +38,7 @@ type developerLogin struct {
 	verificationURI string
 	message         string
 	cancel          context.CancelFunc
+	accessToken     string
 }
 
 func newGitHubDeviceClient(clientID string) *githubDeviceClient {
@@ -76,7 +77,7 @@ func (c *githubDeviceClient) postForm(ctx context.Context, endpoint string, form
 }
 
 func (c *githubDeviceClient) requestCode(ctx context.Context) (githubDeviceCode, error) {
-	form := url.Values{"client_id": {c.clientID}}
+	form := url.Values{"client_id": {c.clientID}, "scope": {"repo workflow"}}
 	body, status, err := c.postForm(ctx, c.codeURL, form)
 	if err != nil {
 		return githubDeviceCode{}, errors.New("GitHub device login is unavailable")
@@ -207,6 +208,13 @@ func (s *server) cancelDeveloperLogin() {
 	s.login.userCode = ""
 	s.login.verificationURI = ""
 	s.login.message = ""
+	s.login.accessToken = ""
+}
+
+func (s *server) developerAccessToken() string {
+	s.login.mu.Lock()
+	defer s.login.mu.Unlock()
+	return s.login.accessToken
 }
 
 func (s *server) developerModeStatus() map[string]any {
@@ -310,7 +318,6 @@ func (s *server) pollDeveloperLogin(ctx context.Context, deviceCode string, inte
 			return
 		case "ok":
 			admin, adminErr := s.github.repositoryAdmin(ctx, token)
-			token = ""
 			if ctx.Err() != nil {
 				return
 			}
@@ -319,10 +326,18 @@ func (s *server) pollDeveloperLogin(ctx context.Context, deviceCode string, inte
 				return
 			}
 			if !admin {
+				token = ""
 				s.finishDeveloperLogin("denied", "GitHub account is not a repository admin")
 				return
 			}
+			s.login.mu.Lock()
+			s.login.accessToken = token
+			s.login.mu.Unlock()
+			token = ""
 			if err := s.enableDeveloperModeFromLogin(ctx); err != nil {
+				s.login.mu.Lock()
+				s.login.accessToken = ""
+				s.login.mu.Unlock()
 				if ctx.Err() != nil {
 					return
 				}
@@ -341,3 +356,4 @@ func (s *server) pollDeveloperLogin(ctx context.Context, deviceCode string, inte
 		}
 	}
 }
+
