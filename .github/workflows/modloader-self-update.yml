@@ -2,6 +2,11 @@ name: Modloader self-update bundles
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing Modloader release tag to publish to the signed update channel
+        required: false
+        type: string
   push:
     branches: [feat/prime-unlimited-mod-loader]
     tags: ['modloader-v*']
@@ -65,3 +70,95 @@ jobs:
       - run: cd release && sha256sum *.zip > SHA256SUMS.txt && stat --printf='%n %s bytes\n' *.zip > SIZES.txt
       - env: {GH_TOKEN: '${{ github.token }}'}
         run: gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "Prime Unlimited Modloader ${GITHUB_REF_NAME#modloader-v}" --notes "Signed-manifest artifacts for the independent self-updater."
+  publish-manifest:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+    needs: package
+    runs-on: ubuntu-24.04
+    environment: mod-release
+    permissions: {contents: write}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/prime-unlimited-mod-loader
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: python -m pip install cryptography
+      - name: Pin release assets and sign update manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          CATALOG_ED25519_PRIVATE: ${{ secrets.CATALOG_ED25519_PRIVATE }}
+        run: |
+          test -n "$CATALOG_ED25519_PRIVATE" || { echo "CATALOG_ED25519_PRIVATE is not configured in mod-release."; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > release.json
+          python - <<'PY'
+          import base64, hashlib, json, os, pathlib, re, urllib.request
+          from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+          release = json.load(open("release.json", encoding="utf-8"))
+          tag = os.environ["RELEASE_TAG"]
+          match = re.fullmatch(r"modloader-v(.+)-r([0-9]+)", tag)
+          if not match:
+              raise SystemExit(f"invalid release tag: {tag}")
+          version, revision = match.group(1), int(match.group(2))
+          assets = {asset["name"]: asset for asset in release["assets"]}
+          artifacts = []
+          targets = (
+              ("JC11S", "armv7l", "gnueabihf", "jc11s"),
+              ("JP24", "aarch64", "gnu", "jp24"),
+          )
+          for model, architecture, abi, suffix in targets:
+              name = f"prime-unlimited-modloader-v{version}-r{revision}-{suffix}.zip"
+              asset = assets.get(name)
+              if asset is None:
+                  raise SystemExit(f"release asset missing: {name}")
+              request = urllib.request.Request(asset["url"], headers={
+                  "Accept": "application/octet-stream",
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "User-Agent": "prime-unlimited-update-publisher",
+              })
+              with urllib.request.urlopen(request) as response:
+                  payload = response.read()
+              if len(payload) != asset["size"]:
+                  raise SystemExit(f"asset size mismatch: {name}")
+              artifacts.append({
+                  "model": model, "architecture": architecture, "abi": abi,
+                  "url": asset["url"], "sha256": hashlib.sha256(payload).hexdigest(),
+                  "size": len(payload),
+              })
+          manifest = {"schemaVersion": 1, "version": version, "revision": revision, "artifacts": artifacts}
+          encoded = (json.dumps(manifest, separators=(",", ":")) + "\n").encode()
+          secret = os.environ["CATALOG_ED25519_PRIVATE"].strip()
+          try:
+              private_bytes = bytes.fromhex(secret)
+          except ValueError:
+              private_bytes = base64.b64decode(secret, validate=True)
+          if len(private_bytes) == 64:
+              private_bytes = private_bytes[:32]
+          if len(private_bytes) != 32:
+              raise SystemExit("signing key must be a 32-byte seed or 64-byte private key")
+          signature = Ed25519PrivateKey.from_private_bytes(private_bytes).sign(encoded)
+          pathlib.Path("modloader/update/manifest.json").write_bytes(encoded)
+          pathlib.Path("modloader/update/manifest.sig.json").write_text(json.dumps({
+              "algorithm": "ed25519", "keyId": "prime-unlimited-2026-1",
+              "signature": base64.b64encode(signature).decode(),
+          }, indent=2) + "\n", encoding="utf-8")
+          readme = pathlib.Path("modloader/updater/README.md")
+          text = readme.read_text(encoding="utf-8")
+          text = re.sub(r"Current signed channel: Modloader `[^`]+` revision `[0-9]+`\.",
+                        f"Current signed channel: Modloader `{version}` revision `{revision}`.", text)
+          readme.write_text(text, encoding="utf-8")
+          PY
+      - name: Verify and publish signed channel
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          cd modloader/updater && go test ./...
+          cd ../..
+          git config user.name "prime-unlimited-mod-pipeline"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add modloader/update/manifest.json modloader/update/manifest.sig.json modloader/updater/README.md
+          git diff --cached --quiet && { echo "Signed channel already points at this release."; exit 0; }
+          git commit -m "chore(modloader): publish signed ${RELEASE_TAG} update channel"
+          git push origin HEAD:feat/prime-unlimited-mod-loader
