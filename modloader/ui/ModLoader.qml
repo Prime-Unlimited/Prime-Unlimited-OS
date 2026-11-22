@@ -137,11 +137,14 @@ Rectangle {
             })
         }
         request.onerror = function() {
+            if (request.readyState === XMLHttpRequest.DONE && request.status >= 200) return
             updaterBusy = false
+            var message = "Self-updater unavailable"
             try {
                 var payload = JSON.parse(request.responseText)
-                statusText = payload.error || "Self-update request failed"
-            } catch(e) { statusText = "Self-updater unavailable" }
+                if (payload && payload.error) message = payload.error
+            } catch (e) {}
+            statusText = message
             refreshSelfUpdate()
         }
         request.ontimeout = function() { updaterBusy=false; statusText="Self-updater timed out" }

@@ -596,6 +596,6 @@ func main() {
 			s.mu.Unlock()
 		}
 	}()
-	httpServer := &http.Server{Addr: *listen, Handler: s, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 12 * time.Minute}
+	httpServer := &http.Server{Addr: *listen, Handler: s, ReadHeaderTimeout: 3 * time.Second, WriteTimeout: 12 * time.Minute}
 	fmt.Println(httpServer.ListenAndServe())
 }

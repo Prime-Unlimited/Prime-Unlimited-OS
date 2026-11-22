@@ -1498,10 +1498,31 @@ func main() {
 	if usedFallback {
 		runtimeServer.catalogSource = "offline-last-good"
 	}
+	httpServer := &http.Server{
+		Addr:              *listen,
+		Handler:           runtimeServer,
+		ReadHeaderTimeout: 3 * time.Second,
+		ReadTimeout:       5 * time.Second,
+		WriteTimeout:      10 * time.Minute,
+		IdleTimeout:       15 * time.Second,
+		MaxHeaderBytes:    16 * 1024,
+	}
+	// The self-updater treats the new runtime as broken unless /api/v1/health
+	// answers within about 12s. Catalog sync and service startup must not
+	// delay that bind.
+	listener, err := net.Listen("tcp", *listen)
+	if err != nil {
+		log.Fatal(err)
+	}
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- httpServer.Serve(listener) }()
+	log.Printf("Prime Unlimited runtime API listening on http://%s (catalog: %s)", *listen, state.Status)
 	if *catalogURL != "" && *catalogSignatureURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		if _, syncErr := runtimeServer.syncCatalog(ctx); syncErr != nil {
+			runtimeServer.catalogMu.Lock()
 			runtimeServer.catalogSyncError = syncErr.Error()
+			runtimeServer.catalogMu.Unlock()
 			log.Printf("GitHub catalog sync unavailable; using last valid catalog")
 		}
 		cancel()
@@ -1521,15 +1542,5 @@ func main() {
 			}
 		}
 	}()
-	httpServer := &http.Server{
-		Addr:              *listen,
-		Handler:           runtimeServer,
-		ReadHeaderTimeout: 3 * time.Second,
-		ReadTimeout:       5 * time.Second,
-		WriteTimeout:      10 * time.Minute,
-		IdleTimeout:       15 * time.Second,
-		MaxHeaderBytes:    16 * 1024,
-	}
-	log.Printf("Prime Unlimited runtime API listening on http://%s (catalog: %s)", *listen, state.Status)
-	log.Fatal(httpServer.ListenAndServe())
+	log.Fatal(<-serveErr)
 }
