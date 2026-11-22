@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -55,14 +54,6 @@ func allowPackageRedirect(request *http.Request, via []*http.Request) error {
 	return http.ErrUseLastResponse
 }
 
-func (s *server) developerConfigured() bool {
-	if s.developerTokenPath == "" {
-		return false
-	}
-	_, err := readAuthToken(s.developerTokenPath)
-	return err == nil
-}
-
 func (s *server) developerEnabled() bool {
 	if s.developerModePath == "" {
 		return false
@@ -71,16 +62,16 @@ func (s *server) developerEnabled() bool {
 	return err == nil && string(data) == "enabled\n"
 }
 
-func (s *server) authorizeDeveloper(r *http.Request) error {
-	expected, err := readAuthToken(s.developerTokenPath)
-	if err != nil || s.developerTokenPath == "" {
-		return errors.New("developer authorization is not configured")
+func (s *server) handleDeveloperQR(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
 	}
-	presented := r.Header.Get("X-Prime-Developer-Token")
-	if len(presented) != len(expected) || subtle.ConstantTimeCompare([]byte(presented), []byte(expected)) != 1 {
-		return errors.New("developer authorization required")
-	}
-	return nil
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(githubDeviceQR)
 }
 
 func writeEnabledFile(path string) error {
@@ -134,10 +125,6 @@ func (s *server) handleDeveloperMode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
-	if err := s.authorizeDeveloper(r); err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
-		return
-	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Content-Type must be application/json"})
@@ -161,11 +148,21 @@ func (s *server) handleDeveloperMode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "request contains trailing JSON data"})
 		return
 	}
-	if err := s.setDeveloperEnabled(body.Enabled); err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "developer mode update failed"})
+	if !body.Enabled {
+		s.cancelDeveloperLogin()
+		if err := s.setDeveloperEnabled(false); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "developer mode update failed"})
+			return
+		}
+		writeJSON(w, http.StatusOK, s.developerModeStatus())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": s.developerEnabled(), "configured": true})
+	if s.developerEnabled() {
+		writeJSON(w, http.StatusOK, s.developerModeStatus())
+		return
+	}
+	status, payload := s.beginDeveloperLogin()
+	writeJSON(w, status, payload)
 }
 
 func (s *server) accessReason(item mod, schemaVersion int) string {

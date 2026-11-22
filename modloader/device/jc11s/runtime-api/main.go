@@ -176,6 +176,8 @@ type server struct {
 	mediaDestinations      map[string]mediaImportDestination
 	mediaPreviews          map[string]*usbcopy.ImportPlan
 	mediaImportWrites      bool
+	github                 *githubDeviceClient
+	login                  developerLogin
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -920,9 +922,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/api/v1/libraries":
 		writeJSON(w, http.StatusOK, map[string]any{"libraries": []any{}})
 	case "/api/v1/developer-mode":
-		writeJSON(w, http.StatusOK, map[string]any{
-			"enabled": s.developerEnabled(), "configured": s.developerConfigured(),
-		})
+		writeJSON(w, http.StatusOK, s.developerModeStatus())
+	case "/api/v1/developer-mode/qr.png":
+		s.handleDeveloperQR(w, r)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
@@ -1608,7 +1610,8 @@ func main() {
 		catalogPath: *catalogPath, catalogSignaturePath: *catalogSignaturePath, catalogTrustKeyPath: *catalogTrustKeyPath,
 		catalogURL: *catalogURL, catalogSignatureURL: *catalogSignatureURL, catalogSource: "offline-cache",
 		cacheRoot: *cacheRoot, stagingRoot: *stagingRoot, httpClient: newPackageHTTPClient(),
-		developerModePath: filepath.Join(*root, "auth", "developer.mode"), developerTokenPath: filepath.Join(*root, "auth", "developer.token")}
+		developerModePath: filepath.Join(*root, "auth", "developer.mode"), developerTokenPath: filepath.Join(*root, "auth", "developer.token"),
+		github: newGitHubDeviceClient(githubOAuthClientID)}
 
 	if usedFallback {
 		runtimeServer.catalogSource = "offline-last-good"

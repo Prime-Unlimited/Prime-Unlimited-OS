@@ -109,15 +109,7 @@ Das ist schon eingerichtet. Nur wiederholen, wenn ein Environment oder das Secre
    Required reviewers: alle Repository-Admins, derzeit `Goaloge` und `xxbluecyxx-byte`.
    Eine Freigabe von einem der beiden reicht.
    Dasselbe Secret `CATALOG_ED25519_PRIVATE`.
-3. Developer-Token nur auf dem Gerät, nur wenn Development-Mods getestet werden:
-
-```sh
-umask 077
-openssl rand -hex 32 > /data/prime-unlimited/auth/developer.token
-```
-
-Die Datei ist 64 Hex-Zeichen und Modus `0600`. Die API erzeugt sie nicht.
-Das Mutation-Token schaltet den Developer Mode nicht ein.
+3. Developer Mode auf dem Gerät nur zum Testen von Development-Mods: `DEV MODE`, QR mit dem Handy scannen, den kurzen Code bei GitHub eingeben. Nur Repo-Admins schalten frei. Das Mutation-Token schaltet den Modus nicht ein.
 
 ## 4. ZIP bauen
 
@@ -255,8 +247,8 @@ Die Download-URL im Katalog ist:
 ## 7. Auf dem Gerät testen
 
 1. Modloader öffnen.
-2. `DEV MODE` drücken und das Developer-Token aus `/data/prime-unlimited/auth/developer.token` eingeben.
-3. `EINSCHALTEN`.
+2. `DEV MODE` drücken, den QR-Code scannen und den angezeigten Code bei GitHub eingeben.
+3. Warten, bis der Knopf `DEV MODE ON` zeigt.
 4. Die Mod erscheint mit dem Zusatz `DEVELOPMENT`.
 5. Installieren und prüfen.
 6. Wenn der Katalog noch der alte ist: im Modloader `SYNC CATALOG`.

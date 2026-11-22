@@ -15,9 +15,10 @@ Rectangle {
     property bool busy: false
     property bool updaterBusy: false
     property bool developerMode: false
-    property bool developerConfigured: false
     property bool developerPrompt: false
-    property string developerToken: ""
+    property string developerStatus: "idle"
+    property string developerUserCode: ""
+    property string developerMessage: ""
     property bool showUpdatePrompt: false
     property var selfUpdate: ({"installed":{"version":"?","revision":0},"available":{"version":"?","revision":0},"updateAvailable":false,"rollbackAvailable":false})
     property int selectedTab: 0
@@ -222,30 +223,89 @@ Rectangle {
         mutation("catalog/sync", "", "", function() { refresh() })
     }
 
-    function setDeveloperMode(enabled) {
-        if (!authToken || !developerToken) {
-            statusText = "Developer authorization is not configured on this device"
-            developerPrompt = true
-            return
-        }
+    function postDeveloperMode(enabled, done) {
         var request = new XMLHttpRequest()
-        request.timeout = 4000
+        request.timeout = 15000
         request.onreadystatechange = function() {
             if (request.readyState !== XMLHttpRequest.DONE) return
-            try {
-                var payload = JSON.parse(request.responseText)
-                if (request.status === 200) {
-                    developerMode = payload.enabled === true
-                    developerPrompt = false
-                    refresh()
-                } else statusText = payload.error || "Developer mode was refused"
-            } catch (e) { statusText = "Developer mode was refused" }
+            var payload = ({})
+            try { payload = JSON.parse(request.responseText) } catch (e) { payload = ({}) }
+            if (request.status === 200) done(true, payload)
+            else done(false, payload)
         }
+        request.onerror = function() { done(false, ({"error": "Connection failed"})) }
+        request.ontimeout = function() { done(false, ({"error": "Connection timed out"})) }
         request.open("POST", apiBase + "/api/v1/developer-mode")
         request.setRequestHeader("Content-Type", "application/json")
         request.setRequestHeader("Authorization", "Bearer " + authToken)
-        request.setRequestHeader("X-Prime-Developer-Token", developerToken)
         request.send(JSON.stringify({"enabled": enabled}))
+    }
+
+    function applyDeveloperPayload(payload) {
+        developerMode = payload.enabled === true
+        developerStatus = payload.status || (developerMode ? "enabled" : "idle")
+        developerUserCode = payload.userCode || ""
+        developerMessage = payload.message || payload.error || ""
+        if (developerMode) {
+            developerPrompt = false
+            refresh()
+        }
+    }
+
+    function beginDeveloperLogin() {
+        developerStatus = "pending"
+        developerMessage = ""
+        postDeveloperMode(true, function(ok, payload) {
+            if (!ok) {
+                developerStatus = "error"
+                developerMessage = payload.error || "GitHub-Anmeldung fehlgeschlagen"
+                return
+            }
+            applyDeveloperPayload(payload)
+        })
+    }
+
+    function pollDeveloperLogin() {
+        var request = new XMLHttpRequest()
+        request.timeout = 4000
+        request.onreadystatechange = function() {
+            if (request.readyState !== XMLHttpRequest.DONE || request.status !== 200) return
+            try { applyDeveloperPayload(JSON.parse(request.responseText)) } catch (e) { return }
+        }
+        request.open("GET", apiBase + "/api/v1/developer-mode")
+        request.setRequestHeader("Authorization", "Bearer " + authToken)
+        request.send()
+    }
+
+    function openDeveloperPrompt() {
+        developerPrompt = true
+        if (developerMode) {
+            developerStatus = "enabled"
+            return
+        }
+        if (developerStatus === "pending" && developerUserCode !== "") return
+        beginDeveloperLogin()
+    }
+
+    function disableDeveloperMode() {
+        postDeveloperMode(false, function(ok, payload) {
+            if (!ok) {
+                developerMessage = payload.error || "Developer Mode blieb an"
+                return
+            }
+            developerMode = false
+            developerStatus = "idle"
+            developerUserCode = ""
+            developerPrompt = false
+            refresh()
+        })
+    }
+
+    Timer {
+        interval: 2000
+        repeat: true
+        running: developerStatus === "pending"
+        onTriggered: pollDeveloperLogin()
     }
 
     function rowLabel(modelData) {
@@ -324,7 +384,7 @@ Rectangle {
                     text: developerMode ? "DEV MODE\nON" : "DEV MODE\nOFF"
                     horizontalAlignment: Text.AlignHCenter
                 }
-                MouseArea { anchors.fill: parent; onClicked: developerPrompt = true }
+                MouseArea { anchors.fill: parent; onClicked: openDeveloperPrompt() }
             }
             Rectangle {
                 width: 82; height: 46; radius: 9
@@ -429,7 +489,7 @@ Rectangle {
                     }
                     Rectangle {
                         width: 104; height: 48; radius: 9; x: parent.width - (present ? 224 : 116); y: 19
-                        color: "#ff541c"
+                        color: present && installed[modelData.id].enabled ? "#1f8a4c" : "#ff541c"
                         property bool present: installed[modelData.id] !== undefined
                         Text { anchors.centerIn: parent; color: "white"; font.bold: true
                             text: modelData.adminTestPreview ? "PENDING" : (parent.present ? (installed[modelData.id].enabled ? "DISABLE" : "ENABLE") : "INSTALL") }
@@ -540,38 +600,51 @@ Rectangle {
         visible: developerPrompt
         anchors.fill: parent; color: "#d9101215"; z: 25
         Rectangle {
-            width: 560; height: 250; radius: 14; anchors.centerIn: parent; color: "#22262b"
+            width: 640; height: developerMode ? 220 : 430; radius: 14; anchors.centerIn: parent; color: "#22262b"
             Text {
-                x: 24; y: 18; width: 512; wrapMode: Text.WordWrap
-                color: "white"; font.pixelSize: 18; font.bold: true
+                x: 24; y: 16; width: 592; wrapMode: Text.WordWrap
+                color: "white"; font.pixelSize: 20; font.bold: true
                 text: developerMode ? "Developer Mode ausschalten" : "Developer Mode einschalten"
             }
-            Text {
-                x: 24; y: 58; width: 512; wrapMode: Text.WordWrap
-                color: "#bfc3c9"; font.pixelSize: 13
-                text: "Lokales Developer-Token. Ein normaler API-Aufruf schaltet den Modus nicht um. Development heißt testbar, nicht hardwaregeprüft."
+            Image {
+                x: 24; y: 58; width: 168; height: 168
+                visible: !developerMode
+                source: apiBase + "/api/v1/developer-mode/qr.png"
+                fillMode: Image.PreserveAspectFit
             }
-            Rectangle {
-                x: 24; y: 118; width: 512; height: 42; radius: 8; color: "#101215"
-                TextInput {
-                    id: developerTokenInput
-                    anchors.fill: parent; anchors.margins: 8
-                    color: "white"; font.pixelSize: 16; echoMode: TextInput.Password
-                    text: developerToken
-                    onTextChanged: developerToken = text
-                }
+            Text {
+                x: 210; y: 64; width: 400; visible: !developerMode
+                color: "white"; font.pixelSize: 32; font.bold: true
+                text: developerUserCode === "" ? "…" : developerUserCode
+            }
+            Text {
+                x: 210; y: 116; width: 400; visible: !developerMode
+                color: "#bfc3c9"; font.pixelSize: 15; wrapMode: Text.WordWrap
+                text: "QR scannen, bei GitHub anmelden und diesen Code eingeben. Nur Admins von Prime-Unlimited/Prime-Unlimited-OS."
+            }
+            Text {
+                x: 210; y: 190; width: 400; visible: !developerMode
+                color: "#8fd0ff"; font.pixelSize: 14
+                text: "https://github.com/login/device"
+            }
+            Text {
+                x: 24; y: developerMode ? 64 : 246; width: 592
+                color: developerStatus === "error" || developerStatus === "denied" || developerStatus === "expired" ? "#ff9b78" : "#bfc3c9"
+                font.pixelSize: 15; wrapMode: Text.WordWrap
+                text: developerMode ? "Development-Mods verschwinden aus der Liste. Einschalten geht wieder über GitHub." : (developerMessage !== "" ? developerMessage : "Warte auf die Anmeldung am Handy. Der Code gilt 15 Minuten.")
             }
             Row {
-                anchors.horizontalCenter: parent.horizontalCenter; y: 180; spacing: 16
+                anchors.horizontalCenter: parent.horizontalCenter; y: developerMode ? 140 : 360; spacing: 16
                 Rectangle {
                     width: 150; height: 46; radius: 10; color: "#33373c"
                     Text { anchors.centerIn: parent; text: "CANCEL"; color: "white"; font.bold: true }
-                    MouseArea { anchors.fill: parent; onClicked: developerPrompt = false }
+                    MouseArea { anchors.fill: parent; onClicked: { if (developerMode) developerPrompt = false; else disableDeveloperMode() } }
                 }
                 Rectangle {
+                    visible: developerMode
                     width: 180; height: 46; radius: 10; color: "#d77921"
-                    Text { anchors.centerIn: parent; text: developerMode ? "AUSSCHALTEN" : "EINSCHALTEN"; color: "white"; font.bold: true }
-                    MouseArea { anchors.fill: parent; onClicked: setDeveloperMode(!developerMode) }
+                    Text { anchors.centerIn: parent; text: "AUSSCHALTEN"; color: "white"; font.bold: true }
+                    MouseArea { anchors.fill: parent; onClicked: disableDeveloperMode() }
                 }
             }
         }
