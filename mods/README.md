@@ -10,8 +10,10 @@ Each mod should declare supported devices, firmware versions, dependencies, inst
 
 Catalog entries have two lifecycle states: `dev` and `published` (missing `status` is treated as
 `published` for existing catalogs). A `dev` entry is only shown in DEV MODE and may be sent to
-`POST /api/v1/publish`; a `published` entry is shown normally. Publishing dispatches
-`.github/workflows/publish-mod.yml`, which creates a device-specific release, records its URL,
+`POST /api/v1/publish`; a `published` entry is shown normally. A commit that adds or changes
+exactly one `dev` entry on `main` automatically runs `.github/workflows/publish-mod.yml`. Its
+device package must be committed as `mods/<id>/dist/<device>.zip`. The workflow creates a
+device-specific release, records its URL,
 digest and size, changes the state to `published`, signs the catalog and commits both catalog
 files.
 
