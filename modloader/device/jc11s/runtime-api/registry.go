@@ -237,6 +237,14 @@ func writeActivationManifest(root string, state registryState) error {
 	return writeAtomicJSON(filepath.Join(root, "activation", "manifest.json"), manifest)
 }
 
+func reconcileActivationManifest(root string) error {
+	registry, err := loadRegistry(filepath.Join(root, "registry", "state.json"))
+	if err != nil {
+		return err
+	}
+	return writeActivationManifest(root, registry)
+}
+
 func setModEnabled(id string, enabled bool, root string) (activationResult, error) {
 	result := activationResult{ID: id, Enabled: enabled}
 	if !modIDPattern.MatchString(id) {

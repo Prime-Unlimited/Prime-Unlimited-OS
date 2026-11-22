@@ -1474,9 +1474,10 @@ func main() {
 	if err := recoverInstall(*root); err != nil {
 		log.Fatalf("install recovery failed: %v", err)
 	}
-	registry, err := loadRegistry(filepath.Join(*root, "registry", "state.json"))
-	if err != nil || writeActivationManifest(*root, registry) != nil {
-		log.Fatal("activation manifest reconciliation failed")
+	// The installed updater rolls back unless this process binds and answers
+	// health. A registry or manifest error stays on disk and is logged.
+	if err := reconcileActivationManifest(*root); err != nil {
+		log.Printf("activation manifest reconciliation failed: %v", err)
 	}
 	state, usedFallback := loadVerifiedCatalogWithFallback(*catalogPath, *catalogSignaturePath, *catalogTrustKeyPath)
 	if state.Status == "invalid" {

@@ -501,3 +501,57 @@ func TestEnableDependencyClosureFailsClosed(t *testing.T) {
 		t.Fatalf("failed plan changed state: %#v %v", final, err)
 	}
 }
+
+func TestReconcileActivationManifestKeepsFilesWhenItCannotRewrite(t *testing.T) {
+	root := t.TempDir()
+	registryDir := filepath.Join(root, "registry")
+	if err := os.MkdirAll(registryDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	registryPath := filepath.Join(registryDir, "state.json")
+	original := []byte("{}\n")
+	if err := os.WriteFile(registryPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileActivationManifest(root); err == nil {
+		t.Fatal("invalid registry was accepted")
+	}
+	got, err := os.ReadFile(registryPath)
+	if err != nil || string(got) != string(original) {
+		t.Fatalf("registry changed: %q %v", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "activation", "manifest.json")); !os.IsNotExist(err) {
+		t.Fatalf("manifest written after load failure: %v", err)
+	}
+
+	item := installedMod{ID: "recover-test", Version: "1.0.0", PackageSHA256: strings.Repeat("a", 64), CatalogID: "test", Architecture: "armv7l", ABI: "gnueabihf", Entrypoint: "mod/start", Root: "mods/installed/recover-test/1.0.0", Enabled: true}
+	if err := writeAtomicJSON(registryPath, recoveryState(item)); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileActivationManifest(root); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(root, "activation", "manifest.json")
+	written, err := readOwnedFile(manifestPath, 1024*1024, "activation manifest")
+	if err != nil || !strings.Contains(string(written), `"id":"recover-test"`) {
+		t.Fatalf("enabled manifest missing: %s %v", written, err)
+	}
+	if err := os.Chmod(filepath.Join(root, "activation"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	registryBefore, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileActivationManifest(root); err == nil {
+		t.Fatal("unsafe activation directory was accepted")
+	}
+	registryAfter, err := os.ReadFile(registryPath)
+	if err != nil || string(registryAfter) != string(registryBefore) {
+		t.Fatalf("registry changed after manifest failure: %q %v", registryAfter, err)
+	}
+	manifestAfter, err := os.ReadFile(manifestPath)
+	if err != nil || string(manifestAfter) != string(written) {
+		t.Fatalf("manifest changed after rewrite failure: %q %v", manifestAfter, err)
+	}
+}
