@@ -1,8 +1,14 @@
 # Managed native service mods
 
 A service declaration in a verified schema-v2 catalog permits one native ELF
-binary and a bounded runtime capability. The first capability is `splash-image`.
-Neither package metadata nor a mod script can grant service privileges.
+binary and a bounded runtime capability. Current capabilities are
+`splash-image` and `media-import`. The latter exposes opaque USB insertion
+events, internal destination summaries, and a bounded USB import preparation
+flow to the trusted OverlayHost. Preparation reads audio tags, artwork and
+playlists in the runtime process and stores a short-lived private preview;
+copying files and writing the Engine database are still withheld until the
+native Engine transaction is verified. Neither package metadata nor a mod
+script can grant service privileges.
 
 ```json
 "service": {

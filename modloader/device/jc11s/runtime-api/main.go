@@ -27,6 +27,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	usbcopy "prime-unlimited.usb-copy/worker"
 )
 
 const maxCatalogBytes = 1024 * 1024
@@ -139,28 +141,41 @@ type catalogSignature struct {
 }
 
 type server struct {
-	model                string
-	firmware             string
-	architecture         string
-	abi                  string
-	catalog              catalogState
-	catalogPath          string
-	catalogSignaturePath string
-	catalogTrustKeyPath  string
-	catalogURL           string
-	catalogSignatureURL  string
-	catalogLastSync      int64
-	catalogSource        string
-	catalogSyncError     string
-	authToken            string
-	cacheRoot            string
-	stagingRoot          string
-	root                 string
-	developerModePath    string
-	developerTokenPath   string
-	httpClient           *http.Client
-	cacheMu              sync.Mutex
-	catalogMu            sync.RWMutex
+	model                  string
+	firmware               string
+	architecture           string
+	abi                    string
+	catalog                catalogState
+	catalogPath            string
+	catalogSignaturePath   string
+	catalogTrustKeyPath    string
+	catalogURL             string
+	catalogSignatureURL    string
+	catalogLastSync        int64
+	catalogSource          string
+	catalogSyncError       string
+	authToken              string
+	cacheRoot              string
+	stagingRoot            string
+	root                   string
+	developerModePath      string
+	developerTokenPath     string
+	httpClient             *http.Client
+	cacheMu                sync.Mutex
+	catalogMu              sync.RWMutex
+	mediaProgressMu        sync.Mutex
+	mediaProgress          mediaPreparationProgress
+	nativeCreateMu         sync.Mutex
+	nativeProbeMu          sync.Mutex
+	nativeProbeRevision    string
+	nativeProbeUntil       time.Time
+	nativeProbeObservation *nativePlaylistObservation
+	nativeProbeReceivedAt  time.Time
+	mediaMu                sync.Mutex
+	mediaEvents            map[string]mediaInsertEvent
+	mediaDestinations      map[string]mediaImportDestination
+	mediaPreviews          map[string]*usbcopy.ImportPlan
+	mediaImportWrites      bool
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -579,7 +594,93 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleServiceSplash(w, r)
 		return
 	}
-
+	if r.URL.Path == "/api/v1/native-playlist/create-test" || strings.HasPrefix(r.URL.Path, "/api/v1/native-playlist/create-test/") {
+		s.handleNativePlaylistCreate(w, r)
+		return
+	}
+	if r.URL.Path == "/api/v1/native-playlist/probe" || strings.HasPrefix(r.URL.Path, "/api/v1/native-playlist/probe/") {
+		s.handleNativePlaylistProbe(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/v1/media-import/review/") {
+		if r.URL.RawQuery != "" || r.URL.Fragment != "" {
+			writeJSON(w, 400, map[string]string{"error": "query parameters are not supported"})
+			return
+		}
+		if !s.authorized(r) {
+			writeJSON(w, 401, map[string]string{"error": "trusted UI authorization required"})
+			return
+		}
+		s.handleMediaJobReview(w, r, strings.TrimPrefix(r.URL.Path, "/api/v1/media-import/review/"))
+		return
+	}
+	if r.URL.Path == "/api/v1/media-import/preparation" {
+		if r.URL.RawQuery != "" || r.URL.Fragment != "" {
+			writeJSON(w, 400, map[string]string{"error": "query parameters are not supported"})
+			return
+		}
+		if !s.authorized(r) {
+			writeJSON(w, 401, map[string]string{"error": "trusted UI authorization required"})
+			return
+		}
+		s.handleMediaPreparation(w, r)
+		return
+	}
+	if r.URL.Path == "/api/v1/media-import/events" {
+		if r.URL.RawQuery != "" || r.URL.Fragment != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query parameters are not supported"})
+			return
+		}
+		if !s.authorized(r) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "trusted UI authorization required"})
+			return
+		}
+		s.handleMediaImportEvents(w, r)
+		return
+	}
+	if r.URL.Path == "/api/v1/media-import/start" {
+		if r.URL.RawQuery != "" || r.URL.Fragment != "" {
+			writeJSON(w, 400, map[string]string{"error": "query parameters are not supported"})
+			return
+		}
+		if !s.authorized(r) {
+			writeJSON(w, 401, map[string]string{"error": "trusted UI authorization required"})
+			return
+		}
+		s.handleMediaJobStart(w, r)
+		return
+	}
+	if r.URL.Path == "/api/v1/media-import/jobs" || r.URL.Path == "/api/v1/media-import/jobs/acknowledge" {
+		if r.URL.RawQuery != "" || r.URL.Fragment != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query parameters are not supported"})
+			return
+		}
+		if !s.authorized(r) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "trusted UI authorization required"})
+			return
+		}
+		if r.URL.Path == "/api/v1/media-import/jobs/acknowledge" {
+			s.handleMediaJobAcknowledge(w, r)
+		} else {
+			s.handleMediaJobs(w, r)
+		}
+		return
+	}
+	if r.URL.Path == "/api/v1/media-import/preview" {
+		if r.URL.RawQuery != "" || r.URL.Fragment != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query parameters are not supported"})
+			return
+		}
+		if !s.authorized(r) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "trusted UI authorization required"})
+			return
+		}
+		s.handleMediaImportPreview(w, r)
+		return
+	}
 	if r.URL.RawQuery != "" || r.URL.Fragment != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query parameters are not supported"})
 		return
@@ -1450,6 +1551,8 @@ func loadOrCreateAuthToken(path string) (string, error) {
 }
 
 func main() {
+	mediaJobID := flag.String("media-import-job", "", "run one trusted import job without starting HTTP")
+	mediaWrites := flag.Bool("media-import-writes", false, "enable experimental supervised JP24 imports")
 	listen := flag.String("listen", "127.0.0.1:8098", "loopback listen address")
 	model := flag.String("model", "JC11S", "device model")
 	firmware := flag.String("firmware", "5.3.0", "Engine OS version")
@@ -1471,6 +1574,17 @@ func main() {
 	if filepath.Clean(*root) != "/data/prime-unlimited" || !filepath.IsAbs(*root) {
 		log.Fatal("refusing runtime root outside /data/prime-unlimited")
 	}
+	if *mediaJobID != "" {
+		state, _ := loadVerifiedCatalogWithFallback(*catalogPath, *catalogSignaturePath, *catalogTrustKeyPath)
+		worker := &server{root: *root, model: *model, firmware: *firmware, architecture: *architecture, abi: *abi, catalog: state, catalogPath: *catalogPath, catalogSignaturePath: *catalogSignaturePath, catalogTrustKeyPath: *catalogTrustKeyPath}
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+		defer cancel()
+		if err := worker.runMediaJob(ctx, *mediaJobID); err != nil {
+			log.Print("USB Copy job requires review")
+			os.Exit(1)
+		}
+		return
+	}
 	if err := recoverInstall(*root); err != nil {
 		log.Fatalf("install recovery failed: %v", err)
 	}
@@ -1490,7 +1604,7 @@ func main() {
 	if err := provisionAuthorizedUI(*root, authToken); err != nil {
 		log.Fatalf("UI authorization setup failed: %v", err)
 	}
-	runtimeServer := &server{model: *model, firmware: *firmware, architecture: *architecture, abi: *abi, catalog: state, authToken: authToken, root: *root,
+	runtimeServer := &server{mediaImportWrites: *mediaWrites, model: *model, firmware: *firmware, architecture: *architecture, abi: *abi, catalog: state, authToken: authToken, root: *root,
 		catalogPath: *catalogPath, catalogSignaturePath: *catalogSignaturePath, catalogTrustKeyPath: *catalogTrustKeyPath,
 		catalogURL: *catalogURL, catalogSignatureURL: *catalogSignatureURL, catalogSource: "offline-cache",
 		cacheRoot: *cacheRoot, stagingRoot: *stagingRoot, httpClient: newPackageHTTPClient(),
@@ -1518,6 +1632,9 @@ func main() {
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- httpServer.Serve(listener) }()
 	log.Printf("Prime Unlimited runtime API listening on http://%s (catalog: %s)", *listen, state.Status)
+	if err := reconcileAbandonedMediaJobs(*root, time.Now()); err != nil {
+		log.Printf("import interruption check: %v", err)
+	}
 	if *catalogURL != "" && *catalogSignatureURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		if _, syncErr := runtimeServer.syncCatalog(ctx); syncErr != nil {
@@ -1535,6 +1652,9 @@ func main() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
+			if err := reconcileAbandonedMediaJobs(*root, time.Now()); err != nil {
+				log.Printf("import interruption check: %v", err)
+			}
 			runtimeServer.cacheMu.Lock()
 			err := reconcileServicesPolicy(*root, runtimeServer.serviceApproved)
 			runtimeServer.cacheMu.Unlock()

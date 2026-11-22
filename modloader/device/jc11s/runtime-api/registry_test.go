@@ -419,6 +419,7 @@ func TestEnableFailureCheckpointsRecoverDeterministically(t *testing.T) {
 func dependencyActivationFixture(t *testing.T) (string, installedMod, installedMod) {
 	t.Helper()
 	root := t.TempDir()
+	makeLauncherFixtureTraversable(t, root)
 	makeItem := func(id, version string) installedMod {
 		item := installedMod{ID: id, Version: version, PackageSHA256: strings.Repeat("a", 64), CatalogID: "test", Architecture: "armv7l", ABI: "gnueabihf", Entrypoint: "mod/start", Root: filepath.ToSlash(filepath.Join("mods", "installed", id, version))}
 		entrypoint := filepath.Join(root, filepath.FromSlash(item.Root), "mod", "start")

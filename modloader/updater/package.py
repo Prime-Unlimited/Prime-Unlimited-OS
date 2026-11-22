@@ -9,10 +9,9 @@ def build(target, output):
     version = json.loads((ROOT / "modloader/VERSION.json").read_text())
     work = output / "work"
     (work / "bin").mkdir(parents=True, exist_ok=True)
-    env = os.environ.copy() | {"GOOS":"linux", "GOARCH":cfg[0], "CGO_ENABLED":"0", "GO111MODULE":"off"}
+    env = os.environ.copy() | {"GOOS":"linux", "GOARCH":cfg[0], "CGO_ENABLED":"0", "GOWORK":"off"}
     if cfg[1]: env["GOARM"] = cfg[1]
     subprocess.run(["go","build","-trimpath","-ldflags=-s -w -buildid=","-o",str(work/"bin/prime-unlimited-runtime-api"),"."],cwd=ROOT/"modloader/device/jc11s/runtime-api",env=env,check=True)
-    env.pop("GO111MODULE",None)
     subprocess.run(["go","build","-trimpath","-ldflags=-s -w -buildid=","-o",str(work/"bin/prime-unlimited-self-updater"),"."],cwd=ROOT/"modloader/updater",env=env,check=True)
     files = {
       ROOT/f"modloader/device/{target}/runtime-api/start.sh": work/"bin/modloader-api-start.sh",

@@ -65,7 +65,7 @@ func validateServiceSpec(spec *serviceSpec) error {
 	}
 	path, err := safeArchivePath(spec.Binary, defaultStageLimits)
 	digest, decodeErr := hex.DecodeString(spec.SHA256)
-	if err != nil || path != spec.Binary || len(digest) != 32 || decodeErr != nil || strings.ToLower(spec.SHA256) != spec.SHA256 || spec.Capability != "splash-image" {
+	if err != nil || path != spec.Binary || len(digest) != 32 || decodeErr != nil || strings.ToLower(spec.SHA256) != spec.SHA256 || (spec.Capability != "splash-image" && spec.Capability != "media-import") {
 		return errors.New("invalid native service declaration")
 	}
 	return nil

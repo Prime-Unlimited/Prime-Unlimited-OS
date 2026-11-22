@@ -11,6 +11,7 @@ import (
 func launcherFixture(t *testing.T, script string, enabled bool) (string, installedMod) {
 	t.Helper()
 	root := t.TempDir()
+	makeLauncherFixtureTraversable(t, root)
 	item := installedMod{ID: "launch-test", Version: "1.0.0", PackageSHA256: strings.Repeat("a", 64), CatalogID: "test", Architecture: "armv7l", ABI: "gnueabihf", Entrypoint: "mod/start.sh", Root: "mods/installed/launch-test/1.0.0", Enabled: enabled}
 	entrypoint := filepath.Join(root, filepath.FromSlash(item.Root), "mod", "start.sh")
 	if err := os.MkdirAll(filepath.Dir(entrypoint), 0o700); err != nil {
@@ -64,5 +65,18 @@ func TestLaunchTimeoutKillsProcessGroupAndRecordsFailure(t *testing.T) {
 	loaded, loadErr := loadLaunchStatus(item.ID, root)
 	if loadErr != nil || loaded.State != "timeout" {
 		t.Fatalf("timeout status: %#v %v", loaded, loadErr)
+	}
+}
+
+// Root-run device tests launch children as nobody; t.TempDir's parent is private.
+func makeLauncherFixtureTraversable(t *testing.T, root string) {
+	t.Helper()
+	if os.Geteuid() != 0 {
+		return
+	}
+	for _, directory := range []string{filepath.Dir(root), root} {
+		if err := os.Chmod(directory, 0o711); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

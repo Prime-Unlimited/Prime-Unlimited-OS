@@ -18,7 +18,7 @@ mkdir -p "$HERE/build"
 (
     cd "$SOURCE"
     GOCACHE=${GOCACHE:-$HERE/build/.go-cache} \
-    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 GO111MODULE=off GOENV=off \
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 GOWORK=off GOENV=off \
         go build -trimpath -ldflags='-s -w' -o "$OUTPUT" .
 )
 

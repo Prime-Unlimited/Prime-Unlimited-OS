@@ -1,0 +1,33 @@
+name: USB Copy preview
+on:
+  workflow_dispatch:
+  push:
+    branches: ['feat/usb-copy-mod']
+    paths: ['mods/USB Copy/**', '.github/workflows/usb-copy-preview.yml']
+permissions:
+  contents: read
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Test worker and durable live sequence
+        working-directory: mods/USB Copy/src/worker
+        run: go test -race ./...
+      - name: Verify preview package contents and architectures
+        run: python3 -m unittest discover -s 'mods/USB Copy/tests'
+      - name: Build unsigned preview packages
+        run: |
+          python3 'mods/USB Copy/scripts/package.py' --target jp24 --output artifacts
+          python3 'mods/USB Copy/scripts/package.py' --target jc11s --output artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: usb-copy-unsigned-preview
+          path: artifacts/*
+          if-no-files-found: error
