@@ -12,6 +12,10 @@ record a transaction with operation `publish`, poll the workflow, and expose `st
 then releases the button. Success is only returned after the workflow has created the
 device-specific release and pushed the newly signed catalog.
 
+The normal path needs no button or GitHub credential on the device: committing one changed
+`dev` catalog entry plus `mods/<id>/dist/<device>.zip` to `main` triggers the same workflow
+automatically. Manual dispatch remains available as a recovery mechanism.
+
 The same transaction fields drive normal Modloader progress:
 
 - `cache` or `download` stage: download percentage.
