@@ -1,6 +1,11 @@
 name: Publish device mod
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'mods/**'
+      - 'modloader/catalog/*.json'
   workflow_dispatch:
     inputs:
       mod_id:
@@ -20,11 +25,12 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: publish-mod-${{ inputs.mod_id }}-${{ inputs.device }}
+  group: publish-mod-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   publish:
+    if: github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'Publish ')
     runs-on: ubuntu-latest
     environment: mod-publishing
     steps:
@@ -33,12 +39,46 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.12', cache: pip}
       - run: pip install 'cryptography>=43,<46'
+      - name: Resolve mod from commit
+        id: resolve
+        env:
+          EVENT_NAME: "${{ github.event_name }}"
+          BEFORE_SHA: "${{ github.event.before }}"
+          INPUT_MOD_ID: "${{ inputs.mod_id }}"
+          INPUT_DEVICE: "${{ inputs.device }}"
+          INPUT_PACKAGE_PATH: "${{ inputs.package_path }}"
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            mod_id="$INPUT_MOD_ID"
+            device="$INPUT_DEVICE"
+            package_path="$INPUT_PACKAGE_PATH"
+          else
+            mapfile -t candidates < <(
+              for device_name in jc11s jp24; do
+                catalog="modloader/catalog/${device_name}.json"
+                while IFS= read -r mod_id; do
+                  old_entry="$(git show "${BEFORE_SHA}:${catalog}" 2>/dev/null | jq -c --arg id "$mod_id" '.mods[]? | select(.id == $id)' || true)"
+                  new_entry="$(jq -c --arg id "$mod_id" '.mods[] | select(.id == $id)' "$catalog")"
+                  [[ "$old_entry" != "$new_entry" ]] && printf '%s|%s\n' "$device_name" "$mod_id"
+                done < <(jq -r '.mods[] | select(.status == "dev") | .id' "$catalog")
+              done
+            )
+            [[ ${#candidates[@]} -eq 1 ]] || { echo "Commit must change exactly one dev catalog entry" >&2; exit 1; }
+            IFS='|' read -r device mod_id <<< "${candidates[0]}"
+            package_path="mods/${mod_id}/dist/${device}.zip"
+          fi
+          test -f "$package_path"
+          echo "mod_id=$mod_id" >> "$GITHUB_OUTPUT"
+          echo "device=$device" >> "$GITHUB_OUTPUT"
+          echo "package_path=$package_path" >> "$GITHUB_OUTPUT"
       - name: Read release version
         id: meta
         env:
-          MOD_ID: "${{ inputs.mod_id }}"
-          DEVICE: "${{ inputs.device }}"
-          PACKAGE_PATH: "${{ inputs.package_path }}"
+          MOD_ID: "${{ steps.resolve.outputs.mod_id }}"
+          DEVICE: "${{ steps.resolve.outputs.device }}"
+          PACKAGE_PATH: "${{ steps.resolve.outputs.package_path }}"
         shell: bash
         run: |
           set -euo pipefail
@@ -51,32 +91,37 @@ jobs:
       - name: Update and sign catalog
         env:
           CATALOG_SIGNING_KEY: "${{ secrets.CATALOG_SIGNING_KEY }}"
-          CATALOG_KEY_ID: "${{ vars.CATALOG_KEY_ID }}"
-        run: >-
-          python tools/publish_mod.py --catalog modloader/catalog/${{ inputs.device }}.json
-          --signature modloader/catalog/${{ inputs.device }}.sig.json
-          --package '${{ steps.meta.outputs.asset }}' --mod-id '${{ inputs.mod_id }}'
-          --device '${{ inputs.device }}'
-          --asset-url 'https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}/${{ steps.meta.outputs.asset }}'
-          --key-id "$CATALOG_KEY_ID" --private-key "$CATALOG_SIGNING_KEY"
+          DEVICE: "${{ steps.resolve.outputs.device }}"
+          MOD_ID: "${{ steps.resolve.outputs.mod_id }}"
+          PACKAGE_PATH: "${{ steps.resolve.outputs.package_path }}"
+          ASSET_URL: "https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}/${{ steps.meta.outputs.asset }}"
+        shell: bash
+        run: |
+          set -euo pipefail
+          key_id="$(jq -r '.keyId' modloader/catalog/trust/prime-unlimited-2026-1.json)"
+          python tools/publish_mod.py \
+            --catalog "modloader/catalog/${DEVICE}.json" \
+            --signature "modloader/catalog/${DEVICE}.sig.json" \
+            --package "$PACKAGE_PATH" --mod-id "$MOD_ID" --device "$DEVICE" \
+            --asset-url "$ASSET_URL" --key-id "$key_id" --private-key "$CATALOG_SIGNING_KEY"
       - name: Create device release
         env:
           GH_TOKEN: "${{ github.token }}"
-          PACKAGE_PATH: "${{ inputs.package_path }}"
+          PACKAGE_PATH: "${{ steps.resolve.outputs.package_path }}"
           RELEASE_TAG: "${{ steps.meta.outputs.tag }}"
           RELEASE_ASSET: "${{ steps.meta.outputs.asset }}"
         shell: bash
         run: |
           set -euo pipefail
           cp "$PACKAGE_PATH" "$RELEASE_ASSET"
-          gh release create "$RELEASE_TAG" "$RELEASE_ASSET" --title '${{ inputs.mod_id }} ${{ steps.meta.outputs.version }} (${{ inputs.device }})' --generate-notes
+          gh release create "$RELEASE_TAG" "$RELEASE_ASSET" --title '${{ steps.resolve.outputs.mod_id }} ${{ steps.meta.outputs.version }} (${{ steps.resolve.outputs.device }})' --generate-notes
       - name: Commit published catalog
         shell: bash
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add 'modloader/catalog/${{ inputs.device }}.json' 'modloader/catalog/${{ inputs.device }}.sig.json'
-          git commit -m 'Publish ${{ inputs.mod_id }} for ${{ inputs.device }}'
+          git add 'modloader/catalog/${{ steps.resolve.outputs.device }}.json' 'modloader/catalog/${{ steps.resolve.outputs.device }}.sig.json'
+          git commit -m 'Publish ${{ steps.resolve.outputs.mod_id }} for ${{ steps.resolve.outputs.device }}'
           git push
 
