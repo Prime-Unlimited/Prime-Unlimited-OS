@@ -30,6 +30,9 @@ class QmlContractTests(unittest.TestCase):
         self.assertIn("Developer preview / not approved", text)
         self.assertIn("SYNC CATALOG", text)
         self.assertIn("updateAvailable", text)
+        self.assertIn('"/api/v1/developer-mode/qr.png"', text)
+        self.assertIn('"#1f8a4c"', text)
+        self.assertNotIn("developerToken", text)
 
     def test_independent_self_updater_contract(self):
         text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")

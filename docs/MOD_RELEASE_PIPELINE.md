@@ -57,14 +57,7 @@ Der Modloader filtert serverseitig.
 - Aus: `/api/v1/mods` enthält keine Development-Mods. `cache`, `stage`, `inspect`, `install` und `update` antworten mit `mod is installable only in developer mode`.
 - An: Development-Mods werden zusätzlich geliefert und in der Oberfläche mit `DEVELOPMENT` gekennzeichnet. Installationsfehler nennen die konkrete Ursache.
 
-Einschalten kann nur ein lokales Token. Die Datei `/data/prime-unlimited/auth/developer.token` wird nicht von der API erzeugt. Einmal auf dem Gerät:
-
-```sh
-umask 077
-openssl rand -hex 32 > /data/prime-unlimited/auth/developer.token
-```
-
-Die Oberfläche fragt dieses Token ab und sendet es als `X-Prime-Developer-Token` zusammen mit dem bestehenden Mutation-Token. Ein Aufruf nur mit dem Mutation-Token oder ganz ohne Token ändert den Modus nicht. Der Zustand liegt in `/data/prime-unlimited/auth/developer.mode` und wird bei jedem Request gelesen.
+Einschalten läuft über den GitHub Device Flow. `DEV MODE` zeigt einen QR-Code für `https://github.com/login/device` und einen kurzen Code. Das Gerät prüft danach, ob das angemeldete Konto Admin von `Prime-Unlimited/Prime-Unlimited-OS` ist. Das GitHub-Token wird nicht gespeichert. Ausschalten bleibt lokal. Der Zustand liegt in `/data/prime-unlimited/auth/developer.mode`. Die Client-ID der OAuth-App ist öffentlich. Das Client-Secret bleibt bei GitHub, und Device Flow muss in der App an sein.
 
 ## 4. Freigabe nach Ready
 

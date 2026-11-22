@@ -82,18 +82,13 @@ func TestDevelopmentModIsHiddenAndNotInstallableUntilAuthorized(t *testing.T) {
 	enable := httptest.NewRequest(http.MethodPost, "/api/v1/developer-mode", strings.NewReader(`{"enabled":true}`))
 	enable.Header.Set("Content-Type", "application/json")
 	enable.Header.Set("Authorization", "Bearer "+handler.authToken)
+	enable.Header.Set("X-Prime-Developer-Token", developerToken)
 	handler.ServeHTTP(unprotected, enable)
 	if unprotected.Code != http.StatusForbidden || handler.developerEnabled() {
-		t.Fatalf("mutation token enabled developer mode: %d %s", unprotected.Code, unprotected.Body.String())
+		t.Fatalf("local token enabled developer mode: %d %s", unprotected.Code, unprotected.Body.String())
 	}
-	authorized := httptest.NewRecorder()
-	enable = httptest.NewRequest(http.MethodPost, "/api/v1/developer-mode", strings.NewReader(`{"enabled":true}`))
-	enable.Header.Set("Content-Type", "application/json")
-	enable.Header.Set("Authorization", "Bearer "+handler.authToken)
-	enable.Header.Set("X-Prime-Developer-Token", developerToken)
-	handler.ServeHTTP(authorized, enable)
-	if authorized.Code != http.StatusOK || !handler.developerEnabled() {
-		t.Fatalf("local developer token was rejected: %d %s", authorized.Code, authorized.Body.String())
+	if err := handler.setDeveloperEnabled(true); err != nil {
+		t.Fatal(err)
 	}
 	list = httptest.NewRecorder()
 	handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/v1/mods", nil))
