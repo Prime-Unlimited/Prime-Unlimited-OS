@@ -23,7 +23,7 @@ Endpoints:
 The service checks automatically at startup. Mutation endpoints use the same
 device-owned bearer token as the main runtime; it is never stored in GitHub.
 
-Current signed channel: Modloader `0.2.0` revision `11`. Revision 8 extended
+Current signed channel: Modloader `0.2.0` revision `12`. Revision 8 extended
 the signed update and rollback boundary to the QRC-backed Control Center tile.
 The manifest pins the
 immutable GitHub assets for JC11S and JP24 by asset ID, byte size and SHA-256.
