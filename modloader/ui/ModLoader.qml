@@ -15,6 +15,7 @@ Rectangle {
     property bool busy: false
     property bool updaterBusy: false
     property bool developerMode: false
+    property string publishingId: ""
     property bool showUpdatePrompt: false
     property var selfUpdate: ({"installed":{"version":"?","revision":0},"available":{"version":"?","revision":0},"updateAvailable":false,"rollbackAvailable":false})
     property int selectedTab: 0
@@ -22,6 +23,30 @@ Rectangle {
     property string statusText: "Connecting..."
     property string deviceText: "Device not detected"
     signal closeRequested()
+
+    function modStatus(item) { return item.status === "dev" ? "dev" : "published" }
+
+    function activeTransaction(id) {
+        for (var index = 0; index < transactions.length; ++index) {
+            var item = transactions[index]
+            if (item.modId === id && item.status !== "completed" && item.status !== "failed") return item
+        }
+        return null
+    }
+
+    function transactionPercent(item) {
+        if (!item) return 0
+        if (item.progress !== undefined) return Math.max(0, Math.min(100, Number(item.progress)))
+        if (item.percent !== undefined) return Math.max(0, Math.min(100, Number(item.percent)))
+        return 0
+    }
+
+    function progressLabel(item) {
+        if (!item) return ""
+        var percent = transactionPercent(item)
+        if (item.stage === "download" || item.stage === "cache") return "Download " + percent + "%"
+        return "Installation " + percent + "%"
+    }
 
     function refresh() {
         var request = new XMLHttpRequest()
@@ -67,6 +92,11 @@ Rectangle {
         getJson("/api/v1/transactions", function(payload) { transactions = payload.transactions || [] })
         getJson("/api/v1/safety", function(payload) { safety = payload }, true)
         refreshSelfUpdate()
+    }
+
+    Timer {
+        interval: 750; repeat: true; running: busy || updaterBusy || publishingId !== ""
+        onTriggered: refreshState()
     }
 
     function refreshSelfUpdate(done) {
@@ -203,12 +233,24 @@ Rectangle {
         mutation("catalog/sync", "", "", function() { refresh() })
     }
 
+    function publishMod(id) {
+        if (publishingId !== "" || busy) return
+        publishingId = id
+        statusText = "Publishing..."
+        mutation("publish", id, "", function(ok) {
+            publishingId = ""
+            if (ok) { statusText = "Mod published"; refresh() }
+        })
+    }
+
     function visibleMods() {
         if (selectedTab === 0) {
             var available = []
             for (var index = 0; index < mods.length; ++index) {
                 var approved = isApprovedForDevice(mods[index])
-                if ((approved && mods[index].compatible) || (developerMode && mods[index].deviceEligible))
+                var status = modStatus(mods[index])
+                if ((status === "published" && approved && mods[index].compatible) ||
+                        (status === "dev" && developerMode && mods[index].deviceEligible))
                     available.push(mods[index])
             }
             return available
@@ -295,6 +337,15 @@ Rectangle {
         color: "#aab0b8"
         font.pixelSize: 17
     }
+    Rectangle {
+        x: 440; y: 108; width: 340; height: 8; radius: 4
+        visible: updaterBusy
+        color: "#33373c"
+        Rectangle {
+            height: parent.height; radius: 4; color: "#ff541c"
+            width: parent.width * Math.max(0, Math.min(100, Number(selfUpdate.progress || 0))) / 100
+        }
+    }
     Text {
         id: status
         x: 20; y: 105
@@ -334,8 +385,9 @@ Rectangle {
             Repeater {
                 model: visibleMods()
                 delegate: Rectangle {
+                    property var currentTransaction: activeTransaction(modelData.id)
                     width: entries.width
-                    height: 132
+                    height: 148
                     radius: 12
                     color: "#22262b"
                     Text {
@@ -347,7 +399,9 @@ Rectangle {
                     }
                     Text {
                         x: 16; y: 48
-                        text: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined
+                        text: currentTransaction ? progressLabel(currentTransaction)
+                            : (modStatus(modelData) === "dev" ? "DEV / only visible in DEV MODE"
+                            : (safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined
                             ? "Quarantined after " + safety.mods[modelData.id].failureCount + " failures"
                             : (modelData.updateAvailable
                                 ? "Update available: " + modelData.updateReason
@@ -355,7 +409,7 @@ Rectangle {
                                     ? "Official / compatible"
                                     : (modelData.deviceEligible && !isApprovedForDevice(modelData)
                                         ? "Developer preview / not approved"
-                                        : "Not compatible with this device")))
+                                        : "Not compatible with this device")))))
                         color: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined ? "#ff9b78" : (modelData.compatible ? "#73d6a3" : "#ff9b78")
                         font.pixelSize: 16
                     }
@@ -375,6 +429,13 @@ Rectangle {
                         width: 104; height: 48; radius: 9; x: parent.width - 334; y: 19; color: "#d77921"
                         Text { anchors.centerIn: parent; text: "UPDATE"; color: "white"; font.bold: true }
                         MouseArea { anchors.fill: parent; enabled: !busy && modelData.compatible; onClicked: updateVerified(modelData.id) }
+                    }
+                    Rectangle {
+                        visible: developerMode && modStatus(modelData) === "dev"
+                        width: 104; height: 48; radius: 9; x: parent.width - 444; y: 19
+                        color: publishingId === modelData.id ? "#6b512e" : "#d77921"
+                        Text { anchors.centerIn: parent; text: publishingId === modelData.id ? "PUBLISHING..." : "PUBLISH"; color: "white"; font.pixelSize: 10; font.bold: true }
+                        MouseArea { anchors.fill: parent; enabled: publishingId === "" && !busy; onClicked: publishMod(modelData.id) }
                     }
                     Rectangle {
                         width: 104; height: 48; radius: 9; x: parent.width - (present ? 224 : 116); y: 19
@@ -401,6 +462,15 @@ Rectangle {
                             width: 104; height: 28; radius: 7; color: "#5a456b"
                             Text { anchors.centerIn: parent; text: "ROLLBACK"; color: "white"; font.bold: true }
                             MouseArea { anchors.fill: parent; enabled: installed[modelData.id] && !installed[modelData.id].enabled && !busy; onClicked: mutation("rollback", modelData.id, "", function() { refresh() }) }
+                        }
+                    }
+                    Rectangle {
+                        visible: currentTransaction !== null
+                        x: 16; y: 132; width: parent.width - 32; height: 7; radius: 3
+                        color: "#33373c"
+                        Rectangle {
+                            height: parent.height; radius: 3; color: "#ff541c"
+                            width: parent.width * transactionPercent(currentTransaction) / 100
                         }
                     }
                 }
@@ -474,3 +544,4 @@ Rectangle {
         }
     }
 }
+
