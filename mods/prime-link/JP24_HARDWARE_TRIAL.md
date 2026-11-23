@@ -21,5 +21,17 @@ and Engine/physical controls, disable, and remove the test package. Record
 screen evidence and the raw translator types/units before interpreting
 position, length or play-state values.
 
+On 2026-11-23, a local trial catalog was prepared by appending Prime Link to
+the device's four active mod records. Its detached signature was independently
+verified against the device's public trust key. The package was also built and
+validated (JP24: 1763 bytes, SHA-256
+`a125178120f237bb5eda0b005e84576470eb3d76300b2349602bc24ebf869536`).
+These are temporary local artifacts, not published catalog or release assets.
+The active Modloader startup script configures online catalog sync, which can
+replace a locally staged test catalog during runtime restart. A live trial
+therefore needs a controlled catalog-source change or an immutable published
+test catalog, with the current catalog/start script restored afterward. The
+running device was not changed during this preparation.
+
 Until those steps pass, the overlay remains build-verified only. It must not
 be described as a working device-to-device link or an audio path.
