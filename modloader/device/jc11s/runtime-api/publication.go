@@ -195,17 +195,6 @@ func (s *server) requireInstallable(w http.ResponseWriter, id string) (mod, bool
 	trusted := s.catalog.Trusted
 	catalogError := s.catalog.Error
 	schemaVersion := s.catalog.Catalog.SchemaVersion
-	var found mod
-	var ok bool
-	if status == "valid" && trusted {
-		for _, item := range s.catalog.Catalog.Mods {
-			if item.ID == id {
-				found = item
-				ok = true
-				break
-			}
-		}
-	}
 	s.catalogMu.RUnlock()
 	if status != "valid" {
 		message := catalogError
@@ -218,6 +207,12 @@ func (s *server) requireInstallable(w http.ResponseWriter, id string) (mod, bool
 	if !trusted {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "compatible catalog mod not found"})
 		return mod{}, false
+	}
+	found, ok := s.lookupMod(id)
+	if !ok && !s.developerEnabled() {
+		// Preserve the explicit authorization error for a known development
+		// release without exposing it in the normal catalog view.
+		found, ok = s.lookupCatalogCandidate(id, true)
 	}
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "compatible catalog mod not found"})

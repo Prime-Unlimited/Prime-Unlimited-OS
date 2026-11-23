@@ -109,6 +109,60 @@ func TestReadyModStaysVisibleWithoutDeveloperMode(t *testing.T) {
 	}
 }
 
+func TestReadyAndDevelopmentVersionsShareStableIdentity(t *testing.T) {
+	ready := validV2Mod()
+	ready.Version = "1.1.2"
+	ready.Revision = 2
+	ready.Status = "ready"
+	ready.Release = &releaseInfo{HardwareVerification: "recorded-separately", ArtifactSHA256: ready.SHA256}
+	development := ready
+	development.Version = "1.1.3"
+	development.Revision = 1
+	development.Status = "development"
+	development.Release = &releaseInfo{HardwareVerification: "not-performed", ArtifactSHA256: development.SHA256}
+
+	document := `{"schemaVersion":2,"catalogId":"prime-unlimited-test","mods":` + mustJSON(t, []mod{ready, development}) + `,"libraries":[]}`
+	state := parseCatalog([]byte(document))
+	if state.Status != "valid" {
+		t.Fatalf("ready and development channels rejected: %#v", state)
+	}
+	handler, _ := developerFixture(t, ready)
+	handler.catalog = state
+	handler.catalog.Trusted = true
+
+	list := httptest.NewRecorder()
+	handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/v1/mods", nil))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"version":"1.1.2"`) || strings.Contains(list.Body.String(), `"version":"1.1.3"`) {
+		t.Fatalf("normal mode did not select ready release: %d %s", list.Code, list.Body.String())
+	}
+	if strings.Count(list.Body.String(), `"id":"`+ready.ID+`"`) != 1 {
+		t.Fatalf("normal mode rendered duplicate cards: %s", list.Body.String())
+	}
+
+	if err := handler.setDeveloperEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	list = httptest.NewRecorder()
+	handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/v1/mods", nil))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"version":"1.1.3"`) || !strings.Contains(list.Body.String(), `"status":"development"`) {
+		t.Fatalf("developer mode did not select development release: %d %s", list.Code, list.Body.String())
+	}
+	if strings.Count(list.Body.String(), `"id":"`+ready.ID+`"`) != 1 {
+		t.Fatalf("developer mode rendered duplicate cards: %s", list.Body.String())
+	}
+}
+
+func TestCatalogRejectsDuplicateIdentityWithinSameChannel(t *testing.T) {
+	first := validV2Mod()
+	second := first
+	second.Version = "9.9.9"
+	document := `{"schemaVersion":2,"catalogId":"prime-unlimited-test","mods":` + mustJSON(t, []mod{first, second}) + `,"libraries":[]}`
+	state := parseCatalog([]byte(document))
+	if state.Status != "invalid" || !strings.Contains(state.Error, "duplicate mod id") {
+		t.Fatalf("same-channel duplicate accepted: %#v", state)
+	}
+}
+
 func TestCacheReportsConcreteDownloadFailures(t *testing.T) {
 	item := validV2Mod()
 	handler, _ := developerFixture(t, item)

@@ -254,17 +254,55 @@ type cacheResult struct {
 }
 
 func (s *server) lookupMod(id string) (mod, bool) {
+	return s.lookupCatalogCandidate(id, s.developerEnabled())
+}
+
+func (s *server) lookupCatalogCandidate(id string, developer bool) (mod, bool) {
 	s.catalogMu.RLock()
 	defer s.catalogMu.RUnlock()
 	if s.catalog.Status != "valid" || !s.catalog.Trusted {
 		return mod{}, false
 	}
+	var selected mod
+	found := false
 	for _, item := range s.catalog.Catalog.Mods {
-		if item.ID == id {
-			return item, true
+		if item.ID != id || (item.publicationStatus() == "development" && !developer) {
+			continue
+		}
+		if !found || preferCatalogCandidate(item, selected, developer) {
+			selected, found = item, true
 		}
 	}
-	return mod{}, false
+	return selected, found
+}
+
+func preferCatalogCandidate(candidate, current mod, developer bool) bool {
+	candidateDev := candidate.publicationStatus() == "development"
+	currentDev := current.publicationStatus() == "development"
+	if developer && candidateDev != currentDev {
+		return candidateDev
+	}
+	comparison := compareCatalogVersions(current.Version, candidate.Version)
+	return comparison < 0 || (comparison == 0 && current.Revision < candidate.Revision)
+}
+
+func (s *server) visibleCatalogMods(developer bool) []mod {
+	selected := make([]mod, 0, len(s.catalog.Catalog.Mods))
+	indexes := map[string]int{}
+	for _, item := range s.catalog.Catalog.Mods {
+		if item.publicationStatus() == "development" && !developer {
+			continue
+		}
+		if index, ok := indexes[item.ID]; ok {
+			if preferCatalogCandidate(item, selected[index], developer) {
+				selected[index] = item
+			}
+			continue
+		}
+		indexes[item.ID] = len(selected)
+		selected = append(selected, item)
+	}
+	return selected
 }
 
 func (s *server) catalogMod(id string) (mod, bool) {
@@ -883,11 +921,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			registry = emptyRegistry()
 		}
 		developerMode := s.developerEnabled()
-		mods := make([]modResponse, 0, len(s.catalog.Catalog.Mods))
-		for _, item := range s.catalog.Catalog.Mods {
-			if item.publicationStatus() == "development" && !developerMode {
-				continue
-			}
+		visible := s.visibleCatalogMods(developerMode)
+		mods := make([]modResponse, 0, len(visible))
+		for _, item := range visible {
 			response := modResponse{mod: item, Compatible: s.compatible(item), DeviceEligible: contains(item.Models, s.model)}
 			if installed, exists := registry.Mods[item.ID]; exists {
 				response.InstalledVersion, response.InstalledRevision, response.InstalledSHA256 = installed.Version, installed.Revision, installed.PackageSHA256
@@ -1228,7 +1264,7 @@ func parseCatalog(data []byte) catalogState {
 			return catalogState{Status: "invalid", Error: "libraries must be an array with at most 2048 entries"}
 		}
 	}
-	ids := make(map[string]bool, len(result.Mods))
+	ids := make(map[string]map[string]bool, len(result.Mods))
 	for index, item := range result.Mods {
 		var err error
 		if result.SchemaVersion == 1 {
@@ -1239,10 +1275,14 @@ func parseCatalog(data []byte) catalogState {
 		if err != nil {
 			return catalogState{Status: "invalid", Error: fmt.Sprintf("mods[%d]: %v", index, err)}
 		}
-		if ids[item.ID] {
-			return catalogState{Status: "invalid", Error: fmt.Sprintf("duplicate mod id %q", item.ID)}
+		status := item.publicationStatus()
+		if ids[item.ID] == nil {
+			ids[item.ID] = map[string]bool{}
 		}
-		ids[item.ID] = true
+		if ids[item.ID][status] {
+			return catalogState{Status: "invalid", Error: fmt.Sprintf("duplicate mod id %q in %s channel", item.ID, status)}
+		}
+		ids[item.ID][status] = true
 	}
 	libraryIDs := make(map[string]bool, len(result.Libraries))
 	for index, item := range result.Libraries {

@@ -131,6 +131,18 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(catalogs["jp24"]["mods"][0]["architecture"], "aarch64")
             self.assertTrue(catalogs["jc11s"]["mods"][0]["downloadUrl"].endswith("/assets/1000"))
 
+    def test_ready_and_newer_development_release_share_stable_id(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            _mod(root, "ready", "demo", "1.1.2", ("jc11s",))
+            _mod(root, "development", "demo", "1.1.3", ("jc11s",))
+            mods = build_catalogs(root)["jc11s"]["mods"]
+            self.assertEqual([(item["id"], item["version"], item.get("status", "ready")) for item in mods], [
+                ("demo-jc11s", "1.1.2", "ready"),
+                ("demo-jc11s", "1.1.3", "development"),
+            ])
+
     def test_ready_mod_is_visible_without_changing_identity(self):
         import tempfile
         with tempfile.TemporaryDirectory() as raw:

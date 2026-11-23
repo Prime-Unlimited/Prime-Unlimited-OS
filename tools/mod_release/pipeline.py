@@ -57,6 +57,19 @@ class ModReleaseError(Exception):
     """A validation or publication rule failed. The catalog is left unchanged."""
 
 
+def _version_key(value: str):
+    main, separator, prerelease = value.partition("-")
+    token = lambda part: (1, int(part)) if part.isdigit() else (0, part.lower())
+    main_key = tuple(token(part) for part in re.split(r"[._+]", main))
+    prerelease_key = tuple(token(part) for part in re.split(r"[._+-]", prerelease)) if separator else ()
+    return main_key, 1 if not separator else 0, prerelease_key
+
+
+def _compare_versions(left: str, right: str) -> int:
+    a, b = _version_key(left), _version_key(right)
+    return (a > b) - (a < b)
+
+
 def asset_url(asset_id: int) -> str:
     if not isinstance(asset_id, int) or isinstance(asset_id, bool) or asset_id < 1:
         raise ModReleaseError("GitHub asset id is missing")
@@ -422,39 +435,38 @@ def merge_device_catalog(previous: dict | None, entries: list[dict], catalog_id:
         if previous.get("schemaVersion") != 2 or previous.get("catalogId") != catalog_id:
             raise ModReleaseError(f"refusing to rewrite an unrelated {catalog_id} catalog")
         previous_mods = previous.get("mods") or []
-    by_id = {}
+    # Keep at most one candidate per publication channel. A ready release and
+    # its newer development successor intentionally share the stable mod id;
+    # the device selects ready normally and development only in Developer Mode.
+    by_key = {}
     for entry in entries:
-        if entry["id"] in by_id:
-            raise ModReleaseError(f"duplicate mod id {entry['id']}")
-        by_id[entry["id"]] = entry
-    merged = []
-    seen = set()
-    for old in previous_mods:
-        new = by_id.get(old.get("id"))
-        if new is None:
-            merged.append(old)
-            seen.add(old.get("id"))
+        key = (entry["id"], _previous_status(entry))
+        current = by_key.get(key)
+        if current is None:
+            by_key[key] = entry
             continue
-        if old.get("version") == new["version"] and old.get("sha256") != new["sha256"]:
-            raise ModReleaseError(f"refusing to overwrite published artifact {old.get('id')} {old.get('version')}")
-        if old.get("version") == new["version"] and old.get("size") != new["size"]:
-            raise ModReleaseError(f"refusing to overwrite published artifact size {old.get('id')}")
-        if not _url_change_allowed(old.get("downloadUrl", ""), new["downloadUrl"]):
-            if old.get("version") == new["version"]:
+        comparison = _compare_versions(current["version"], entry["version"])
+        if comparison < 0 or (comparison == 0 and int(current.get("revision") or 0) < int(entry.get("revision") or 0)):
+            by_key[key] = entry
+        elif comparison == 0 and current.get("sha256") != entry.get("sha256"):
+            raise ModReleaseError(f"duplicate mod id {entry['id']} has conflicting artifacts")
+    represented = {entry["id"] for entry in by_key.values()}
+    merged = []
+    for old in previous_mods:
+        if old.get("id") not in represented:
+            merged.append(old)
+            continue
+        for new in by_key.values():
+            if old.get("id") != new["id"] or old.get("version") != new["version"]:
+                continue
+            if old.get("sha256") != new["sha256"] or old.get("size") != new["size"]:
+                raise ModReleaseError(f"refusing to overwrite published artifact {old.get('id')} {old.get('version')}")
+            if not _url_change_allowed(old.get("downloadUrl", ""), new["downloadUrl"]):
                 raise ModReleaseError(f"download URL for {old.get('id')} is immutable")
-        if _previous_status(old) == "ready" and _previous_status(new) != "ready":
-            raise ModReleaseError(f"refusing to return {old.get('id')} to development")
-        if old.get("version") == new["version"] and int(old.get("revision") or 0) != int(new["revision"]):
-            raise ModReleaseError(f"revision for {old.get('id')} {old.get('version')} is immutable")
-        merged.append(new)
-        seen.add(new["id"])
-    for entry in entries:
-        if entry["id"] not in seen:
-            merged.append(entry)
-            seen.add(entry["id"])
-    if len(seen) != len(merged):
-        raise ModReleaseError("duplicate catalog entries")
-    merged.sort(key=lambda item: item["id"])
+            if int(old.get("revision") or 0) != int(new["revision"]):
+                raise ModReleaseError(f"revision for {old.get('id')} {old.get('version')} is immutable")
+    merged.extend(by_key.values())
+    merged.sort(key=lambda item: (item["id"], 0 if _previous_status(item) == "ready" else 1))
     libraries = previous.get("libraries") if previous else []
     return {"schemaVersion": 2, "catalogId": catalog_id, "mods": merged, "libraries": libraries or []}
 

@@ -156,8 +156,9 @@ func (s *server) resolveCatalogMod(id string) (resolutionResult, error) {
 	if s.catalog.Status != "valid" || !s.catalog.Trusted || s.catalog.Catalog.SchemaVersion != 2 {
 		return result, errors.New("trusted v2 catalog required")
 	}
-	mods := make(map[string]mod, len(s.catalog.Catalog.Mods))
-	for _, item := range s.catalog.Catalog.Mods {
+	visible := s.visibleCatalogMods(s.developerEnabled())
+	mods := make(map[string]mod, len(visible))
+	for _, item := range visible {
 		mods[item.ID] = item
 	}
 	libraries := make(map[string]library, len(s.catalog.Catalog.Libraries))
