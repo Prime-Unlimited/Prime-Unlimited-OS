@@ -223,16 +223,17 @@ func readEngineTrackPaths(db *sql.DB) (map[int64]string, error) {
 
 func normalizeEngineTrackPath(value string) (string, bool) {
 	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
-	value = strings.TrimLeft(value, "/")
-	if value == "" || strings.Contains(value, ":") {
+	// Track.path is relative to Engine Library. Desktop libraries can point
+	// one level up to a music folder at the volume root. Check containment
+	// after resolving that base, rather than rejecting every parent segment.
+	if value == "" || strings.Contains(value, ":") || strings.HasPrefix(value, "/") {
 		return "", false
 	}
-	clean := filepath.Clean(filepath.FromSlash(value))
+	clean := filepath.Clean(filepath.Join("Engine Library", filepath.FromSlash(value)))
 	if !safeRelative(clean) {
 		return "", false
 	}
-	// Database2 Track.path is relative to the Engine Library directory.
-	return filepath.ToSlash(filepath.Join("Engine Library", clean)), true
+	return filepath.ToSlash(clean), true
 }
 
 func orderEngineEntities(entities []engineEntityRow) []engineEntityRow {

@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	usbcopy "prime-unlimited.usb-copy/worker"
+	"testing"
+)
 
 func TestLiveAdmissionNeverFallsBackToOfflineRestart(t *testing.T) {
 	for _, tc := range []struct {
@@ -37,5 +40,25 @@ func TestLivePreviewRejectsUnverifiedDeviceProfile(t *testing.T) {
 	s.setMediaPreviewMode(&p)
 	if p.Mode != "live" || p.CommitAvailable {
 		t.Fatal("unverified profile silently used offline mode")
+	}
+}
+
+func TestAdditionalAudioContainersRequireVerifiedLiveProfile(t *testing.T) {
+	s := &server{mediaImportWrites: true, mediaImportLive: true, model: "JP24", firmware: "5.3.0", architecture: "aarch64"}
+	for _, ext := range []string{"mp3", "WAV", "flac", "aiff"} {
+		p := usbcopy.ImportPlan{Tracks: []usbcopy.PlannedTrack{{SourceRelative: "song." + ext}}}
+		if s.mediaSupportedPlan(p) != (ext != "aiff") {
+			t.Fatal("live format gate", ext)
+		}
+		s.mediaImportLive = false
+		if s.mediaSupportedPlan(p) != (ext == "mp3") {
+			t.Fatal("offline format gate expanded", ext)
+		}
+		s.mediaImportLive = true
+		s.model = "JC11S"
+		if s.mediaSupportedPlan(p) {
+			t.Fatal("unverified profile accepted", ext)
+		}
+		s.model = "JP24"
 	}
 }

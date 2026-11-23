@@ -130,6 +130,9 @@ func BuildImportPlan(sourceRoot, destinationMusicRoot, volumeLabel string, copie
 				missing++
 			}
 		}
+		if missing > 0 {
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf("source playlist has %d unavailable track references", missing))
+		}
 		if len(members) == 0 {
 			continue
 		}

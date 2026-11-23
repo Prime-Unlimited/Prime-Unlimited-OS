@@ -129,7 +129,7 @@ func validLiveCommand(c LiveCommand) bool {
 	}
 	seen := map[string]bool{}
 	for _, p := range c.Paths {
-		if !safeRelative(p) || filepath.ToSlash(filepath.Clean(p)) != p || !strings.HasPrefix(p, "Music/") || filepath.Ext(strings.ToLower(p)) != ".mp3" || seen[p] {
+		if !safeRelative(p) || filepath.ToSlash(filepath.Clean(p)) != p || !strings.HasPrefix(p, "Music/") || !LiveAudioExtension(p) || seen[p] {
 			return false
 		}
 		seen[p] = true

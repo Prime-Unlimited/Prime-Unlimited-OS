@@ -60,3 +60,17 @@ func TestEngineTrackIdentityRejectsConflictingAliases(t *testing.T) {
 		t.Fatal("conflicting local/origin identity accepted")
 	}
 }
+
+func TestEngineTrackPathsResolveRelativeToLibraryWithinVolume(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"Music/one.mp3", "Engine Library/Music/one.mp3"},
+		{"../KlangKunst Playlist/Eli Brown - Believe.mp3", "KlangKunst Playlist/Eli Brown - Believe.mp3"},
+		{`..\Lukas\one.mp3`, "Lukas/one.mp3"},
+		{"../../outside.mp3", ""}, {"/outside.mp3", ""}, {"C:/outside.mp3", ""},
+	} {
+		got, ok := normalizeEngineTrackPath(tc.raw)
+		if ok != (tc.want != "") || got != tc.want {
+			t.Errorf("%q: got %q,%v; want %q", tc.raw, got, ok, tc.want)
+		}
+	}
+}

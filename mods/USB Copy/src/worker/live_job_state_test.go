@@ -117,3 +117,64 @@ func TestJobCannotSwitchBetweenOfflineAndLive(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifiedNoEffectsReviewClosesWithoutResumingActions(t *testing.T) {
+	s := jobFixture(t)
+	j, e := s.Save(ImportJobStatus{ID: strings.Repeat("d", 64), Mode: "live", Phase: JobQueued, FilesTotal: 3, BytesTotal: 50})
+	if e != nil {
+		t.Fatal(e)
+	}
+	j.Phase = JobInterrupted
+	j.EngineRestored = true
+	j, e = s.Save(j)
+	if e != nil {
+		t.Fatal(e)
+	}
+	bad := j
+	bad.Phase = JobFailed
+	if _, e = s.Save(bad); e == nil {
+		t.Fatal("unreviewed terminal rewrite accepted")
+	}
+	if _, e = s.CloseVerifiedUnstartedLiveFailure(j.ID, j.Revision, "invalid"); e == nil {
+		t.Fatal("missing evidence accepted")
+	}
+	closed, e := s.CloseVerifiedUnstartedLiveFailure(j.ID, j.Revision, strings.Repeat("e", 64))
+	if e != nil || closed.Phase != JobFailed || !closed.Acknowledged || closed.FilesDone != 0 || closed.BytesDone != 0 {
+		t.Fatal("bounded no-effects closure failed", closed, e)
+	}
+	if _, e = s.CloseVerifiedUnstartedLiveFailure(closed.ID, closed.Revision, strings.Repeat("f", 64)); e == nil {
+		t.Fatal("repeated closure accepted")
+	}
+	closed.Phase = JobCopying
+	if _, e = s.Save(closed); e == nil {
+		t.Fatal("closed job resumed copying")
+	}
+}
+func TestNoEffectsReviewRejectsAnyPublishedProgress(t *testing.T) {
+	for _, progress := range []struct {
+		files int
+		bytes int64
+	}{{1, 0}, {0, 1}} {
+		s := jobFixture(t)
+		j, e := s.Save(ImportJobStatus{ID: strings.Repeat("a", 64), Mode: "live", Phase: JobQueued, FilesTotal: 3, BytesTotal: 50})
+		if e != nil {
+			t.Fatal(e)
+		}
+		j.Phase = JobCopying
+		j, e = s.Save(j)
+		if e != nil {
+			t.Fatal(e)
+		}
+		j.Phase = JobInterrupted
+		j.EngineRestored = true
+		j.FilesDone = progress.files
+		j.BytesDone = progress.bytes
+		j, e = s.Save(j)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, e = s.CloseVerifiedUnstartedLiveFailure(j.ID, j.Revision, strings.Repeat("e", 64)); e == nil {
+			t.Fatal("progressful job accepted as no-effects")
+		}
+	}
+}

@@ -29,3 +29,11 @@ The mode-aware UI 0.1.4-dev.1 was subsequently installed through signed local ca
 - Validate other hardware separately. JC11S is a compile target only; JP24 evidence does not establish Prime 4 compatibility.
 
 Live mode remains explicitly experimental and is not enabled by default. No production catalog release has been made. SD cards and USB source files were not modified in these trials.
+
+## Larger mixed-source trial, in progress
+
+The owner confirmed normal use after declining and successful device restart. A subsequent 690-file source contains 635 MP3, 48 WAV and 7 FLAC files; all WAV/FLAC container checks passed. Preview identified 539 new files, 141 existing files and 10 source aliases. No full mixed-format import success is claimed yet.
+
+The first attempt stopped before session publication, with zero copied files/bytes and no native or playlist commands. An explicit bounded root review under both leases closed that failed job without replaying it. The MP3 reader was corrected to exclude validated APE trailers. The owner separately approved two independently decoded files with partial final MPEG packets, scoped to their exact bytes and source digest. A new normal preview/import trial is underway.
+
+The source database has 15 physical track records and a playlist with 372 unresolved references. The planner now reports unavailable references rather than fabricating members. Library-relative paths that resolve within the source volume are supported; escaping the volume remains forbidden.

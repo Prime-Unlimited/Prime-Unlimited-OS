@@ -19,10 +19,13 @@ func TestLivePlanConvertsActualCopyPlanPlaylistDestinations(t *testing.T) {
 	if e = os.WriteFile(filepath.Join(source, "new.mp3"), []byte("song"), 0600); e != nil {
 		t.Fatal(e)
 	}
-	snapshot := Snapshot{Tracks: []Track{{RelativePath: "new.mp3", Bytes: 4}}, Playlists: []Playlist{{Name: "USB list", Tracks: []string{"new.mp3"}}}}
+	snapshot := Snapshot{Tracks: []Track{{RelativePath: "new.mp3", Bytes: 4}}, Playlists: []Playlist{{Name: "USB list", Tracks: []string{"new.mp3"}, Missing: 3}}}
 	p, e := BuildImportPlan(source, dest, "USB", time.Now(), snapshot, nil)
 	if e != nil {
 		t.Fatal(e)
+	}
+	if len(p.Warnings) != 1 || p.Warnings[0] != "source playlist has 3 unavailable track references" || p.SourcePlaylists[0].Missing != 3 {
+		t.Fatal("unavailable source references must be reported without invented members")
 	}
 	if p.CopyPlaylist.Tracks[0] == "new.mp3" {
 		t.Fatal("fixture no longer exercises destination mapping")

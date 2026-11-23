@@ -37,6 +37,23 @@ func mediaMP3Plan(plan usbcopy.ImportPlan) bool {
 	}
 	return len(plan.Tracks) > 0
 }
+
+// The offline SQL writer remains MP3-only. Additional containers use Engine's
+// native registration exclusively, behind the verified live profile gate.
+func (s *server) mediaSupportedPlan(plan usbcopy.ImportPlan) bool {
+	if !s.mediaImportLive {
+		return mediaMP3Plan(plan)
+	}
+	if !s.mediaLiveAvailable() || len(plan.Tracks) == 0 {
+		return false
+	}
+	for _, t := range plan.Tracks {
+		if !usbcopy.LiveAudioExtension(t.SourceRelative) {
+			return false
+		}
+	}
+	return true
+}
 func mediaJobRequestsRoot(root string) (string, error) {
 	if _, e := usbcopy.OpenJobStore(filepath.Join(root, "media-jobs")); e != nil {
 		return "", e
@@ -213,7 +230,7 @@ func (s *server) handleMediaJobStart(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var state mediaPreviewState
-	if e = readMediaPreview(input.EventID, &state); e != nil || state.EventID != input.EventID || time.Since(state.CreatedAt) > mediaPreviewLifetime || !s.hasPendingMediaPreview(input.EventID) || !mediaMP3Plan(state.Plan) {
+	if e = readMediaPreview(input.EventID, &state); e != nil || state.EventID != input.EventID || time.Since(state.CreatedAt) > mediaPreviewLifetime || !s.hasPendingMediaPreview(input.EventID) || !s.mediaSupportedPlan(state.Plan) {
 		writeJSON(w, 409, map[string]string{"error": "valid supported preview required"})
 		return
 	}

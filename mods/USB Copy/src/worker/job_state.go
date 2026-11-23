@@ -199,7 +199,7 @@ func (s *JobStore) Read(id string) (ImportJobStatus, error) {
 // Save uses a revision check and a per-job OS lock across the API and worker.
 // Successful return means the atomic record and its directory were synced.
 func (s *JobStore) Save(next ImportJobStatus) (ImportJobStatus, error) {
-	return s.save(next, "")
+	return s.save(next, "", "")
 }
 
 // BeginVerifiedLiveFinalization is for an explicitly reviewed root supervisor,
@@ -220,10 +220,30 @@ func (s *JobStore) BeginVerifiedLiveFinalization(id string, revision uint64, evi
 	j.Phase = JobCommitting
 	j.Acknowledged = false
 	j.ErrorCode = ""
-	return s.save(j, evidenceSHA)
+	return s.save(j, evidenceSHA, "finalization")
 }
 
-func (s *JobStore) save(next ImportJobStatus, reviewEvidence string) (ImportJobStatus, error) {
+// CloseVerifiedUnstartedLiveFailure is an explicit root review, not recovery.
+// The caller holds both leases and proves that session/native/copy work never
+// began. It only closes the failed job; it cannot resume or repeat its actions.
+func (s *JobStore) CloseVerifiedUnstartedLiveFailure(id string, revision uint64, evidenceSHA string) (ImportJobStatus, error) {
+	if !validJobStatusID(evidenceSHA) {
+		return ImportJobStatus{}, errors.New("verified no-effects evidence required")
+	}
+	j, e := s.Read(id)
+	if e != nil {
+		return j, e
+	}
+	if j.Revision != revision {
+		return j, errors.New("review revision changed")
+	}
+	j.Phase = JobFailed
+	j.Acknowledged = true
+	j.ErrorCode = "live_preflight_failed"
+	return s.save(j, evidenceSHA, "no_effects")
+}
+
+func (s *JobStore) save(next ImportJobStatus, reviewEvidence, reviewKind string) (ImportJobStatus, error) {
 	if !validJobStatusID(next.ID) || !validJobProgress(next) {
 		return next, errors.New("invalid job status")
 	}
@@ -245,7 +265,9 @@ func (s *JobStore) save(next ImportJobStatus, reviewEvidence string) (ImportJobS
 	} else if e != nil {
 		return next, e
 	} else {
-		review := reviewEvidence != "" && previous.Mode == "live" && next.Mode == "live" && previous.Phase == JobInterrupted && next.Phase == JobCommitting && previous.EngineRestored && previous.FilesDone == previous.FilesTotal && previous.BytesDone == previous.BytesTotal && !previous.ResultAvailable && !next.ResultAvailable
+		reviewFinalization := reviewKind == "finalization" && reviewEvidence != "" && previous.Mode == "live" && next.Mode == "live" && previous.Phase == JobInterrupted && next.Phase == JobCommitting && previous.EngineRestored && previous.FilesDone == previous.FilesTotal && previous.BytesDone == previous.BytesTotal && !previous.ResultAvailable && !next.ResultAvailable
+		reviewNoEffects := reviewKind == "no_effects" && reviewEvidence != "" && previous.Mode == "live" && next.Mode == "live" && previous.Phase == JobInterrupted && next.Phase == JobFailed && previous.EngineRestored && previous.FilesDone == 0 && previous.BytesDone == 0 && !previous.ResultAvailable && !next.ResultAvailable && next.Acknowledged && next.ErrorCode == "live_preflight_failed"
+		review := reviewFinalization || reviewNoEffects
 		if reviewEvidence != "" && !review {
 			return next, errors.New("job is not eligible for reviewed finalization")
 		}

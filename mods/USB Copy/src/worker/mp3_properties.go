@@ -56,16 +56,10 @@ func ReadMP3Properties(ctx context.Context, root, relative string) (result MP3Pr
 	if e != nil || !before.Mode().IsRegular() {
 		return result, errors.New("MP3 unavailable")
 	}
-	start, end := int64(0), before.Size()
-	// Exclude a trailing ID3v1 tag before walking MPEG frames.
-	if end >= 128 {
-		var tag [3]byte
-		if _, e = f.ReadAt(tag[:], end-128); e != nil {
-			return result, e
-		}
-		if string(tag[:]) == "TAG" {
-			end -= 128
-		}
+	start := int64(0)
+	end, e := mp3AudioEnd(f, before.Size())
+	if e != nil {
+		return result, e
 	}
 	for start+10 <= end {
 		var h [10]byte

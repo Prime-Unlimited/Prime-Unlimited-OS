@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -49,7 +50,7 @@ func verifyMediaLiveEngine(ctx context.Context) error {
 	}
 	return nil
 }
-func prepareMediaLivePlan(ctx context.Context, request mediaJobRequest) (usbcopy.ImportPlan, []usbcopy.DuplicateDecision, error) {
+func prepareMediaLivePlan(ctx context.Context, root string, request mediaJobRequest) (usbcopy.ImportPlan, []usbcopy.DuplicateDecision, error) {
 	var empty usbcopy.ImportPlan
 	source, dest := request.Mounts.Source.Root, request.Mounts.Destination.Root
 	snapshot, e := usbcopy.Scan(source)
@@ -103,8 +104,8 @@ func prepareMediaLivePlan(ctx context.Context, request mediaJobRequest) (usbcopy
 	}
 	sources := []string{}
 	for _, t := range snapshot.Tracks {
-		if !strings.EqualFold(filepath.Ext(t.RelativePath), ".mp3") {
-			return empty, nil, errors.New("live import currently supports MP3 only")
+		if !usbcopy.LiveAudioExtension(t.RelativePath) {
+			return empty, nil, errors.New("live import supports MP3, WAV and FLAC only")
 		}
 		sources = append(sources, t.RelativePath)
 	}
@@ -157,9 +158,13 @@ func prepareMediaLivePlan(ctx context.Context, request mediaJobRequest) (usbcopy
 	if e != nil {
 		return empty, nil, e
 	}
+	fingerprints := map[string]usbcopy.FileFingerprint{}
+	for _, d := range decisions {
+		fingerprints[d.SourceRelative] = d.Fingerprint
+	}
 	for _, t := range filtered.Tracks {
-		if _, e = usbcopy.ReadMP3Properties(ctx, source, t.SourceRelative); e != nil {
-			return empty, nil, e
+		if e = validateMediaLiveAudio(ctx, root, source, request.SourceDigest, t, fingerprints[t.SourceRelative]); e != nil {
+			return empty, nil, fmt.Errorf("validate live source %q: %w", t.SourceRelative, e)
 		}
 	}
 	return p, decisions, nil
@@ -188,12 +193,21 @@ func (s *server) runMediaLiveJob(ctx context.Context, request mediaJobRequest, s
 	if e != nil {
 		return e
 	}
+	effectsPossible := false
 	defer func() {
 		if err != nil {
 			latest, readErr := store.Read(request.ID)
 			if readErr == nil && latest.Phase != usbcopy.JobCompleted {
 				latest.Phase = usbcopy.JobInterrupted
 				latest.ErrorCode = "live_review_required"
+				if !effectsPossible {
+					latest.Phase = usbcopy.JobFailed
+					latest.ErrorCode = "live_preflight_failed"
+				}
+				failureDir := filepath.Join(s.root, "media-jobs", "failures")
+				if ensurePrivateDirectory(failureDir) == nil {
+					_ = writeAtomicJSON(filepath.Join(failureDir, request.ID+".json"), map[string]any{"jobId": request.ID, "effectsPossible": effectsPossible, "error": err.Error()})
+				}
 				current, _ := nativeEngineIdentity()
 				latest.EngineRestored = current == engine
 				_, _ = store.Save(latest)
@@ -227,7 +241,7 @@ func (s *server) runMediaLiveJob(ctx context.Context, request mediaJobRequest, s
 	if e = control.ValidateVolumes(ctx); e != nil {
 		return e
 	}
-	plan, decisions, e := prepareMediaLivePlan(ctx, request)
+	plan, decisions, e := prepareMediaLivePlan(ctx, s.root, request)
 	if e != nil {
 		return e
 	}
@@ -241,6 +255,7 @@ func (s *server) runMediaLiveJob(ctx context.Context, request mediaJobRequest, s
 	if e = control.ValidateVolumes(ctx); e != nil {
 		return e
 	}
+	effectsPossible = true // Every copy/native effect is downstream of this boundary.
 	session, e := createMediaLiveSession(s.root, request, engine)
 	if e != nil {
 		return e

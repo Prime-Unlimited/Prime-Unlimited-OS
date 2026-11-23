@@ -11,6 +11,8 @@ This is a new experimental mod, version **0.1.4-dev.1**. It requires the USB Cop
 - **SD cards are excluded from this validation.** Do not use them for these tests. The source USB must remain unchanged.
 - Interrupted native operations require review; automatic SQL repair or blind native retries are not implemented.
 
+The experimental native path also implements WAV/FLAC container preflight; native multi-file import/playback validation is still in progress. See [LIVE_AUDIO_FORMATS.md](LIVE_AUDIO_FORMATS.md) for scope and exact-file owner approvals.
+
 See [LIVE_IMPORT_STATUS.md](LIVE_IMPORT_STATUS.md) for verified behavior and remaining integration work. Packages built with `scripts/package.py` are unsigned preview artifacts, not an approved catalog release.
 
 ## Goal

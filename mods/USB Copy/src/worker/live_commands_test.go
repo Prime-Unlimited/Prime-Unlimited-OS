@@ -290,3 +290,17 @@ func TestNativeCommandRejectsCrashReservationStaleAndArbitraryCalls(t *testing.T
 		t.Fatal("crash reservation replayed")
 	}
 }
+
+func TestNativeRegistrationAllowsOnlyLiveAudioContainers(t *testing.T) {
+	_, c := commandFixture(t)
+	c.Operation = "register_files"
+	c.Intent = c.JobID + ":register:0"
+	c.ID = LiveCommandID(c.JobID, c.Intent)
+	for _, path := range []string{"Music/new.wav", "Music/new.FLAC", "Music/new.mp3", "Music/not.exe", "Music/new.aiff", "../Music/new.wav", "Music/../new.wav"} {
+		c.Paths = []string{path}
+		want := path == "Music/new.wav" || path == "Music/new.FLAC" || path == "Music/new.mp3"
+		if validLiveCommand(c) != want {
+			t.Fatalf("registration format/containment gate: %s", path)
+		}
+	}
+}

@@ -228,7 +228,7 @@ func (s *server) handleMediaImportPreview(w http.ResponseWriter, r *http.Request
 		return
 	}
 	result := mediaPreviewFromPlan(state.Plan, duplicates)
-	result.CommitAvailable = s.mediaCommitAvailable() && mediaMP3Plan(state.Plan)
+	result.CommitAvailable = s.mediaCommitAvailable() && s.mediaSupportedPlan(state.Plan)
 	s.setMediaPreviewMode(&result)
 	writeJSON(w, http.StatusOK, result)
 }
@@ -378,7 +378,7 @@ func (s *server) handleMediaImportDecision(w http.ResponseWriter, r *http.Reques
 		}
 		s.mediaPreviews[eventKey] = &previewState.Plan
 		result := mediaPreviewFromPlan(plan, duplicates)
-		result.CommitAvailable = s.mediaCommitAvailable() && mediaMP3Plan(plan)
+		result.CommitAvailable = s.mediaCommitAvailable() && s.mediaSupportedPlan(plan)
 		s.setMediaPreviewMode(&result)
 		writeJSON(w, http.StatusOK, result)
 		return
