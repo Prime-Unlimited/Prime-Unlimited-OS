@@ -46,6 +46,16 @@ class QmlContractTests(unittest.TestCase):
         self.assertIn("restartModLoader()", text)
         self.assertIn("host.active = true", text)
 
+    def test_publish_and_progress_contract(self):
+        text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")
+        self.assertIn('mutation("publish", id', text)
+        self.assertIn('"/api/v1/publish-status"', text)
+        self.assertIn('modelData.status === "development"', text)
+        self.assertIn('"PUBLISHING..."', text)
+        self.assertIn('selfUpdate.progress', text)
+        self.assertIn('"Download 0%"', text)
+        self.assertIn('"Installation 100%"', text)
+
     def test_header_order_and_reduced_lifecycle_controls(self):
         text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")
         header = text[text.index("id: header") : text.index("id: device")]
@@ -88,3 +98,4 @@ class QmlContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

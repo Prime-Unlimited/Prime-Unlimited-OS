@@ -12,7 +12,7 @@ References: [Microsoft WAVEFORMATEX](https://learn.microsoft.com/en-us/windows/w
 
 ## Validation status
 
-On 2026-11-23, container preflight passed for all 48 WAV and 7 FLAC files on the owner-authorized 690-track USB source. Worker race tests and the Linux ARM64 runtime suite passed. Native WAV/FLAC import and deck playback validation remain pending; this is not a stable release claim.
+On 2026-11-23, container preflight passed for all 48 WAV and 7 FLAC files on the owner-authorized 690-track USB source. Worker race tests and the Linux ARM64 runtime suite passed. Native WAV import and owner-confirmed playback subsequently passed as recorded below; new FLAC import remains untested. This is not a stable release claim.
 
 The same source contains two readable Engine playlists. One has 372 references without a matching track identity in its source database. These references cannot be reconstructed from unrelated audio filenames. Import planning emits an unavailable-reference warning and preserves only resolved, newly copied members in their source order.
 
@@ -29,3 +29,15 @@ Two other newly copied candidates have a partial final MPEG packet; they decode,
 The read-only scanner now parses embedded WAVE ID3 chunks and LIST/INFO fields. Explicit ID3 fields take priority; INFO supplies missing basic fields. Raw tagless WAVs retain an empty embedded title so filename fallback is checked only when metadata is truly absent. Tests cover both chunk orders, bounds and unchanged source bytes.
 
 The mixed-source trial revealed three correctly registered WAV titles that the former scanner had mistaken for tagless files. After correcting the reader, all 32 already applied registrations verified. A separately reviewed continuation rechecks every copied SHA-256, the unchanged Engine/mount binding, the exact registered prefix and database effect counts. It skips the proven prefix, performs only missing native work and never calls the copy adapter. This reviewed completion does not count as an automatic end-to-end batch pass.
+
+## Completed mixed-source validation — 2026-11-23
+
+The 690-file USB batch completed with 539 newly copied tracks (498 MP3 and 41 WAV), 151 skips and 7,583,360,670 copied bytes. All seven FLAC files already existed on the destination, so this run does not validate a new FLAC registration. Independent verification passed for source/copy SHA-256, native metadata and artwork, 12 filename-fallback titles, and exact new-only playlist membership and source order. The generated playlist contains 539 tracks; the two resolved source playlists contain 13 new tracks each. Engine process identity remained unchanged, and source USB and SD contents were not modified.
+
+The owner confirmed that an imported tagged WAV was visible, loadable and playable from the generated playlist. The mixed batch required a reviewed continuation after the WAVE metadata reader correction: the first 32 registrations were verified and preserved; only the missing 507 registrations and playlist work were performed. No audio was recopied. This is a verified completed batch, not a fully automatic end-to-end batch pass. A fresh normal WAV import after the correction and a genuinely new FLAC import remain release-validation tasks.
+
+## Fresh normal WAV/FLAC import — 2026-11-23
+
+After the WAVE metadata reader correction, a fresh normal authenticated preview/start imported one new FLAC and one new WAV to internal Denon storage. The unchanged 690 other files were skipped; 9,905,526 bytes were copied and exactly one generated playlist was created with only the two new tracks. The job completed automatically without reviewed continuation, re-registration, direct SQL writes or Engine restart. Independent read-only verification passed (0.71 seconds) for both source/copy SHA-256 values, native metadata/artwork checks, exact playlist order and unchanged Engine identity.
+
+The tagless FLAC appears as `FLAC-Testfile.flac`; the WAV contains the embedded title `Pink Noise` and artist `16 Bit 44.1 KHz`. The owner confirmed both fresh files are visible, loadable and playable from the generated playlist. Large-source preview and live revalidation reread existing content and can take several minutes; the queued live preparation currently lacks detailed durable progress. This evidence establishes normal new WAV/FLAC registration on the tested JP24 profile, not compatibility with every codec variant or other models.

@@ -179,6 +179,7 @@ type server struct {
 	mediaImportLive        bool
 	github                 *githubDeviceClient
 	login                  developerLogin
+	publish                publishState
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -233,7 +234,7 @@ func (s *server) authorizationStatus() string {
 
 func isMutationPath(path string) bool {
 	switch path {
-	case "/api/v1/service-access", "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/update", "/api/v1/catalog/sync", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve", "/api/v1/launch", "/api/v1/launch-set", "/api/v1/safe-mode/enable", "/api/v1/safe-mode/disable", "/api/v1/recover", "/api/v1/developer-mode":
+	case "/api/v1/service-access", "/api/v1/cache", "/api/v1/stage", "/api/v1/inspect", "/api/v1/install", "/api/v1/update", "/api/v1/catalog/sync", "/api/v1/enable", "/api/v1/disable", "/api/v1/uninstall", "/api/v1/rollback", "/api/v1/resolve", "/api/v1/launch", "/api/v1/launch-set", "/api/v1/safe-mode/enable", "/api/v1/safe-mode/disable", "/api/v1/recover", "/api/v1/developer-mode", "/api/v1/publish":
 		return true
 	default:
 		return false
@@ -787,6 +788,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.handleDeveloperMode(w, r)
 			return
 		}
+		if r.URL.Path == "/api/v1/publish" {
+			s.handlePublish(w, r)
+			return
+		}
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "mutation engine unavailable"})
 		return
 	}
@@ -940,6 +945,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.developerModeStatus())
 	case "/api/v1/developer-mode/qr.png":
 		s.handleDeveloperQR(w, r)
+	case "/api/v1/publish-status":
+		writeJSON(w, http.StatusOK, s.publish.snapshot())
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}

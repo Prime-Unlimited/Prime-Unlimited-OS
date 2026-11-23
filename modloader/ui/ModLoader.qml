@@ -15,6 +15,10 @@ Rectangle {
     property bool busy: false
     property bool updaterBusy: false
     property bool developerMode: false
+    property var publishState: ({"status":"idle","modId":"","message":"","progress":0})
+    property string operationModId: ""
+    property int operationProgress: 0
+    property string operationLabel: ""
     property bool developerPrompt: false
     property string developerStatus: "idle"
     property string developerUserCode: ""
@@ -84,6 +88,30 @@ Rectangle {
         getJson("/api/v1/transactions", function(payload) { transactions = payload.transactions || [] })
         getJson("/api/v1/safety", function(payload) { safety = payload }, true)
         refreshSelfUpdate()
+        getJson("/api/v1/publish-status", function(payload) { publishState = payload }, true)
+    }
+
+    Timer {
+        interval: 2000; repeat: true; running: publishState.status === "publishing"
+        onTriggered: pollPublish()
+    }
+
+    function pollPublish() {
+        getJson("/api/v1/publish-status", function(payload) {
+            publishState = payload
+            statusText = payload.message || "Publishing..."
+            if (payload.status === "published") refresh()
+        }, true)
+    }
+
+    function publishMod(id) {
+        if (publishState.status === "publishing" || busy) return
+        publishState = ({"status":"publishing","modId":id,"message":"Publishing...","progress":0})
+        statusText = "Publishing..."
+        mutation("publish", id, "", function(ok, payload) {
+            if (ok) { publishState = payload; pollPublish() }
+            else publishState = ({"status":"failed","modId":id,"message":payload.error || "Publishing failed","progress":0})
+        })
     }
 
     function refreshSelfUpdate(done) {
@@ -190,16 +218,20 @@ Rectangle {
 
     function installVerified(id) {
         var steps = ["cache", "stage", "inspect", "install"]
+        operationModId = id; operationProgress = 0; operationLabel = "Download 0%"
         function next(index) {
-            if (index >= steps.length) { statusText = "Verified installation completed"; refreshState(); return }
+            if (index >= steps.length) { operationProgress = 100; operationLabel = "Installation 100%"; statusText = "Verified installation completed"; refreshState(); return }
+            operationProgress = index * 25
+            operationLabel = index === 0 ? "Download " + operationProgress + "%" : "Installation " + operationProgress + "%"
             statusText = "Installation: " + steps[index]
-            mutation(steps[index], id, "", function(ok) { if (ok) next(index + 1) })
+            mutation(steps[index], id, "", function(ok) { if (ok) next(index + 1); else { operationModId = ""; operationProgress = 0 } })
         }
         next(0)
     }
 
     function updateVerified(id) {
         var wasEnabled = installed[id] && installed[id].enabled
+        operationModId = id; operationProgress = 0; operationLabel = "Download 0%"
         function executeUpdate() {
             var steps = ["cache", "stage", "inspect", "update"]
             function next(index) {
@@ -210,6 +242,8 @@ Rectangle {
                     return
                 }
                 statusText = "Update: " + steps[index]
+                operationProgress = index * 25
+                operationLabel = index === 0 ? "Download " + operationProgress + "%" : "Installation " + operationProgress + "%"
                 mutation(steps[index], id, "", function(ok) { if (ok) next(index + 1) })
             }
             next(0)
@@ -310,8 +344,8 @@ Rectangle {
 
     function rowLabel(modelData) {
         if (modelData.status === "development")
-            return modelData.compatible ? "DEVELOPMENT" : "DEVELOPMENT — not compatible with this device"
-        if (modelData.adminTestPreview) return "ADMIN TEST / awaiting signed catalog – install unavailable"
+            return modelData.compatible ? "DEVELOPMENT" : "DEVELOPMENT â€” not compatible with this device"
+        if (modelData.adminTestPreview) return "ADMIN TEST / awaiting signed catalog â€“ install unavailable"
         if (safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined)
             return "Quarantined after " + safety.mods[modelData.id].failureCount + " failures"
         if (modelData.updateAvailable) return "Update available: " + modelData.updateReason
@@ -413,6 +447,12 @@ Rectangle {
         color: "#aab0b8"
         font.pixelSize: 17
     }
+    Rectangle {
+        x: 440; y: 108; width: 340; height: 8; radius: 4
+        visible: updaterBusy
+        color: "#33373c"
+        Rectangle { height: parent.height; radius: 4; color: "#ff541c"; width: parent.width * Math.max(0, Math.min(100, Number(selfUpdate.progress || 0))) / 100 }
+    }
     Text {
         id: status
         x: 20; y: 105
@@ -454,7 +494,7 @@ Rectangle {
                 model: visibleMods()
                 delegate: Rectangle {
                     width: entries.width
-                    height: 132
+                    height: 148
                     radius: 12
                     color: "#22262b"
                     Text {
@@ -466,7 +506,9 @@ Rectangle {
                     }
                     Text {
                         x: 16; y: 48
-                        text: rowLabel(modelData)
+                        text: publishState.status === "publishing" && publishState.modId === modelData.id
+                            ? "Publishing... " + (publishState.progress || 0) + "%"
+                            : (operationModId === modelData.id ? operationLabel : rowLabel(modelData))
                         color: safety.mods && safety.mods[modelData.id] && safety.mods[modelData.id].quarantined ? "#ff9b78" : (modelData.compatible ? "#73d6a3" : "#ff9b78")
                         font.pixelSize: 16
                     }
@@ -486,6 +528,14 @@ Rectangle {
                         width: 104; height: 48; radius: 9; x: parent.width - 334; y: 19; color: "#d77921"
                         Text { anchors.centerIn: parent; text: "UPDATE"; color: "white"; font.bold: true }
                         MouseArea { anchors.fill: parent; enabled: !busy && modelData.compatible; onClicked: updateVerified(modelData.id) }
+                    }
+                    Rectangle {
+                        visible: developerMode && modelData.status === "development"
+                        width: 104; height: 48; radius: 9; x: parent.width - 444; y: 19
+                        color: publishState.status === "publishing" && publishState.modId === modelData.id ? "#6b512e" : "#d77921"
+                        Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 10; font.bold: true
+                            text: publishState.status === "publishing" && publishState.modId === modelData.id ? "PUBLISHING..." : "PUBLISH" }
+                        MouseArea { anchors.fill: parent; enabled: publishState.status !== "publishing" && !busy; onClicked: publishMod(modelData.id) }
                     }
                     Rectangle {
                         width: 104; height: 48; radius: 9; x: parent.width - (present ? 224 : 116); y: 19
@@ -519,6 +569,14 @@ Rectangle {
                             width: 104; height: 28; radius: 7; color: "#5a456b"
                             Text { anchors.centerIn: parent; text: "ROLLBACK"; color: "white"; font.bold: true }
                             MouseArea { anchors.fill: parent; enabled: installed[modelData.id] && !installed[modelData.id].enabled && !busy; onClicked: mutation("rollback", modelData.id, "", function() { refresh() }) }
+                        }
+                    }
+                    Rectangle {
+                        visible: operationModId === modelData.id || (publishState.status === "publishing" && publishState.modId === modelData.id)
+                        x: 16; y: 132; width: parent.width - 32; height: 7; radius: 3; color: "#33373c"
+                        Rectangle {
+                            height: parent.height; radius: 3; color: "#ff541c"
+                            width: parent.width * Math.max(0, Math.min(100, publishState.status === "publishing" && publishState.modId === modelData.id ? publishState.progress : operationProgress)) / 100
                         }
                     }
                 }
@@ -615,7 +673,7 @@ Rectangle {
             Text {
                 x: 210; y: 64; width: 400; visible: !developerMode
                 color: "white"; font.pixelSize: 32; font.bold: true
-                text: developerUserCode === "" ? "…" : developerUserCode
+                text: developerUserCode === "" ? "â€¦" : developerUserCode
             }
             Text {
                 x: 210; y: 116; width: 400; visible: !developerMode
@@ -631,7 +689,7 @@ Rectangle {
                 x: 24; y: developerMode ? 64 : 246; width: 592
                 color: developerStatus === "error" || developerStatus === "denied" || developerStatus === "expired" ? "#ff9b78" : "#bfc3c9"
                 font.pixelSize: 15; wrapMode: Text.WordWrap
-                text: developerMode ? "Development-Mods verschwinden aus der Liste. Einschalten geht wieder über GitHub." : (developerMessage !== "" ? developerMessage : "Warte auf die Anmeldung am Handy. Der Code gilt 15 Minuten.")
+                text: developerMode ? "Development-Mods verschwinden aus der Liste. Einschalten geht wieder Ã¼ber GitHub." : (developerMessage !== "" ? developerMessage : "Warte auf die Anmeldung am Handy. Der Code gilt 15 Minuten.")
             }
             Row {
                 anchors.horizontalCenter: parent.horizontalCenter; y: developerMode ? 140 : 360; spacing: 16
@@ -667,3 +725,4 @@ Rectangle {
         }
     }
 }
+

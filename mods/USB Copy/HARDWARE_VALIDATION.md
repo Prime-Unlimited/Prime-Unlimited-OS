@@ -454,3 +454,15 @@ rendering or deployed device verification. No new device writes were performed.
 ## 2026-11-23 — normal live admission, complete automatic import
 
 JP24 / firmware 5.3.0: Sunbeam Outside World imported through normal preview/start with one new MP3, four duplicates skipped, one generated playlist containing only the new track. Destination SHA-256, ID3 and embedded cover verified; Engine identity unchanged. Owner confirmed cover, playlist membership and deck loading. The preceding Afterlife uncertain-create recovery was separate and is not counted as an automatic end-to-end pass. See LIVE_IMPORT_STATUS.md for remaining release checks.
+
+## Completed mixed-source validation — 2026-11-23
+
+The 690-file USB batch completed with 539 newly copied tracks (498 MP3 and 41 WAV), 151 skips and 7,583,360,670 copied bytes. All seven FLAC files already existed on the destination, so this run does not validate a new FLAC registration. Independent verification passed for source/copy SHA-256, native metadata and artwork, 12 filename-fallback titles, and exact new-only playlist membership and source order. The generated playlist contains 539 tracks; the two resolved source playlists contain 13 new tracks each. Engine process identity remained unchanged, and source USB and SD contents were not modified.
+
+The owner confirmed that an imported tagged WAV was visible, loadable and playable from the generated playlist. The mixed batch required a reviewed continuation after the WAVE metadata reader correction: the first 32 registrations were verified and preserved; only the missing 507 registrations and playlist work were performed. No audio was recopied. This is a verified completed batch, not a fully automatic end-to-end batch pass. A fresh normal WAV import after the correction and a genuinely new FLAC import remain release-validation tasks.
+
+## Fresh normal WAV/FLAC import — 2026-11-23
+
+After the WAVE metadata reader correction, a fresh normal authenticated preview/start imported one new FLAC and one new WAV to internal Denon storage. The unchanged 690 other files were skipped; 9,905,526 bytes were copied and exactly one generated playlist was created with only the two new tracks. The job completed automatically without reviewed continuation, re-registration, direct SQL writes or Engine restart. Independent read-only verification passed (0.71 seconds) for both source/copy SHA-256 values, native metadata/artwork checks, exact playlist order and unchanged Engine identity.
+
+The tagless FLAC appears as `FLAC-Testfile.flac`; the WAV contains the embedded title `Pink Noise` and artist `16 Bit 44.1 KHz`. The owner confirmed both fresh files are visible, loadable and playable from the generated playlist. Large-source preview and live revalidation reread existing content and can take several minutes; the queued live preparation currently lacks detailed durable progress. This evidence establishes normal new WAV/FLAC registration on the tested JP24 profile, not compatibility with every codec variant or other models.

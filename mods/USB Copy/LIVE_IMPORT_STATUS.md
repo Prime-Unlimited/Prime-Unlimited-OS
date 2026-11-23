@@ -30,10 +30,22 @@ The mode-aware UI 0.1.4-dev.1 was subsequently installed through signed local ca
 
 Live mode remains explicitly experimental and is not enabled by default. No production catalog release has been made. SD cards and USB source files were not modified in these trials.
 
-## Larger mixed-source trial, in progress
+## Larger mixed-source trial history
 
-The owner confirmed normal use after declining and successful device restart. A subsequent 690-file source contains 635 MP3, 48 WAV and 7 FLAC files; all WAV/FLAC container checks passed. Preview identified 539 new files, 141 existing files and 10 source aliases. No full mixed-format import success is claimed yet.
+The owner confirmed normal use after declining and successful device restart. A subsequent 690-file source contains 635 MP3, 48 WAV and 7 FLAC files; all WAV/FLAC container checks passed. Preview identified 539 new files, 141 existing files and 10 source aliases. Completion and its limits are recorded below.
 
-The first attempt stopped before session publication, with zero copied files/bytes and no native or playlist commands. An explicit bounded root review under both leases closed that failed job without replaying it. The MP3 reader was corrected to exclude validated APE trailers. The owner separately approved two independently decoded files with partial final MPEG packets, scoped to their exact bytes and source digest. A new normal preview/import trial is underway.
+The first attempt stopped before session publication, with zero copied files/bytes and no native or playlist commands. An explicit bounded root review under both leases closed that failed job without replaying it. The MP3 reader was corrected to exclude validated APE trailers. The owner separately approved two independently decoded files with partial final MPEG packets, scoped to their exact bytes and source digest. The subsequent trial and its reviewed completion are recorded below.
 
 The source database has 15 physical track records and a playlist with 372 unresolved references. The planner now reports unavailable references rather than fabricating members. Library-relative paths that resolve within the source volume are supported; escaping the volume remains forbidden.
+
+## Completed mixed-source validation — 2026-11-23
+
+The 690-file USB batch completed with 539 newly copied tracks (498 MP3 and 41 WAV), 151 skips and 7,583,360,670 copied bytes. All seven FLAC files already existed on the destination, so this run does not validate a new FLAC registration. Independent verification passed for source/copy SHA-256, native metadata and artwork, 12 filename-fallback titles, and exact new-only playlist membership and source order. The generated playlist contains 539 tracks; the two resolved source playlists contain 13 new tracks each. Engine process identity remained unchanged, and source USB and SD contents were not modified.
+
+The owner confirmed that an imported tagged WAV was visible, loadable and playable from the generated playlist. The mixed batch required a reviewed continuation after the WAVE metadata reader correction: the first 32 registrations were verified and preserved; only the missing 507 registrations and playlist work were performed. No audio was recopied. This is a verified completed batch, not a fully automatic end-to-end batch pass. A fresh normal WAV import after the correction and a genuinely new FLAC import remain release-validation tasks.
+
+## Fresh normal WAV/FLAC import — 2026-11-23
+
+After the WAVE metadata reader correction, a fresh normal authenticated preview/start imported one new FLAC and one new WAV to internal Denon storage. The unchanged 690 other files were skipped; 9,905,526 bytes were copied and exactly one generated playlist was created with only the two new tracks. The job completed automatically without reviewed continuation, re-registration, direct SQL writes or Engine restart. Independent read-only verification passed (0.71 seconds) for both source/copy SHA-256 values, native metadata/artwork checks, exact playlist order and unchanged Engine identity.
+
+The tagless FLAC appears as `FLAC-Testfile.flac`; the WAV contains the embedded title `Pink Noise` and artist `16 Bit 44.1 KHz`. The owner confirmed both fresh files are visible, loadable and playable from the generated playlist. Large-source preview and live revalidation reread existing content and can take several minutes; the queued live preparation currently lacks detailed durable progress. This evidence establishes normal new WAV/FLAC registration on the tested JP24 profile, not compatibility with every codec variant or other models.
