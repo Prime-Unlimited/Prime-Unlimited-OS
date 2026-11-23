@@ -21,10 +21,11 @@ The sequence holds the shared writer lease, backs up destination databases consi
 
 The authenticated actor is embedded in the trusted runtime and loaded through the approved overlay mechanism. No authorization token is included in source or preview packages. Native IDs are read from the actual model, never synthesized from SQL IDs.
 
+The mode-aware UI 0.1.4-dev.1 was subsequently installed through signed local catalog admission (stage/inspect/update/enable), using the existing device trust key. The runtime advertises the new overlay and the native actor; Engine identity remained unchanged. The source is published in draft PR #24, and preview CI passed for the live integration commit. This local test installation is not a production catalog release.
+
 ## Remaining release validation
 
 - Exercise multi-file/source-playlist batches, filtered views and UI/context changes, source removal and interrupted API/Engine/native acknowledgements with the integrated live adapter.
-- Deliver the updated mode-aware UI through a correctly signed test package; installed test UI remains version 0.1.3. Publish the reconciled source and run preview CI.
 - Validate other hardware separately. JC11S is a compile target only; JP24 evidence does not establish Prime 4 compatibility.
 
 Live mode remains explicitly experimental and is not enabled by default. No production catalog release has been made. SD cards and USB source files were not modified in these trials.
