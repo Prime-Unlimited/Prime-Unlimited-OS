@@ -203,8 +203,15 @@ func readTags(path string, track *Track) error {
 	defer file.Close()
 	metadata, err := tag.ReadFrom(file)
 	if err != nil {
+		if strings.EqualFold(filepath.Ext(path), ".wav") {
+			return readWaveMetadata(file, track)
+		}
 		return err
 	}
+	return applyAudioMetadata(metadata, track)
+}
+
+func applyAudioMetadata(metadata tag.Metadata, track *Track) error {
 	track.Tags = Tags{
 		Format: string(metadata.Format()), Title: cleanTag(metadata.Title()),
 		Artist: cleanTag(metadata.Artist()), AlbumArtist: cleanTag(metadata.AlbumArtist()),

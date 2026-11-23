@@ -33,6 +33,9 @@ type mediaLiveAdapter struct {
 	refs       map[string]usbcopy.LiveTrackReference
 	uris       map[string]string
 	lists      map[int64]liveCreatedList
+	// Populated only by an explicitly reviewed root continuation. Every entry
+	// is rechecked against copied bytes and current native database metadata.
+	reviewedRegistration map[string]liveRegisteredTrack
 }
 
 var _ usbcopy.LiveSequenceAdapter = (*mediaLiveAdapter)(nil)
@@ -199,6 +202,16 @@ func (a *mediaLiveAdapter) registerAll(ctx context.Context, intent string) error
 	a.registered = map[string]liveRegisteredTrack{}
 	a.refs = map[string]usbcopy.LiveTrackReference{}
 	a.uris = map[string]string{}
+	prefix := 0
+	for _, t := range a.plan.Tracks {
+		if _, ok := a.reviewedRegistration[t.SourceRelative]; !ok {
+			break
+		}
+		prefix++
+	}
+	if prefix != len(a.reviewedRegistration) || (prefix%32 != 0 && prefix != len(a.plan.Tracks)) {
+		return errors.New("reviewed registration is not a complete leading batch")
+	}
 	// Keep native import calls bounded; scan the model in larger lookup batches.
 	for start := 0; start < len(a.plan.Tracks); start += 32 {
 		end := start + 32
@@ -208,6 +221,19 @@ func (a *mediaLiveAdapter) registerAll(ctx context.Context, intent string) error
 		batch := a.plan.Tracks[start:end]
 		if e := a.checkCopies(ctx, batch); e != nil {
 			return e
+		}
+		if start < prefix {
+			for _, t := range batch {
+				actual, e := liveRegistered(ctx, a.database, a.destination, a.binding.LibraryUUID, t)
+				if e != nil {
+					return e
+				}
+				if actual != a.reviewedRegistration[t.SourceRelative] {
+					return errors.New("reviewed native registration changed")
+				}
+				a.registered[t.SourceRelative] = actual
+			}
+			continue
 		}
 		paths := []string{}
 		for _, t := range batch {

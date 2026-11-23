@@ -47,6 +47,9 @@ func TestVerifyCompletedLiveBatchDevice(t *testing.T) {
 	read("batch-approved-preview.json", &approved)
 	var state usbcopy.LiveSequenceState
 	read("journal/"+id+".json", &state)
+	if state.Phase == "review_required" {
+		read("reviewed-native-state.json", &state)
+	}
 	store, e := usbcopy.OpenJobStore("/data/prime-unlimited/media-jobs")
 	if e != nil {
 		t.Fatal(e)
@@ -185,10 +188,26 @@ func TestVerifyCompletedLiveBatchDevice(t *testing.T) {
 	if cursor != len(state.Playlists) {
 		t.Fatal("unexpected extra playlist")
 	}
+	var manifest struct{ ImportDirectory string }
+	read("manifest.json", &manifest)
+	fresh, e := usbcopy.Scan(filepath.Join(approved.DestinationRoot, "Engine Library", "Music", manifest.ImportDirectory))
+	if e != nil {
+		t.Fatal(e)
+	}
+	parsed := map[string]usbcopy.Track{}
+	for _, tr := range fresh.Tracks {
+		parsed[tr.RelativePath] = tr
+	}
 	formats := map[string]int{}
 	fallback := 0
 	for i, ref := range state.Tracks {
 		tr, ok := sourceTracks[ref.SourceRelative]
+		metadata, found := parsed[ref.SourceRelative]
+		if !found {
+			t.Fatal("copied metadata unavailable")
+		}
+		tr.Tags = metadata.Tags
+		tr.Artwork = metadata.Artwork
 		if !ok {
 			t.Fatal("unknown copied source")
 		}
@@ -211,7 +230,15 @@ func TestVerifyCompletedLiveBatchDevice(t *testing.T) {
 		if e != nil || a.SHA256 != b.SHA256 {
 			t.Fatal("copied content differs", e)
 		}
-		formats[strings.ToLower(filepath.Ext(tr.SourceRelative))]++
+		format := strings.ToLower(filepath.Ext(tr.SourceRelative))
+		if formats[format] == 0 {
+			var title, artist string
+			if e = db.QueryRowContext(ctx, "SELECT coalesce(title,''),coalesce(artist,'') FROM Track WHERE id=?", ref.LocalID).Scan(&title, &artist); e != nil {
+				t.Fatal(e)
+			}
+			t.Logf("sample for device playback: format=%s title=%q artist=%q source=%q", format, title, artist, tr.SourceRelative)
+		}
+		formats[format]++
 		if tr.Tags.Title == "" {
 			fallback++
 		}
@@ -547,4 +574,98 @@ func TestRecheckOwnerApprovedBatchFilesDevice(t *testing.T) {
 	if checked != 5 {
 		t.Fatal("expected the five previously identified new/alias files", checked)
 	}
+}
+
+func TestInspectMixedBatchRegistrationDevice(t *testing.T) {
+	id := os.Getenv("PRIME_USB_INSPECT_REGISTRATION_BATCH")
+	if id == "" {
+		t.Skip("explicit interrupted batch required")
+	}
+	if !validMediaEventID(id) {
+		t.Fatal("invalid batch ID")
+	}
+	const root = "/data/prime-unlimited"
+	dir := filepath.Join(root, "media-jobs", "live", id)
+	var approved mediaPreviewState
+	b, e := readOwnedFile(filepath.Join(root, "media-jobs", "diagnostics", "batch-approved-"+id+".json"), 64<<20, "source plan")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = json.Unmarshal(b, &approved); e != nil {
+		t.Fatal(e)
+	}
+	var manifest struct {
+		ImportDirectory string
+		Tracks          []struct {
+			Source, Destination string
+			Bytes               int64
+		}
+	}
+	b, e = os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = json.Unmarshal(b, &manifest); e != nil {
+		t.Fatal(e)
+	}
+	var command usbcopy.LiveCommandRecord
+	b, e = os.ReadFile(filepath.Join(dir, "commands", "command.json"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = json.Unmarshal(b, &command); e != nil {
+		t.Fatal(e)
+	}
+	bySource := map[string]usbcopy.PlannedTrack{}
+	for _, tr := range approved.Plan.Tracks {
+		bySource[tr.SourceRelative] = tr
+	}
+	byDest := map[string]string{}
+	for _, tr := range manifest.Tracks {
+		byDest[tr.Destination] = tr.Source
+	}
+	database, e := internalEngineDatabase(approved.DestinationRoot)
+	if e != nil {
+		t.Fatal(e)
+	}
+	db, e := openNativeReadDB(database)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer db.Close()
+	copied, e := usbcopy.Scan(filepath.Join(approved.DestinationRoot, "Engine Library", "Music", manifest.ImportDirectory))
+	if e != nil {
+		t.Fatal(e)
+	}
+	fresh := map[string]usbcopy.Track{}
+	for _, tr := range copied.Tracks {
+		fresh[tr.RelativePath] = tr
+	}
+	good, bad := 0, 0
+	for _, dest := range command.Command.Paths {
+		source := byDest[dest]
+		tr := bySource[source]
+		metadata, ok := fresh[source]
+		if !ok {
+			t.Fatal("copied metadata missing", source)
+		}
+		tr.Tags = metadata.Tags
+		tr.Artwork = metadata.Artwork
+		tr.DestinationRelative = strings.TrimPrefix(dest, "Music/")
+		var local int64
+		var title, artist string
+		e = db.QueryRow("SELECT id,coalesce(title,''),coalesce(artist,'') FROM Track WHERE path=?", dest).Scan(&local, &title, &artist)
+		if e != nil {
+			bad++
+			t.Logf("registration unavailable: %q: %v", source, e)
+			continue
+		}
+		if _, e = liveRegistered(context.Background(), database, approved.DestinationRoot, command.Command.Binding.LibraryUUID, tr); e != nil {
+			bad++
+			t.Logf("verification mismatch: source=%q id=%d expectedTitle=%q actualTitle=%q artist=%q error=%v", source, local, tr.Tags.Title, title, artist, e)
+		} else {
+			good++
+		}
+	}
+	t.Logf("registered first batch: verified=%d mismatch=%d", good, bad)
 }

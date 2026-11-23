@@ -241,3 +241,34 @@ func TestLiveRegistrationVerifierChecksTagsCoverAndFilenameFallback(t *testing.T
 		t.Fatal("blank filename fallback accepted")
 	}
 }
+
+func TestReviewedRegistrationPrefixIsVerifiedWithoutRepeatingNativeImport(t *testing.T) {
+	f := newLiveAdapterFixture(t)
+	if _, e := usbcopy.RunLiveSequence(context.Background(), f.a.id, f.plan, f.decisions, f.journal, f.a); e != nil {
+		t.Fatal(e)
+	}
+	tr := f.a.plan.Tracks[0]
+	existing, e := liveRegistered(context.Background(), f.a.database, f.a.destination, f.a.binding.LibraryUUID, tr)
+	if e != nil {
+		t.Fatal(e)
+	}
+	f.a.reviewedRegistration = map[string]liveRegisteredTrack{tr.SourceRelative: existing}
+	f.a.refs = nil
+	f.calls = nil
+	if _, e = f.a.Register(context.Background(), f.a.id+":reviewed-register", tr); e != nil {
+		t.Fatal(e)
+	}
+	if !reflect.DeepEqual(f.calls, []string{"lookup_tracks"}) {
+		t.Fatal("review repeated native import", f.calls)
+	}
+	existing.ID++
+	f.a.reviewedRegistration[tr.SourceRelative] = existing
+	f.a.refs = nil
+	f.calls = nil
+	if _, e = f.a.Register(context.Background(), f.a.id+":bad-review", tr); e == nil {
+		t.Fatal("changed registration accepted")
+	}
+	if len(f.calls) != 0 {
+		t.Fatal("native operation before reviewed identity verification", f.calls)
+	}
+}

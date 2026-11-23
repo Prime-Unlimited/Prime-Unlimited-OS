@@ -178,3 +178,54 @@ func TestNoEffectsReviewRejectsAnyPublishedProgress(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewedNativeCompletionCannotCopyOrProceedWithPartialBytes(t *testing.T) {
+	s := jobFixture(t)
+	j, e := s.Save(ImportJobStatus{ID: strings.Repeat("b", 64), Mode: "live", Phase: JobQueued, FilesTotal: 3, BytesTotal: 50})
+	if e != nil {
+		t.Fatal(e)
+	}
+	j.Phase = JobCopying
+	j, e = s.Save(j)
+	if e != nil {
+		t.Fatal(e)
+	}
+	j.Phase = JobInterrupted
+	j.FilesDone = 3
+	j.BytesDone = 49
+	j.EngineRestored = true
+	j, e = s.Save(j)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.BeginVerifiedLiveNativeCompletion(j.ID, j.Revision, strings.Repeat("e", 64)); e == nil {
+		t.Fatal("incomplete copied bytes accepted")
+	}
+	// A separate complete job can enter only committing, never copying.
+	s = jobFixture(t)
+	j, e = s.Save(ImportJobStatus{ID: strings.Repeat("c", 64), Mode: "live", Phase: JobQueued, FilesTotal: 3, BytesTotal: 50})
+	if e != nil {
+		t.Fatal(e)
+	}
+	j.Phase = JobCopying
+	j, e = s.Save(j)
+	if e != nil {
+		t.Fatal(e)
+	}
+	j.Phase = JobInterrupted
+	j.FilesDone = 3
+	j.BytesDone = 50
+	j.EngineRestored = true
+	j, e = s.Save(j)
+	if e != nil {
+		t.Fatal(e)
+	}
+	j, e = s.BeginVerifiedLiveNativeCompletion(j.ID, j.Revision, strings.Repeat("e", 64))
+	if e != nil || j.Phase != JobCommitting {
+		t.Fatal(j, e)
+	}
+	j.Phase = JobCopying
+	if _, e = s.Save(j); e == nil {
+		t.Fatal("reviewed completion allowed another copy")
+	}
+}
