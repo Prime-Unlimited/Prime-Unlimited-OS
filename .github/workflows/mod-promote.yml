@@ -1,0 +1,88 @@
+name: Mod promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      mod:
+        description: Mod id, for example splash-manager
+        required: true
+        type: string
+      version:
+        description: Exact version directory to promote
+        required: true
+        type: string
+      jc11s_sha256:
+        description: Confirmed JC11S zip SHA-256, or empty when that device is not targeted
+        required: false
+        type: string
+        default: ""
+      jp24_sha256:
+        description: Confirmed JP24 zip SHA-256, or empty when that device is not targeted
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prime-unlimited-mod-catalog
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: mod-release
+    permissions:
+      contents: write
+    if: github.repository == 'Prime-Unlimited/Prime-Unlimited-OS'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/prime-unlimited-mod-loader
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: python -m pip install cryptography
+      - name: Promote the confirmed artifact and re-sign catalogs
+        env:
+          CATALOG_ED25519_PRIVATE: ${{ secrets.CATALOG_ED25519_PRIVATE }}
+          MOD: ${{ inputs.mod }}
+          VERSION: ${{ inputs.version }}
+          JC11S_SHA256: ${{ inputs.jc11s_sha256 }}
+          JP24_SHA256: ${{ inputs.jp24_sha256 }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          if [ -z "$CATALOG_ED25519_PRIVATE" ]; then
+            echo "CATALOG_ED25519_PRIVATE is not configured."
+            echo "Store the existing prime-unlimited-2026-1 key as an environment secret on mod-release. Do not generate a replacement key and do not store it as a repository secret."
+            exit 1
+          fi
+          args=()
+          if [ -n "$JC11S_SHA256" ]; then args+=(--sha "jc11s=$JC11S_SHA256"); fi
+          if [ -n "$JP24_SHA256" ]; then args+=(--sha "jp24=$JP24_SHA256"); fi
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "At least one device SHA-256 is required. Promotion is artifact-bound."
+            exit 1
+          fi
+          python -m tools.mod_release promote --root . --mod "$MOD" --version "$VERSION" --run-id "github-run-$RUN_ID" "${args[@]}"
+          python -m tools.mod_release sign --root .
+          python -m tools.mod_release validate --root .
+      - name: Commit the ready catalogs
+        env:
+          MOD: ${{ inputs.mod }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "prime-unlimited-mod-pipeline"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add mods/development mods/ready \
+            modloader/catalog/jc11s.json modloader/catalog/jc11s.sig.json \
+            modloader/catalog/jp24.json modloader/catalog/jp24.sig.json
+          git diff --cached --quiet && { echo "Promotion produced no change."; exit 1; }
+          git commit -m "chore(mods): promote ${MOD} ${VERSION} to ready"
+          git push
+          {
+            echo "### Promoted ${MOD} ${VERSION}"
+            echo "Administrator environment: mod-release."
+            echo "The catalog status is ready. Hardware verification is a separate record and was not implied."
+          } >> "$GITHUB_STEP_SUMMARY"
