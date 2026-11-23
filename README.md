@@ -44,7 +44,7 @@ Further technical details: [Bootstrap specification](docs/BOOTSTRAP_SPEC.md) · 
 
 **Use at your own risk.** This project includes an installer, a modloader, and device modifications (mods). Installing or using any of these components may modify internal storage, system configuration, device behavior, or files on connected storage devices. These changes carry risks, including:
 
-- **Data loss:** Flashing overwrites the `/data` partition and removes settings, Wi-Fi configuration, and local library metadata. Mods that access USB drives or SSDs may also cause unintended deletion, overwriting, corruption, or incomplete copying of files.
+- **Data loss:** Flashing overwrites the `/data` partition and removes settings, Wi-Fi configuration, and local library metadata. Modifications may also cause unintended deletion, overwriting, corruption, or incomplete copying of files on internal or connected storage.
 - **Device failure:** An incorrect image, interrupted installation, incompatible firmware, or malfunctioning mod may leave a device unable to boot or operate normally and may require recovery or repair. Recovery is not guaranteed.
 - **Performance and reliability:** Mods may cause crashes, unexpected behavior, interrupted playback, or other malfunctions. Do not rely on experimental modifications during critical performances.
 - **Warranty and support:** Modifying a device may affect manufacturer warranty coverage or support. Applicable statutory consumer rights depend on the relevant law and circumstances.
