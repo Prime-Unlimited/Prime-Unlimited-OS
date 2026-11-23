@@ -63,3 +63,21 @@ Future trial cleanup must recreate the transient unit rather than call
 These results verify catalog admission and enable/disable lifecycle on JP24.
 They do not confirm that the overlay visibly rendered, that any Planck
 translator value was correct, or that deck audio can be accessed.
+
+## Visibility diagnosis — 2026-11-23
+
+A second one-minute enable trial produced no visible Prime Link panel, as
+reported by the owner. A third trial checked `GET /api/v1/overlays` immediately
+after a successful enable response and found `{"overlays":[]}`. The device's
+`GET /api/v1/safety` then showed `"safeMode":true`; the persisted safety state
+predated the Prime Link trial. `enabledOverlays` deliberately returns an empty
+list in Safe Mode. Thus the no-panel result does not test QML rendering at all.
+
+An interim hypothesis that the generic JP24 overlay Loader was behind Engine's
+overlay layer led to one temporary hook build and an Engine restart. Once Safe
+Mode was identified, that unneeded hook change was rolled back from a SHA-256
+verified backup and Engine was restarted again. The original hook SHA-256,
+Engine, independent SSH and normal API were verified; Safe Mode remains on.
+The corresponding source edit was also reverted. A real visibility check
+requires temporarily disabling Safe Mode with owner authorization, then
+restoring it after the test.
