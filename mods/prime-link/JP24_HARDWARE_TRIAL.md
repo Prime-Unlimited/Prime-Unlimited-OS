@@ -32,6 +32,34 @@ replace a locally staged test catalog during runtime restart. A live trial
 therefore needs a controlled catalog-source change or an immutable published
 test catalog, with the current catalog/start script restored afterward. The
 running device was not changed during this preparation.
+`scripts/prepare_trial_catalog.py` makes this append reproducible from a
+read-only copy of the active catalog and the exact built ZIP. It refuses to
+overwrite an output file and does not sign or install anything.
 
 Until those steps pass, the overlay remains build-verified only. It must not
 be described as a working device-to-device link or an audio path.
+
+## Reversible API admission trial — 2026-11-23
+
+With the device free of running USB Copy jobs, the exact JP24 ZIP was copied
+into a root-only trial directory and its SHA-256 verified on-device. A separate
+transient runtime API on the normal loopback port used the locally signed
+catalog and the existing device trust root; the original transient API was
+stopped temporarily. The signed metadata preserved all four active catalog
+records. The normal authenticated `cache`, `stage`, `inspect`, `install` and
+`enable` calls all succeeded. Inspection reported `eligible:true`, `aarch64`,
+`gnu`, and the declared QML overlay. Engine remained active. No matching
+DeckTelemetry or QML error appeared in the checked Engine journal window.
+
+The trial disabled and uninstalled Prime Link. The original catalog SHA-256
+was unchanged, the trial package cache file was removed, and the normal API
+and Engine were active after restoration. The first automated restore used
+`systemctl start` on the stopped transient API, whose unit definition had
+disappeared; this left the API briefly inactive. It was immediately recreated
+with `systemd-run` using its original start script and verified healthy.
+Future trial cleanup must recreate the transient unit rather than call
+`systemctl start` on a vanished unit.
+
+These results verify catalog admission and enable/disable lifecycle on JP24.
+They do not confirm that the overlay visibly rendered, that any Planck
+translator value was correct, or that deck audio can be accessed.
