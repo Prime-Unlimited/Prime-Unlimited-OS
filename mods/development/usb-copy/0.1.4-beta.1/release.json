@@ -1,0 +1,11 @@
+{
+  "assets": {
+    "jp24": {
+      "id": 783278296,
+      "name": "usb-copy-v0.1.4-beta.1-jp24.zip",
+      "sha256": "277111480ab656b822bbc75a0abce2d13d12d6eb12eb6c42285850df878bec95",
+      "size": 832490
+    }
+  },
+  "tag": "mod-usb-copy-v0.1.4-beta.1"
+}
