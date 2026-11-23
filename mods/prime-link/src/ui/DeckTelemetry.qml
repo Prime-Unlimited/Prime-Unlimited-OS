@@ -25,6 +25,10 @@ Item {
         return isFinite(n) ? n : null
     }
 
+    function displayNumber(n) {
+        return n === null ? "?" : Number(n).toFixed(1)
+    }
+
     function refresh() {
         var active = []
         try {
@@ -60,7 +64,7 @@ Item {
 
     Rectangle {
         width: 300
-        height: Math.min(180, 38 + column.implicitHeight)
+        height: Math.min(220, 38 + column.implicitHeight)
         x: Math.max(0, root.width - width - 8)
         y: 8
         radius: 6
@@ -74,11 +78,20 @@ Item {
             Text { text: root.status; color: "#f2f4f5"; font.bold: true }
             Repeater {
                 model: root.snapshots
-                delegate: Text {
+                delegate: Column {
                     width: column.width
-                    color: "#cbd6e3"
-                    elide: Text.ElideRight
-                    text: "Deck " + modelData.deck + ": " + (modelData.artist || "?") + " — " + (modelData.title || "?")
+                    Text {
+                        width: parent.width
+                        color: "#cbd6e3"
+                        elide: Text.ElideRight
+                        text: "Deck " + modelData.deck + ": " + (modelData.artist || "?") + " — " + (modelData.title || "?")
+                    }
+                    Text {
+                        color: "#9db0c5"
+                        text: "BPM " + root.displayNumber(modelData.bpm)
+                            + "   Position " + root.displayNumber(modelData.position)
+                            + "   State " + (modelData.playState === null ? "?" : String(modelData.playState))
+                    }
                 }
             }
         }
