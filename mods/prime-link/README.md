@@ -16,6 +16,8 @@ The package scripts follow the Prime Clock overlay layout. Build with
 `python3 scripts/package.py --target jp24 --output dist`, then run
 `python3 scripts/validate_package.py dist/prime-link-v0.1.0-dev.1-jp24.zip --target jp24`.
 No signed catalog record or device installation is included.
+The observed JP24 prerequisites and the remaining reversible device-test gate
+are recorded in `JP24_HARDWARE_TRIAL.md`.
 
 `src/peer` contains the first transport-independent deck-status decoder and
 sequence gate. Run `go test ./...` from that directory. It validates untrusted

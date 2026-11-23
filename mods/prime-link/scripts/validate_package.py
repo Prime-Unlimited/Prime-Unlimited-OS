@@ -23,6 +23,8 @@ def main():
             assert info.file_size <= 1024 * 1024
         profile = json.loads(archive.read("prime-link/platform.json"))
         assert profile["model"].lower() == args.target
+        assert profile["architecture"] == ("aarch64" if args.target == "jp24" else "armv7l")
+        assert profile["abi"] == ("gnu" if args.target == "jp24" else "gnueabihf")
         qml = archive.read("prime-link/ui/DeckTelemetry.qml").decode()
         assert "import QtQuick 2.12" in qml and "import Planck 1.0" in qml
         assert "/GUI/Decks/ActiveDecks" in qml
