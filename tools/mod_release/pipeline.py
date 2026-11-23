@@ -206,7 +206,7 @@ def validate_zip(path: Path, entrypoint: str, service: dict | None, device: str)
         capability = service.get("capability")
         if not isinstance(binary, str) or binary not in names or names[binary].is_dir():
             raise ModReleaseError("native service file is invalid")
-        if capability != "splash-image" or not SHA_RE.fullmatch(str(digest or "")):
+        if capability not in ("splash-image", "media-import") or not SHA_RE.fullmatch(str(digest or "")):
             raise ModReleaseError("native service file is invalid")
         payload = archive.read(binary)
         if _sha256(payload) != digest:

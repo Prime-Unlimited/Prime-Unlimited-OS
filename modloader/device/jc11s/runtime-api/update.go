@@ -10,11 +10,12 @@ import (
 )
 
 type rollbackRecord struct {
-	SchemaVersion int          `json:"schemaVersion"`
-	ModID         string       `json:"modId"`
-	Payload       string       `json:"payload"`
-	Previous      installedMod `json:"previous"`
-	CreatedAt     int64        `json:"createdAt"`
+	SchemaVersion  int             `json:"schemaVersion"`
+	ModID          string          `json:"modId"`
+	Payload        string          `json:"payload"`
+	Previous       installedMod    `json:"previous"`
+	PreviousSafety *modSafetyState `json:"previousSafety,omitempty"`
+	CreatedAt      int64           `json:"createdAt"`
 }
 
 type updateResult struct {
@@ -58,6 +59,15 @@ func updateDisabledMod(item mod, catalogID, cacheRoot, stagingRoot, root string)
 	}
 	if previous.Enabled {
 		return result, errors.New("enabled mod cannot be updated")
+	}
+	safety, err := loadSafetyState(root)
+	if err != nil {
+		return result, err
+	}
+	var previousSafety *modSafetyState
+	if value, ok := safety.Mods[item.ID]; ok {
+		copy := value
+		previousSafety = &copy
 	}
 	available, _ := updateDetails(item, previous)
 	if !available {
@@ -125,9 +135,19 @@ func updateDisabledMod(item mod, catalogID, cacheRoot, stagingRoot, root string)
 		_ = writeAtomicJSON(registryPath, state)
 		return result, err
 	}
-	record := rollbackRecord{SchemaVersion: 1, ModID: item.ID, Payload: filepath.ToSlash(filepath.Join("mods", "rollback", item.ID, txid)), Previous: previous, CreatedAt: time.Now().Unix()}
+	record := rollbackRecord{SchemaVersion: 1, ModID: item.ID, Payload: filepath.ToSlash(filepath.Join("mods", "rollback", item.ID, txid)), Previous: previous, PreviousSafety: previousSafety, CreatedAt: time.Now().Unix()}
 	if err = writeAtomicJSON(filepath.Join(rollbackRoot, "current.json"), record); err != nil {
 		_ = writeAtomicJSON(registryPath, state)
+		_ = writeActivationManifest(root, state)
+		return result, err
+	}
+	// Quarantine records failures of the exact old payload. A different signed
+	// and inspected payload receives one clean retry. Global Safe Mode remains.
+	delete(safety.Mods, item.ID)
+	if err = writeSafetyState(root, safety); err != nil {
+		_ = os.Remove(filepath.Join(rollbackRoot, "current.json"))
+		_ = writeAtomicJSON(registryPath, state)
+		_ = writeActivationManifest(root, state)
 		return result, err
 	}
 	committed = true
@@ -198,6 +218,24 @@ func rollbackMod(id, root string) (updateResult, error) {
 	}
 	next.Mods[id] = record.Previous
 	if err = writeAtomicJSON(registryPath, next); err != nil {
+		_ = os.Rename(previousTarget, backup)
+		_ = os.Rename(failed, target)
+		return result, err
+	}
+	safety, err := loadSafetyState(root)
+	if err != nil {
+		_ = writeAtomicJSON(registryPath, state)
+		_ = os.Rename(previousTarget, backup)
+		_ = os.Rename(failed, target)
+		return result, err
+	}
+	if record.PreviousSafety == nil {
+		delete(safety.Mods, id)
+	} else {
+		safety.Mods[id] = *record.PreviousSafety
+	}
+	if err = writeSafetyState(root, safety); err != nil {
+		_ = writeAtomicJSON(registryPath, state)
 		_ = os.Rename(previousTarget, backup)
 		_ = os.Rename(failed, target)
 		return result, err

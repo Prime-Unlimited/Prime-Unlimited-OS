@@ -65,6 +65,11 @@ func TestVerifiedUpdateAndRollbackPreservePreviousVersion(t *testing.T) {
 	if _, err := installDisabledMod(item, "trusted-test", cacheRoot, stagingRoot, root); err != nil {
 		t.Fatal(err)
 	}
+	safety := emptySafetyState()
+	safety.Mods[item.ID] = modSafetyState{FailureCount: failureQuarantineThreshold, Quarantined: true, LastFailure: 1234}
+	if err := writeSafetyState(root, safety); err != nil {
+		t.Fatal(err)
+	}
 	payload := makeZIP(t, []zipEntry{{name: "mod/start.sh", data: "#!/bin/sh\n", mode: 0o777}, {name: "mod/data.txt", data: "updated"}})
 	updated, updatedCache := cachedZIP(t, payload)
 	updated.ID = item.ID
@@ -85,6 +90,13 @@ func TestVerifiedUpdateAndRollbackPreservePreviousVersion(t *testing.T) {
 	if err != nil || !result.Updated || result.RolledBack {
 		t.Fatalf("update=%#v err=%v", result, err)
 	}
+	safety, err = loadSafetyState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := safety.Mods[item.ID]; exists {
+		t.Fatal("verified update retained stale quarantine state")
+	}
 	state, err := loadRegistry(filepath.Join(root, "registry", "state.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -95,6 +107,13 @@ func TestVerifiedUpdateAndRollbackPreservePreviousVersion(t *testing.T) {
 	rolled, err := rollbackMod(item.ID, root)
 	if err != nil || !rolled.RolledBack {
 		t.Fatalf("rollback=%#v err=%v", rolled, err)
+	}
+	safety, err = loadSafetyState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored := safety.Mods[item.ID]; !restored.Quarantined || restored.FailureCount != failureQuarantineThreshold {
+		t.Fatalf("rollback did not restore previous quarantine: %#v", restored)
 	}
 	state, err = loadRegistry(filepath.Join(root, "registry", "state.json"))
 	if err != nil {

@@ -105,6 +105,17 @@ def _catalog(root: Path, device: str, mods: list[dict]) -> None:
 
 
 class PipelineTests(unittest.TestCase):
+    def test_media_import_service_is_valid_for_development_catalog(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            directory = _mod(root, "development", "usb-copy", "0.1.0-beta.1", ("jp24",), service=True)
+            document = json.loads((directory / "mod.json").read_text())
+            document["targets"]["jp24"]["service"]["capability"] = "media-import"
+            (directory / "mod.json").write_text(json.dumps(document))
+            found = validate_tree(root)
+            self.assertEqual(found[0]["targets"]["jp24"]["service"]["capability"], "media-import")
+
     def test_new_development_mod_is_detected_for_both_devices(self):
         root = Path(self.id().replace(".", "-"))
         # Use a temp directory rather than the test id as a relative path.

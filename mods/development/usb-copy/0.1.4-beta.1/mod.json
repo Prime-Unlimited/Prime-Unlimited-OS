@@ -1,0 +1,24 @@
+{
+  "id": "usb-copy",
+  "name": "USB Copy",
+  "version": "0.1.4-beta.1",
+  "revision": 1,
+  "description": "Experimental USB-to-internal import for MP3, WAV and FLAC on JP24.",
+  "firmware": ["5.3.0"],
+  "entrypoint": "usb-copy/start.sh",
+  "overlay": "usb-copy/ui/USBCopy.qml",
+  "hardwareVerification": "recorded-separately",
+  "approval": {"maintainer": "Prime Unlimited", "devices": ["JP24"]},
+  "dependencies": [],
+  "conflicts": [],
+  "targets": {
+    "jp24": {
+      "description": "Experimental USB-to-internal import; visible and installable only while Developer Mode is enabled.",
+      "service": {
+        "binary": "usb-copy/bin/usb-copy-service-aarch64",
+        "sha256": "ffe06d8f1a8369691be9d45e2884d9ad65f72d7f12d519d86c2e577e10e80d67",
+        "capability": "media-import"
+      }
+    }
+  }
+}
