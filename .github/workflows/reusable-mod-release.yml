@@ -71,7 +71,7 @@ jobs:
         run: python -m pytest -q "$MOD_DIR/tests" modloader/ui
       - name: Test the shared Mod Loader runtime
         working-directory: modloader/device/jc11s/runtime-api
-        env: {GO111MODULE: 'off'}
+        env: {GO111MODULE: 'on'}
         run: go test ./...
 
   hook-builds:

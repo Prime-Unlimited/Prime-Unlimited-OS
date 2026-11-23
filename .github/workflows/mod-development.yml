@@ -50,7 +50,7 @@ jobs:
           python -m unittest tools.mod_release.tests.test_pipeline modloader/ui/test_qml_contract.py
       - name: Test the device runtime
         working-directory: modloader/device/jc11s/runtime-api
-        env: {GO111MODULE: "off"}
+        env: {GO111MODULE: "on"}
         run: go test ./...
 
   publish:
