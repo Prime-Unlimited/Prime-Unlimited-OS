@@ -450,3 +450,7 @@ internal mounts. A local mocked JavaScript flow check passed stale-response,
 duplicate-request, close-serialization and direct-preview scenarios. Eight
 existing QML contract tests passed. This is logic/static checking, not Qt
 rendering or deployed device verification. No new device writes were performed.
+
+## 2026-11-23 — normal live admission, complete automatic import
+
+JP24 / firmware 5.3.0: Sunbeam Outside World imported through normal preview/start with one new MP3, four duplicates skipped, one generated playlist containing only the new track. Destination SHA-256, ID3 and embedded cover verified; Engine identity unchanged. Owner confirmed cover, playlist membership and deck loading. The preceding Afterlife uncertain-create recovery was separate and is not counted as an automatic end-to-end pass. See LIVE_IMPORT_STATUS.md for remaining release checks.

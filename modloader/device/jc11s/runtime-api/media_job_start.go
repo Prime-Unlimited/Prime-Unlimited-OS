@@ -6,6 +6,7 @@ import (
 	"errors"
 	"golang.org/x/sys/unix"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 )
 
 type mediaJobRequest struct {
+	Mode                string                   `json:"mode,omitempty"`
 	DestinationIdentity mediaDestinationIdentity `json:"destinationIdentity,omitempty"`
 	ID                  string                   `json:"id"`
 	EventID             string                   `json:"eventId"`
@@ -24,7 +26,7 @@ type mediaJobRequest struct {
 }
 
 func mediaIdentity(v mountedBlockVolume) mediaMountIdentity {
-	return mediaMountIdentity{MountID: v.mountID, DeviceID: v.deviceID, Root: v.mountPath, SysfsPath: v.sysfsPath}
+	return mediaMountIdentity{Generation: v.deviceGeneration, MountID: v.mountID, DeviceID: v.deviceID, Root: v.mountPath, SysfsPath: v.sysfsPath}
 }
 func (s *server) mediaCommitAvailable() bool { return s.mediaImportWrites && s.model == "JP24" }
 func mediaMP3Plan(plan usbcopy.ImportPlan) bool {
@@ -50,6 +52,9 @@ func mediaJobRequestsRoot(root string) (string, error) {
 	return dir, nil
 }
 func writeMediaJobRequest(root string, request mediaJobRequest) error {
+	if request.Mode != "" && request.Mode != "offline" && request.Mode != "live" {
+		return errors.New("invalid import mode")
+	}
 	if !validMediaEventID(request.ID) || !validMediaEventID(request.EventID) || !validMediaEventID(request.SourceDigest) || (!request.DestinationIdentity.empty() && !request.DestinationIdentity.valid()) {
 		return errors.New("invalid private job request")
 	}
@@ -100,6 +105,9 @@ func readMediaJobRequest(root, id string) (mediaJobRequest, error) {
 	if !request.DestinationIdentity.empty() && !request.DestinationIdentity.valid() {
 		return request, errors.New("invalid library identity")
 	}
+	if request.Mode != "" && request.Mode != "offline" && request.Mode != "live" {
+		return request, errors.New("invalid import mode")
+	}
 	return request, nil
 }
 func launchMediaJob(s *server, id string) error {
@@ -118,7 +126,21 @@ func launchMediaJob(s *server, id string) error {
 	if e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 {
 		return errors.New("unsafe runtime executable")
 	}
-	args := []string{"--quiet", "--unit=pu-usb-job-" + id, "--property=Type=exec", "--property=Restart=no", "--property=KillMode=control-group", "--property=RuntimeMaxSec=420s", "--property=TimeoutStopSec=45s", "--property=UMask=0077", exe, "--media-import-job", id, "--model", s.model, "--firmware", s.firmware, "--architecture", s.architecture, "--abi", s.abi, "--root", s.root, "--catalog", s.catalogPath, "--catalog-signature", s.catalogSignaturePath, "--catalog-trust-key", s.catalogTrustKeyPath}
+	request, e := readMediaJobRequest(s.root, id)
+	if e != nil {
+		return e
+	}
+	maximum := "420s"
+	if request.Mode == "live" {
+		if !s.mediaLiveAvailable() {
+			return errors.New("live job launch is not enabled")
+		}
+		maximum = "21600s"
+	}
+	args := []string{"--quiet", "--unit=pu-usb-job-" + id, "--property=Type=exec", "--property=Restart=no", "--property=KillMode=control-group", "--property=RuntimeMaxSec=" + maximum, "--property=TimeoutStopSec=45s", "--property=UMask=0077", exe, "--media-import-job", id, "--model", s.model, "--firmware", s.firmware, "--architecture", s.architecture, "--abi", s.abi, "--root", s.root, "--catalog", s.catalogPath, "--catalog-signature", s.catalogSignaturePath, "--catalog-trust-key", s.catalogTrustKeyPath}
+	if request.Mode == "live" {
+		args = append(args, "--media-import-live", "--media-import-writes")
+	}
 	_, e = mediaEngineCommand(context.Background(), "/usr/bin/systemd-run", args...)
 	return e
 }
@@ -131,13 +153,24 @@ func (s *server) handleMediaJobStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "supervised import is not enabled"})
 		return
 	}
+	if s.mediaImportLive && !s.mediaLiveAvailable() {
+		writeJSON(w, 403, map[string]string{"error": "live import is not verified for this device profile"})
+		return
+	}
 	var input struct {
 		EventID              string `json:"eventId"`
+		Mode                 string `json:"mode,omitempty"`
+		ConfirmCopy          bool   `json:"confirmCopy"`
 		ConfirmEngineRestart bool   `json:"confirmEngineRestart"`
 	}
 	data, e := io.ReadAll(io.LimitReader(r.Body, 4097))
-	if e != nil || len(data) > 4096 || decodeStrictJSON(data, &input) != nil || !validMediaEventID(input.EventID) || !input.ConfirmEngineRestart {
+	if e != nil || len(data) > 4096 || decodeStrictJSON(data, &input) != nil || !validMediaEventID(input.EventID) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "valid preview and explicit Engine-restart confirmation required"})
+		return
+	}
+	mode, modeErr := mediaRequestedImportMode(s.mediaImportLive, input.Mode, input.ConfirmCopy, input.ConfirmEngineRestart)
+	if modeErr != nil {
+		writeJSON(w, 400, map[string]string{"error": "valid import mode and explicit copy confirmation required"})
 		return
 	}
 	s.mediaMu.Lock()
@@ -191,7 +224,7 @@ func (s *server) handleMediaJobStart(w http.ResponseWriter, r *http.Request) {
 	}
 	source, sourceOK := findVolumeByKey(volumes, state.SourceMountID+":"+state.SourceDevice)
 	target, targetOK := findVolumeByKey(volumes, state.DestinationMountID+":"+state.DestinationDevice)
-	if !sourceOK || !targetOK || source.mountPath != state.SourceRoot || target.mountPath != state.DestinationRoot || !isReadableMediaSource(source) || !isInternalMediaDestination(target) {
+	if !sourceOK || !targetOK || source.deviceGeneration != state.SourceGeneration || target.deviceGeneration != state.DestinationGeneration || source.mountPath != state.SourceRoot || target.mountPath != state.DestinationRoot || !isReadableMediaSource(source) || !isInternalMediaDestination(target) {
 		writeJSON(w, 409, map[string]string{"error": "source or destination changed"})
 		return
 	}
@@ -214,12 +247,12 @@ func (s *server) handleMediaJobStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "job identity unavailable"})
 		return
 	}
-	request := mediaJobRequest{DestinationIdentity: destinationIdentity, ID: id, EventID: input.EventID, Mounts: mediaJobMounts{BootID: boot, Source: mediaIdentity(source), Destination: mediaIdentity(target)}, SourceDigest: state.DuplicateSummary.SourceDigest, CreatedAt: time.Now().UTC()}
+	request := mediaJobRequest{Mode: mode, DestinationIdentity: destinationIdentity, ID: id, EventID: input.EventID, Mounts: mediaJobMounts{BootID: boot, Source: mediaIdentity(source), Destination: mediaIdentity(target)}, SourceDigest: state.DuplicateSummary.SourceDigest, CreatedAt: time.Now().UTC()}
 	if e = writeMediaJobRequest(s.root, request); e != nil {
 		writeJSON(w, 503, map[string]string{"error": "job request could not be saved"})
 		return
 	}
-	job, e := store.Save(usbcopy.ImportJobStatus{ID: id, Phase: usbcopy.JobQueued, FilesTotal: len(state.Plan.Tracks), BytesTotal: state.DuplicateSummary.BytesToCopy})
+	job, e := store.Save(usbcopy.ImportJobStatus{Mode: mode, ID: id, Phase: usbcopy.JobQueued, FilesTotal: len(state.Plan.Tracks), BytesTotal: state.DuplicateSummary.BytesToCopy})
 	if e != nil {
 		writeJSON(w, 503, map[string]string{"error": "job status could not be saved"})
 		return
@@ -237,6 +270,9 @@ func (s *server) handleMediaJobStart(w http.ResponseWriter, r *http.Request) {
 	}
 	for key, event := range s.mediaEvents {
 		if event.ID == input.EventID {
+			if e := s.rememberMediaResolution(event); e != nil {
+				log.Printf("accepted media job resolution could not be persisted")
+			}
 			event.Resolved = true
 			s.mediaEvents[key] = event
 		}
@@ -266,6 +302,9 @@ func (s *server) runMediaJob(ctx context.Context, id string) (err error) {
 	request, e := readMediaJobRequest(s.root, id)
 	if e != nil {
 		return e
+	}
+	if request.Mode == "live" {
+		return s.runMediaLiveJob(ctx, request, store)
 	}
 	control, e := newMediaEngineController(s.model, request.Mounts)
 	if e != nil {

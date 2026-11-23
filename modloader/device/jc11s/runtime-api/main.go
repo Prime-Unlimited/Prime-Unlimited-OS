@@ -176,6 +176,7 @@ type server struct {
 	mediaDestinations      map[string]mediaImportDestination
 	mediaPreviews          map[string]*usbcopy.ImportPlan
 	mediaImportWrites      bool
+	mediaImportLive        bool
 	github                 *githubDeviceClient
 	login                  developerLogin
 }
@@ -588,6 +589,14 @@ func (s *server) handleRecover(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/v1/media-import/native-status" {
+		s.handleNativeMediaStatus(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/v1/media-import/native/") {
+		s.handleNativeMediaCommand(w, r)
+		return
+	}
 	if r.URL.Path == "/api/v1/service-pair" {
 		s.handleServicePair(w, r)
 		return
@@ -915,6 +924,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "overlay state unavailable"})
 			return
+		}
+		if native, enabled, e := s.nativeMediaOverlay(); e != nil {
+			writeJSON(w, 503, map[string]string{"error": "native overlay unavailable"})
+			return
+		} else if enabled {
+			overlays = append(overlays, native)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"overlays": overlays})
 	case "/api/v1/monotonic":
@@ -1555,6 +1570,7 @@ func loadOrCreateAuthToken(path string) (string, error) {
 func main() {
 	mediaJobID := flag.String("media-import-job", "", "run one trusted import job without starting HTTP")
 	mediaWrites := flag.Bool("media-import-writes", false, "enable experimental supervised JP24 imports")
+	mediaLive := flag.Bool("media-import-live", false, "enable experimental trusted native import broker")
 	listen := flag.String("listen", "127.0.0.1:8098", "loopback listen address")
 	model := flag.String("model", "JC11S", "device model")
 	firmware := flag.String("firmware", "5.3.0", "Engine OS version")
@@ -1578,8 +1594,12 @@ func main() {
 	}
 	if *mediaJobID != "" {
 		state, _ := loadVerifiedCatalogWithFallback(*catalogPath, *catalogSignaturePath, *catalogTrustKeyPath)
-		worker := &server{root: *root, model: *model, firmware: *firmware, architecture: *architecture, abi: *abi, catalog: state, catalogPath: *catalogPath, catalogSignaturePath: *catalogSignaturePath, catalogTrustKeyPath: *catalogTrustKeyPath}
-		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+		worker := &server{mediaImportLive: *mediaLive, mediaImportWrites: *mediaWrites, root: *root, model: *model, firmware: *firmware, architecture: *architecture, abi: *abi, catalog: state, catalogPath: *catalogPath, catalogSignaturePath: *catalogSignaturePath, catalogTrustKeyPath: *catalogTrustKeyPath}
+		maximum := 6 * time.Minute
+		if *mediaLive {
+			maximum = 6 * time.Hour
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), maximum)
 		defer cancel()
 		if err := worker.runMediaJob(ctx, *mediaJobID); err != nil {
 			log.Print("USB Copy job requires review")
@@ -1606,7 +1626,12 @@ func main() {
 	if err := provisionAuthorizedUI(*root, authToken); err != nil {
 		log.Fatalf("UI authorization setup failed: %v", err)
 	}
-	runtimeServer := &server{mediaImportWrites: *mediaWrites, model: *model, firmware: *firmware, architecture: *architecture, abi: *abi, catalog: state, authToken: authToken, root: *root,
+	if *mediaLive {
+		if err := provisionNativeMediaUI(*root, authToken); err != nil {
+			log.Fatalf("native media UI setup failed: %v", err)
+		}
+	}
+	runtimeServer := &server{mediaImportLive: *mediaLive, mediaImportWrites: *mediaWrites, model: *model, firmware: *firmware, architecture: *architecture, abi: *abi, catalog: state, authToken: authToken, root: *root,
 		catalogPath: *catalogPath, catalogSignaturePath: *catalogSignaturePath, catalogTrustKeyPath: *catalogTrustKeyPath,
 		catalogURL: *catalogURL, catalogSignatureURL: *catalogSignatureURL, catalogSource: "offline-cache",
 		cacheRoot: *cacheRoot, stagingRoot: *stagingRoot, httpClient: newPackageHTTPClient(),

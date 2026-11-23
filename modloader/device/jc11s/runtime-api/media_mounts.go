@@ -6,21 +6,23 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 // mountedBlockVolume is an internal runtime record. Its mount path and kernel
 // device number must never be returned to a mod or copied from API input.
 type mountedBlockVolume struct {
-	mountID   string
-	deviceID  string
-	mountPath string
-	sysfsPath string
-	source    string
-	fsType    string
-	options   map[string]bool
-	usb       bool
-	sdCard    bool
+	mountID          string
+	deviceID         string
+	mountPath        string
+	sysfsPath        string
+	source           string
+	fsType           string
+	options          map[string]bool
+	usb              bool
+	sdCard           bool
+	deviceGeneration string
 }
 
 var sysfsUSBPort = regexp.MustCompile(`^usb[0-9]+$`)
@@ -69,6 +71,7 @@ func parseMountedBlockVolumes(file *os.File, sysDevBlock string) ([]mountedBlock
 		}
 		if target, err := filepath.EvalSymlinks(filepath.Join(sysDevBlock, deviceID)); err == nil {
 			volume.sysfsPath = target
+			volume.deviceGeneration = blockDeviceGeneration(target)
 			volume.usb = hasUSBAncestor(target)
 			volume.sdCard = hasSDCardAncestor(target)
 		} else {
@@ -82,6 +85,21 @@ func parseMountedBlockVolumes(file *os.File, sysDevBlock string) ([]mountedBlock
 		return nil, errors.New("mount table could not be parsed")
 	}
 	return volumes, nil
+}
+
+func blockDeviceGeneration(target string) string {
+	for _, dir := range []string{target, filepath.Dir(target)} {
+		data, e := os.ReadFile(filepath.Join(dir, "diskseq"))
+		if e != nil {
+			continue
+		}
+		value := strings.TrimSpace(string(data))
+		n, e := strconv.ParseUint(value, 10, 64)
+		if e == nil && n > 0 && strconv.FormatUint(n, 10) == value {
+			return value
+		}
+	}
+	return ""
 }
 
 func validDeviceNumber(value string) bool {

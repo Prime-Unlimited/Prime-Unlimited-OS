@@ -6,7 +6,7 @@ This is a new experimental mod, version **0.1.4-dev.1**. It requires the USB Cop
 
 - Prime 4 G2 (JP24): USB prompt, destination selection, progress, content deduplication, offline metadata/artwork import and generated playlists were exercised on hardware. Missing title tags fall back to the original filename.
 - Native live operations on JP24: playlist creation, existing-track membership, and registering one new internal MP3 with ID3 title/artist and embedded cover were individually verified without restarting Engine. The new track was also added separately to the test playlist.
-- The reusable live sequence and durable intent journal are implemented and tested. **The general native adapter is not yet connected to normal USB Copy admission.** Normal imports still use the tested offline supervisor. Diagnostic native endpoints remain limited to a fixed test fixture, not arbitrary files.
+- Normal USB Copy admission is connected to the durable live sequence and trusted native broker behind explicit experimental runtime flags. On 2026-11-23, one new tagged MP3 with cover was automatically copied and added to a new playlist while four existing files were skipped. The owner confirmed visibility and deck loading; Engine remained running. See LIVE_IMPORT_STATUS.md for release limits.
 - Prime 4 / Prime 4+ and other models: do not infer hardware validation from JP24 tests. JC11S is a preview build target only.
 - **SD cards are excluded from this validation.** Do not use them for these tests. The source USB must remain unchanged.
 - Interrupted native operations require review; automatic SQL repair or blind native retries are not implemented.
@@ -90,7 +90,9 @@ the mod must not modify Engine database files directly.
 - Never write to a mounted SQLite library without an Engine-owned API or a
   verified coordination/locking mechanism.
 
-## Current status
+## Implementation history
+
+The following milestones describe development stages. The current live integration and hardware evidence are recorded in [LIVE_IMPORT_STATUS.md](LIVE_IMPORT_STATUS.md).
 
 Implementation has started on `feat/usb-copy-to-internal`, based on the open
 service-mod work in PR #22. The shared scanner recognizes audio files, extracts
@@ -237,8 +239,7 @@ entrypoint and overlay paths. Artifacts are unsigned and unapproved; packaging
 does not publish, alter a catalog, install or enable anything. The lifecycle
 service opens no media or network listeners. The preview requires the updated
 trusted runtime and OverlayHost; the laboratory import/repair executables are
-excluded from the package. Copying through the production dialog is not yet
-implemented. Package tests verify both ELF architectures, hashes, archive
+excluded from the package. The normal admission path supports experimental live imports with the compatible trusted runtime; these unsigned packages alone do not enable it. Package tests verify both ELF architectures, hashes, archive
 paths, no embedded runtime token and absence of laboratory executables.
 
 ## Building a preview

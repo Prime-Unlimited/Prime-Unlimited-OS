@@ -30,22 +30,33 @@ type nativePlaylistID struct {
 	Value  string `json:"value"`
 	Length int    `json:"length"`
 }
+type nativeDeviceObservation struct {
+	Path      string `json:"path"`
+	UUID      string `json:"uuid"`
+	Row       int    `json:"row"`
+	Current   bool   `json:"current"`
+	CanSelect bool   `json:"canSelect"`
+}
 type nativePlaylistObservation struct {
-	CollectionIsLibrary    bool                     `json:"collectionIsLibrary"`
-	CanRegisterFiles       bool                     `json:"canRegisterFiles"`
-	Errors                 int                      `json:"errors"`
-	VisibleVisited         int                      `json:"visibleVisited"`
-	ClassHints             []string                 `json:"classHints"`
-	MainScreen             bool                     `json:"mainScreen"`
-	Visited                int                      `json:"visited"`
-	Truncated              bool                     `json:"truncated"`
-	DurationMS             int                      `json:"durationMs"`
-	RootDepth              int                      `json:"rootDepth"`
-	CanRefreshCollection   bool                     `json:"canRefreshCollection"`
-	CanImportTracks        bool                     `json:"canImportTracks"`
-	CanAddTracksToDatabase bool                     `json:"canAddTracksToDatabase"`
-	Instances              []nativePlaylistInstance `json:"instances"`
-	IDs                    []nativePlaylistID       `json:"ids"`
+	CollectionPath         string                    `json:"collectionPath,omitempty"`
+	CollectionListID       string                    `json:"collectionListId,omitempty"`
+	CollectionRows         int                       `json:"collectionRows"`
+	Devices                []nativeDeviceObservation `json:"devices,omitempty"`
+	CollectionIsLibrary    bool                      `json:"collectionIsLibrary"`
+	CanRegisterFiles       bool                      `json:"canRegisterFiles"`
+	Errors                 int                       `json:"errors"`
+	VisibleVisited         int                       `json:"visibleVisited"`
+	ClassHints             []string                  `json:"classHints"`
+	MainScreen             bool                      `json:"mainScreen"`
+	Visited                int                       `json:"visited"`
+	Truncated              bool                      `json:"truncated"`
+	DurationMS             int                       `json:"durationMs"`
+	RootDepth              int                       `json:"rootDepth"`
+	CanRefreshCollection   bool                      `json:"canRefreshCollection"`
+	CanImportTracks        bool                      `json:"canImportTracks"`
+	CanAddTracksToDatabase bool                      `json:"canAddTracksToDatabase"`
+	Instances              []nativePlaylistInstance  `json:"instances"`
+	IDs                    []nativePlaylistID        `json:"ids"`
 }
 
 var nativeProbeClassPattern = regexp.MustCompile(`^[A-Za-z0-9_]{1,128}$`)
@@ -62,6 +73,22 @@ func validNativeObservation(o nativePlaylistObservation) bool {
 	}
 	if o.Visited < 0 || o.Visited > 20000 || o.DurationMS < 0 || o.DurationMS > 60000 || o.RootDepth < 0 || o.RootDepth > 64 || len(o.Instances) > 16 || len(o.IDs) > 6 {
 		return false
+	}
+	if o.CollectionRows < 0 || o.CollectionRows > 1000000 || len(o.CollectionPath) > 256 || (o.CollectionPath != "" && (!strings.HasPrefix(o.CollectionPath, "/media/") || strings.Contains(o.CollectionPath, "..") || strings.ContainsAny(o.CollectionPath, "\x00\r\n"))) {
+		return false
+	}
+	if o.CollectionListID != "" {
+		if _, e := strconv.ParseInt(o.CollectionListID, 10, 64); e != nil {
+			return false
+		}
+	}
+	if len(o.Devices) > 32 {
+		return false
+	}
+	for _, d := range o.Devices {
+		if !strings.HasPrefix(d.Path, "/media/") || len(d.Path) > 256 || strings.Contains(d.Path, "..") || strings.ContainsAny(d.Path, "\x00\r\n") || d.Row < 0 || d.Row > 31 || len(d.UUID) > 128 || !nativeProbeIDPattern.MatchString(d.UUID) {
+			return false
+		}
 	}
 	validType := func(t string) bool {
 		return t == "undefined" || t == "object" || t == "number" || t == "string" || t == "boolean"

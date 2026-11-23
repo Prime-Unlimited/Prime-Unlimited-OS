@@ -54,6 +54,9 @@ func (a *fakeLiveAdapter) call(action string) error {
 	}
 	return nil
 }
+func (a *fakeLiveAdapter) SelectLibrary(context.Context, string) error {
+	return a.call("select_library")
+}
 func (a *fakeLiveAdapter) Backup(context.Context, string) error { return a.call("backup") }
 func (a *fakeLiveAdapter) Copy(_ context.Context, _ string, p ImportPlan, d []DuplicateDecision) error {
 	a.copied = p
@@ -107,7 +110,7 @@ func TestLiveSequenceOnlyCopiesAndListsNewFiles(t *testing.T) {
 			t.Fatalf("skipped track in playlist: %+v", refs)
 		}
 	}
-	expected := []string{"backup", "copy", "register", "create", "add", "create", "add", "verify"}
+	expected := []string{"backup", "select_library", "copy", "register", "create", "add", "create", "add", "verify"}
 	if !reflect.DeepEqual(a.calls, expected) {
 		t.Fatalf("calls %v", a.calls)
 	}
@@ -171,5 +174,29 @@ func TestLivePlanRejectsBadAliasAndStaleFingerprint(t *testing.T) {
 	d[0].Fingerprint.ModifiedAt = 1
 	if _, _, e := LiveNewOnlyPlan(p, d); e == nil {
 		t.Fatal("changed source timestamp accepted")
+	}
+}
+
+func TestLivePlanMatchesSourcesAcrossSortingDifferences(t *testing.T) {
+	p, d := liveFixture()
+	p.Tracks[0], p.Tracks[2] = p.Tracks[2], p.Tracks[0]
+	out, skipped, e := LiveNewOnlyPlan(p, d)
+	if e != nil || skipped != 2 || len(out.Tracks) != 1 || out.Tracks[0].SourceRelative != "a.mp3" {
+		t.Fatalf("source mapping depends on position: %+v %d %v", out, skipped, e)
+	}
+	d[1] = d[0]
+	if _, _, e = LiveNewOnlyPlan(p, d); e == nil {
+		t.Fatal("duplicate decision accepted")
+	}
+}
+
+func TestLiveSequenceFailedSelectionNeverCopiesMusic(t *testing.T) {
+	p, d := liveFixture()
+	j := &memoryLiveJournal{}
+	a := liveAdapter(j)
+	a.fail = "select_library"
+	state, e := RunLiveSequence(context.Background(), strings.Repeat("f", 64), p, d, j, a)
+	if e == nil || state.Phase != "review_required" || len(a.copied.Tracks) != 0 || a.registrations != 0 {
+		t.Fatalf("copied without confirmed library: %+v %v", state, e)
 	}
 }

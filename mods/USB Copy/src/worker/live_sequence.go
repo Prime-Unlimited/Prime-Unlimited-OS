@@ -21,6 +21,7 @@ type LivePlaylistReference struct {
 	NativeID string
 	LocalID  int64
 	Binding  LiveBinding
+	Title    string `json:"Title,omitempty"`
 }
 type LiveSequenceState struct {
 	SourceDigest string                  `json:"sourceDigest"`
@@ -48,6 +49,7 @@ type LiveSequenceJournal interface {
 type LiveSequenceAdapter interface {
 	Validate(context.Context) (LiveBinding, error)
 	Backup(context.Context, string) error
+	SelectLibrary(context.Context, string) error
 	Copy(context.Context, string, ImportPlan, []DuplicateDecision) error
 	Register(context.Context, string, PlannedTrack) (LiveTrackReference, error)
 	CreatePlaylist(context.Context, string, string) (LivePlaylistReference, error)
@@ -55,7 +57,7 @@ type LiveSequenceAdapter interface {
 	Verify(context.Context, ImportPlan, LiveSequenceState) error
 }
 
-// LiveNewOnlyPlan rejects incomplete/reordered/stale duplicate decisions and
+// LiveNewOnlyPlan rejects incomplete/conflicting/stale duplicate decisions and
 // filters BOTH generated/source playlists to only files actually copied. Aliases
 // of newly copied files are skipped as requested, not added to the playlists.
 func LiveNewOnlyPlan(plan ImportPlan, decisions []DuplicateDecision) (ImportPlan, int, error) {
@@ -70,11 +72,17 @@ func LiveNewOnlyPlan(plan ImportPlan, decisions []DuplicateDecision) (ImportPlan
 	}
 	allowed := map[string]bool{}
 	seen := map[string]bool{}
-	fingerprints := map[string]FileFingerprint{}
+	bySource := map[string]DuplicateDecision{}
+	for _, d := range decisions {
+		if _, exists := bySource[d.SourceRelative]; exists {
+			return out, 0, errors.New("repeated duplicate decision")
+		}
+		bySource[d.SourceRelative] = d
+	}
 	skipped := 0
-	for i, t := range plan.Tracks {
-		d := decisions[i]
-		if d.SourceRelative != t.SourceRelative || seen[t.SourceRelative] || d.Fingerprint.Bytes != t.Bytes || d.Fingerprint.ModifiedAt != t.SourceModifiedAt || len(d.Fingerprint.SHA256) != 64 {
+	for _, t := range plan.Tracks {
+		d, exists := bySource[t.SourceRelative]
+		if !exists || seen[t.SourceRelative] || d.Fingerprint.Bytes != t.Bytes || d.Fingerprint.ModifiedAt != t.SourceModifiedAt || len(d.Fingerprint.SHA256) != 64 {
 			return out, 0, errors.New("source changed after live preview")
 		}
 		for _, c := range d.Fingerprint.SHA256 {
@@ -83,12 +91,14 @@ func LiveNewOnlyPlan(plan ImportPlan, decisions []DuplicateDecision) (ImportPlan
 			}
 		}
 		seen[t.SourceRelative] = true
-		fingerprints[t.SourceRelative] = d.Fingerprint
 		if d.ExistingTrackID < 0 || (d.ExistingTrackID > 0 && d.DuplicateOfSource != "") {
 			return out, 0, errors.New("conflicting duplicate decision")
 		}
-		if d.DuplicateOfSource != "" && (d.DuplicateOfSource == d.SourceRelative || !seen[d.DuplicateOfSource] || fingerprints[d.DuplicateOfSource].SHA256 != d.Fingerprint.SHA256 || fingerprints[d.DuplicateOfSource].Bytes != d.Fingerprint.Bytes) {
-			return out, 0, errors.New("unresolved duplicate source")
+		if d.DuplicateOfSource != "" {
+			target, ok := bySource[d.DuplicateOfSource]
+			if !ok || d.DuplicateOfSource == d.SourceRelative || target.DuplicateOfSource != "" || target.Fingerprint.SHA256 != d.Fingerprint.SHA256 || target.Fingerprint.Bytes != d.Fingerprint.Bytes {
+				return out, 0, errors.New("unresolved duplicate source")
+			}
 		}
 		if d.ExistingTrackID > 0 || d.DuplicateOfSource != "" {
 			skipped++
@@ -212,6 +222,9 @@ func RunLiveSequence(ctx context.Context, id string, plan ImportPlan, decisions 
 		return state, journal.Save(ctx, state)
 	}
 	if err = effect("backup", func() error { return adapter.Backup(ctx, id) }); err != nil {
+		return finishFailure(err)
+	}
+	if err = effect("select_library", func() error { return adapter.SelectLibrary(ctx, state.Intent) }); err != nil {
 		return finishFailure(err)
 	}
 	if err = effect("copy", func() error { return adapter.Copy(ctx, id, filtered, copiedDecisions) }); err != nil {

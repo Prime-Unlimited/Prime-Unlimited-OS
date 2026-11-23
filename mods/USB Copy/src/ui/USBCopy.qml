@@ -100,7 +100,7 @@ Item {
     }
     function jobMessage() {
         if (!currentJob) return ""
-        var phases = {queued: "Import vorbereitet", stopping_engine: "Engine wird angehalten …", copying: "Musik wird kopiert …", committing_library: "Bibliothek und Playlists werden aktualisiert …", restarting_engine: "Engine wird gestartet …", completed: "Import abgeschlossen", failed: "Import fehlgeschlagen", cancelled: "Import abgebrochen", interrupted: "Import unterbrochen. Bitte vor einem erneuten Import prüfen."}
+        var phases = {queued: "Import wird vorbereitet …", stopping_engine: "Engine wird angehalten …", copying: "Musik wird kopiert …", committing_library: "Bibliothek und Playlists werden aktualisiert …", restarting_engine: "Engine wird gestartet …", completed: "Import abgeschlossen", failed: "Import fehlgeschlagen", cancelled: "Import abgebrochen", interrupted: "Import unterbrochen. Bitte vor einem erneuten Import prüfen."}
         if (currentJob.phase === "completed" && currentJob.resultAvailable) {
             var copied = currentJob.copiedFiles || 0
             var skipped = currentJob.skippedFiles || 0
@@ -122,7 +122,7 @@ Item {
             if (!accepted) { message = "Importstart konnte nicht bestätigt werden (HTTP " + status + ")."; mediaImportBridge.refreshJobs(); return }
             try { currentJob = JSON.parse(responseText).job || null } catch (e) { currentJob = null }
             if (currentJob) { currentEvent = null; preview = null; choosingDestination = false; confirmRestart = false; message = "" }
-        })
+        }, preview.mode || "offline")
     }
     function closeJob() {
         if (!terminalJob() || busy) return
@@ -263,7 +263,7 @@ Item {
                 Text {
                     width: parent.width
                     visible: overlay.preview !== null
-                    text: overlay.confirmRestart ? "Engine wird neu gestartet. Eine laufende Wiedergabe wird beendet." : "Vorschau bereit. Es wurde noch nichts kopiert."
+                    text: overlay.confirmRestart ? (overlay.preview && overlay.preview.mode === "live" ? "Musik und Playlists werden ohne Engine-Neustart importiert." : "Engine wird neu gestartet. Eine laufende Wiedergabe wird beendet.") : "Vorschau bereit. Es wurde noch nichts kopiert."
                     color: "#ffd27a"
                     font.pixelSize: 14
                     wrapMode: Text.WordWrap

@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: ['feat/usb-copy-mod']
-    paths: ['mods/USB Copy/**', '.github/workflows/usb-copy-preview.yml']
+    paths: ['mods/USB Copy/**', 'modloader/ui/**', 'modloader/device/jc11s/runtime-api/**', '.github/workflows/usb-copy-preview.yml']
 permissions:
   contents: read
 jobs:
@@ -17,9 +17,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test trusted native UI actor and diagnostic guards
+        working-directory: modloader/ui
+        run: |
+          node test_native_media_import.cjs ../device/jc11s/runtime-api/assets/NativeMediaImport.qml
+          node test_native_playlist_create.cjs NativePlaylistProbe.qml
+          node test_native_playlist_probe.cjs NativePlaylistProbe.qml
       - name: Test worker and durable live sequence
         working-directory: mods/USB Copy/src/worker
         run: go test -race ./...
+      - name: Test trusted runtime and native command broker
+        working-directory: modloader/device/jc11s/runtime-api
+        run: go test ./...
       - name: Verify preview package contents and architectures
         run: python3 -m unittest discover -s 'mods/USB Copy/tests'
       - name: Build unsigned preview packages

@@ -25,6 +25,12 @@ type nativePlaylistMember struct {
 	Track int64  `json:"track"`
 }
 type nativeCreateState struct {
+	LookupOriginUUID          string                   `json:"lookupOriginUuid,omitempty"`
+	LookupOriginID            int64                    `json:"lookupOriginId,omitempty"`
+	LookupLocalID             int64                    `json:"lookupLocalId,omitempty"`
+	LookupFileURL             string                   `json:"lookupFileUrl,omitempty"`
+	LookupURI                 string                   `json:"lookupUri,omitempty"`
+	SelectionReviewed         bool                     `json:"selectionReviewed,omitempty"`
 	BeforeListMembers         []nativePlaylistMember   `json:"beforeListMembers,omitempty"`
 	UserConfirmedRegistration bool                     `json:"userConfirmedRegistration,omitempty"`
 	NativeCollectionComplete  bool                     `json:"nativeCollectionComplete,omitempty"`
@@ -151,6 +157,15 @@ func (s *server) nativeCreateViewMatches(state nativeCreateState) bool {
 	if state.Operation == "register" && (!s.nativeProbeObservation.CollectionIsLibrary || !s.nativeProbeObservation.CanRegisterFiles) {
 		return false
 	}
+	if state.Operation == "lookup" {
+		return nativeSelectionMatches(s.nativeProbeObservation, state, true) && s.nativeProbeObservation.CollectionPath == state.SourceDevice && (s.nativeProbeObservation.CollectionListID == "0" || s.nativeProbeObservation.CollectionListID == "-1")
+	}
+	if state.Operation == "all_tracks" {
+		return nativeSelectionMatches(s.nativeProbeObservation, state, true)
+	}
+	if state.Operation == "select" {
+		return nativeSelectionMatches(s.nativeProbeObservation, state, false)
+	}
 	n := 0
 	for _, view := range s.nativeProbeObservation.Instances {
 		if state.Operation == "add" || state.Operation == "register" {
@@ -223,6 +238,12 @@ func verifyNativeCreate(ctx context.Context, state *nativeCreateState, database 
 	return nil
 }
 func nativeCreateActive(state nativeCreateState) bool {
+	if state.Operation == "lookup" && state.Phase == "lookup_failed" {
+		return false
+	}
+	if state.Phase == "selection_noop" && state.Operation == "select" && state.SelectionReviewed {
+		return false
+	}
 	return state.Phase != "verified" && state.Phase != "not_invoked" && !(state.Phase == "registration_verified" && state.Operation == "register" && state.UserConfirmedRegistration)
 }
 func nativeCreateLease(root string) (func(), error) {
@@ -282,6 +303,18 @@ func (s *server) handleNativePlaylistCreate(w http.ResponseWriter, r *http.Reque
 	defer s.nativeCreateMu.Unlock()
 	suffix := strings.TrimPrefix(r.URL.Path, "/api/v1/native-playlist/create-test")
 	state, loadErr := readNativeCreate(s.root)
+	if suffix == "/lookup-track" && r.Method == http.MethodPost {
+		s.queueNativeTrackLookup(w, r, state, loadErr)
+		return
+	}
+	if suffix == "/all-tracks" && r.Method == http.MethodPost {
+		s.queueNativeLibrarySelection(w, r, state, loadErr, "all_tracks")
+		return
+	}
+	if suffix == "/select-library" && r.Method == http.MethodPost {
+		s.queueNativeLibrarySelection(w, r, state, loadErr, "select")
+		return
+	}
 	if suffix == "/register-file" && r.Method == http.MethodPost {
 		s.queueNativeRegistration(w, r, state, loadErr)
 		return
@@ -404,7 +437,17 @@ func (s *server) handleNativePlaylistCreate(w http.ResponseWriter, r *http.Reque
 				if e != nil {
 					err = e
 				} else {
-					if state.Operation == "register" {
+					if state.Operation == "all_tracks" {
+						if state.Phase == "submitted" && s.nativeAllTracksConfirmed(state) {
+							state.Phase = "verified"
+						}
+					} else if state.Operation == "select" {
+						if state.Phase == "submitted" && s.nativeSelectionConfirmed(state) {
+							state.Phase = "verified"
+						}
+					} else if state.Operation == "lookup" {
+						// Read-only lookup is completed only by its checked URI response.
+					} else if state.Operation == "register" {
 						err = verifyNativeRegistration(r.Context(), &state, database)
 					} else if state.Operation == "add" {
 						err = verifyNativeAdd(r.Context(), &state, database)
@@ -427,11 +470,13 @@ func (s *server) handleNativePlaylistCreate(w http.ResponseWriter, r *http.Reque
 	}
 	if (suffix == "/claim" || suffix == "/ack") && r.Method == http.MethodPost {
 		var input struct {
-			ID    string `json:"id"`
-			Stage string `json:"stage"`
+			ID            string `json:"id"`
+			Stage         string `json:"stage"`
+			NativeTrackID string `json:"nativeTrackId,omitempty"`
+			NativeURI     string `json:"nativeUri,omitempty"`
 		}
-		data, err := io.ReadAll(io.LimitReader(r.Body, 513))
-		if err != nil || len(data) > 512 || decodeStrictJSON(data, &input) != nil || input.ID != state.ID {
+		data, err := io.ReadAll(io.LimitReader(r.Body, 8193))
+		if err != nil || len(data) > 8192 || decodeStrictJSON(data, &input) != nil || input.ID != state.ID {
 			writeJSON(w, 400, map[string]string{"error": "invalid command acknowledgement"})
 			return
 		}
@@ -450,7 +495,7 @@ func (s *server) handleNativePlaylistCreate(w http.ResponseWriter, r *http.Reque
 				writeJSON(w, 409, map[string]string{"error": "native target changed"})
 				return
 			}
-			if state.Operation == "add" || state.Operation == "register" {
+			if state.Operation == "add" || state.Operation == "register" || state.Operation == "select" || state.Operation == "all_tracks" || state.Operation == "lookup" {
 				identity, e := nativeEngineIdentity()
 				if e != nil || identity != state.EngineIdentity {
 					writeJSON(w, 409, map[string]string{"error": "engine instance changed"})
@@ -485,6 +530,71 @@ func (s *server) handleNativePlaylistCreate(w http.ResponseWriter, r *http.Reque
 				}
 				if e != nil {
 					writeJSON(w, 409, map[string]string{"error": "registration verification failed"})
+					return
+				}
+			case "review_selection_noop":
+				if state.Operation != "select" {
+					writeJSON(w, 400, map[string]string{"error": "selection review required"})
+					return
+				}
+				identity, e := nativeEngineIdentity()
+				s.nativeProbeMu.Lock()
+				otherCurrent := 0
+				if s.nativeProbeObservation != nil {
+					for _, d := range s.nativeProbeObservation.Devices {
+						if d.Current && d.Path != state.SourceDevice {
+							otherCurrent++
+						}
+					}
+				}
+				fresh := time.Now().Before(s.nativeProbeUntil) && time.Since(s.nativeProbeReceivedAt) < 15*time.Second && nativeSelectionMatches(s.nativeProbeObservation, state, false)
+				s.nativeProbeMu.Unlock()
+				if e != nil || identity != state.EngineIdentity || !fresh || otherCurrent != 1 {
+					writeJSON(w, 409, map[string]string{"error": "selection outcome not established"})
+					return
+				}
+				state.SelectionReviewed = true
+				state.Phase = "selection_noop"
+			case "lookup_failed":
+				if state.Operation != "lookup" {
+					writeJSON(w, 400, map[string]string{"error": "lookup command required"})
+					return
+				}
+				state.Phase = "lookup_failed"
+			case "lookup_result":
+				if state.Operation != "lookup" || !s.nativeAllTracksConfirmed(state) {
+					writeJSON(w, 409, map[string]string{"error": "native lookup context changed"})
+					return
+				}
+				identity, e := nativeEngineIdentity()
+				if e != nil || identity != state.EngineIdentity {
+					writeJSON(w, 409, map[string]string{"error": "engine instance changed"})
+					return
+				}
+				target, e := nativeCreateTarget(r.Context(), state)
+				if e == nil {
+					var database string
+					database, e = internalEngineDatabase(target.mountPath)
+					if e == nil {
+						var expected string
+						expected, e = nativeLookupFileURL(r.Context(), database, target.mountPath, state.LookupLocalID)
+						if expected != state.LookupFileURL {
+							e = errors.New("lookup track moved")
+						}
+						if e == nil {
+							fresh := state
+							e = populateNativeLookupOrigin(r.Context(), &fresh, database)
+							if fresh.LookupOriginUUID != state.LookupOriginUUID || fresh.LookupOriginID != state.LookupOriginID {
+								e = errors.New("lookup origin changed")
+							}
+						}
+					}
+				}
+				if e == nil {
+					e = verifyNativeLookupResult(&state, input.NativeTrackID, input.NativeURI)
+				}
+				if e != nil {
+					writeJSON(w, 409, map[string]string{"error": "native lookup result did not verify"})
 					return
 				}
 			case "submitted":

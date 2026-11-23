@@ -12,10 +12,11 @@ import (
 )
 
 type mediaMountIdentity struct {
-	MountID   string
-	DeviceID  string
-	Root      string
-	SysfsPath string
+	MountID    string
+	DeviceID   string
+	Root       string
+	SysfsPath  string
+	Generation string
 }
 type mediaJobMounts struct {
 	BootID      string
@@ -93,7 +94,7 @@ func mediaEnginePause(ctx context.Context, d time.Duration) error {
 }
 func mediaJobMountMatch(volumes []mountedBlockVolume, identity mediaMountIdentity) (mountedBlockVolume, bool) {
 	for _, volume := range volumes {
-		if volume.mountID == identity.MountID && volume.deviceID == identity.DeviceID && volume.mountPath == identity.Root && volume.sysfsPath == identity.SysfsPath {
+		if volume.mountID == identity.MountID && volume.deviceID == identity.DeviceID && volume.mountPath == identity.Root && volume.sysfsPath == identity.SysfsPath && (identity.Generation == "" || volume.deviceGeneration == identity.Generation) {
 			return volume, true
 		}
 	}

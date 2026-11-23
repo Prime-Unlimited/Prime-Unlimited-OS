@@ -29,6 +29,7 @@ const (
 
 // ImportJobStatus contains public progress and a playlist label, never file paths or tags.
 type ImportJobStatus struct {
+	Mode             string    `json:"mode,omitempty"`
 	ResultAvailable  bool      `json:"resultAvailable,omitempty"`
 	CopiedFiles      int       `json:"copiedFiles,omitempty"`
 	SkippedFiles     int       `json:"skippedFiles,omitempty"`
@@ -104,6 +105,12 @@ func validJobTransition(old, next JobPhase) bool {
 	return false
 }
 func validJobProgress(s ImportJobStatus) bool {
+	if s.Mode != "" && s.Mode != "offline" && s.Mode != "live" {
+		return false
+	}
+	if s.Mode == "live" && (s.Phase == JobStopping || s.Phase == JobRestarting) {
+		return false
+	}
 	if s.FilesDone < 0 || s.FilesTotal < 0 || s.FilesDone > s.FilesTotal || s.BytesDone < 0 || s.BytesTotal < 0 || s.BytesDone > s.BytesTotal || len(s.ErrorCode) > 80 {
 		return false
 	}
@@ -126,6 +133,30 @@ func validJobProgress(s ImportJobStatus) bool {
 		}
 	}
 	return true
+}
+
+func validJobStatusTransition(old, next ImportJobStatus) bool {
+	if old.Mode != next.Mode {
+		return false
+	}
+	if old.Mode != "live" {
+		return validJobTransition(old.Phase, next.Phase)
+	}
+	if terminalJobPhase(old.Phase) {
+		return false
+	}
+	if old.Phase == next.Phase || next.Phase == JobFailed || next.Phase == JobInterrupted {
+		return true
+	}
+	switch old.Phase {
+	case JobQueued:
+		return next.Phase == JobCopying || next.Phase == JobCancelled
+	case JobCopying:
+		return next.Phase == JobCommitting || next.Phase == JobCancelled
+	case JobCommitting:
+		return next.Phase == JobCompleted
+	}
+	return false
 }
 func (s *JobStore) Read(id string) (ImportJobStatus, error) {
 	var status ImportJobStatus
@@ -168,6 +199,31 @@ func (s *JobStore) Read(id string) (ImportJobStatus, error) {
 // Save uses a revision check and a per-job OS lock across the API and worker.
 // Successful return means the atomic record and its directory were synced.
 func (s *JobStore) Save(next ImportJobStatus) (ImportJobStatus, error) {
+	return s.save(next, "")
+}
+
+// BeginVerifiedLiveFinalization is for an explicitly reviewed root supervisor,
+// never automatic recovery or mod HTTP admission. The caller must hold both
+// writer leases and independently validate persisted files/native identities.
+// It permits only final membership work, not copying or registration again.
+func (s *JobStore) BeginVerifiedLiveFinalization(id string, revision uint64, evidenceSHA string) (ImportJobStatus, error) {
+	if !validJobStatusID(evidenceSHA) {
+		return ImportJobStatus{}, errors.New("verified review evidence required")
+	}
+	j, e := s.Read(id)
+	if e != nil {
+		return j, e
+	}
+	if j.Revision != revision {
+		return j, errors.New("review revision changed")
+	}
+	j.Phase = JobCommitting
+	j.Acknowledged = false
+	j.ErrorCode = ""
+	return s.save(j, evidenceSHA)
+}
+
+func (s *JobStore) save(next ImportJobStatus, reviewEvidence string) (ImportJobStatus, error) {
 	if !validJobStatusID(next.ID) || !validJobProgress(next) {
 		return next, errors.New("invalid job status")
 	}
@@ -189,17 +245,47 @@ func (s *JobStore) Save(next ImportJobStatus) (ImportJobStatus, error) {
 	} else if e != nil {
 		return next, e
 	} else {
+		review := reviewEvidence != "" && previous.Mode == "live" && next.Mode == "live" && previous.Phase == JobInterrupted && next.Phase == JobCommitting && previous.EngineRestored && previous.FilesDone == previous.FilesTotal && previous.BytesDone == previous.BytesTotal && !previous.ResultAvailable && !next.ResultAvailable
+		if reviewEvidence != "" && !review {
+			return next, errors.New("job is not eligible for reviewed finalization")
+		}
 		ackOnly = false
 		if terminalJobPhase(previous.Phase) && next.Phase == previous.Phase && !previous.Acknowledged && next.Acknowledged {
 			compare := next
 			compare.Acknowledged = previous.Acknowledged
 			ackOnly = compare == previous
 		}
-		if next.Revision != previous.Revision || (!validJobTransition(previous.Phase, next.Phase) && !ackOnly) {
+		if next.Revision != previous.Revision || (!validJobStatusTransition(previous, next) && !ackOnly && !review) {
 			return next, errors.New("stale revision or invalid job transition")
 		}
 		if next.FilesTotal != previous.FilesTotal || next.BytesTotal != previous.BytesTotal || next.FilesDone < previous.FilesDone || next.BytesDone < previous.BytesDone {
 			return next, errors.New("job totals or progress changed inconsistently")
+		}
+		if review {
+			f, err := os.OpenFile(filepath.Join(s.root, next.ID+".review-reserved"), os.O_WRONLY|os.O_CREATE|os.O_EXCL|unix.O_NOFOLLOW, 0600)
+			if err != nil {
+				return next, err
+			}
+			_, err = f.WriteString(reviewEvidence)
+			if err == nil {
+				err = f.Sync()
+			}
+			ce := f.Close()
+			if err == nil {
+				err = ce
+			}
+			if err != nil {
+				return next, err
+			}
+			d, err := os.Open(s.root)
+			if err != nil {
+				return next, err
+			}
+			err = d.Sync()
+			d.Close()
+			if err != nil {
+				return next, err
+			}
 		}
 	}
 	if e == nil && !ackOnly && terminalJobPhase(next.Phase) && next.Phase != JobInterrupted && previous.Phase != JobQueued && !next.EngineRestored {

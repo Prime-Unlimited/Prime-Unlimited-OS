@@ -126,7 +126,7 @@ Item {
             request.send()
         }
 
-        function startImport(eventId, callback) {
+        function startImport(eventId, callback, mode) {
             if (preparing) { if (callback) callback(false, 409, ""); return }
             preparing = true
             generation++
@@ -141,7 +141,10 @@ Item {
             request.open("POST", "http://127.0.0.1:8098/api/v1/media-import/start")
             request.setRequestHeader("Content-Type", "application/json")
             host.authorized(request)
-            request.send(JSON.stringify({eventId: eventId, confirmEngineRestart: true}))
+            var input = {eventId: eventId}
+            if (mode === "live") { input.mode = "live"; input.confirmCopy = true }
+            else { if (mode === "offline") input.mode = "offline"; input.confirmEngineRestart = true }
+            request.send(JSON.stringify(input))
         }
         function refreshJobs() {
             if (preparing || jobsRefreshing) return

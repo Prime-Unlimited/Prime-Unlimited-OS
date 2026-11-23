@@ -22,3 +22,24 @@ command.operation='register';command.targetListId='2397';command.fileUrl='file:/
 c.handledCommands={};c.Planck.librarianController.currentCollectionController={addTracksFromFileSystem(){throw Error('wrong controller')}};c.pollNativeCreate();assert.equal(registrations.length,1);
 c.Planck.librarianController.currentCollectionController=collection;command.fileUrl='file:///media/SD%20Card/sample.mp3';c.pollNativeCreate();assert.equal(registrations.length,1);
 console.log('PASS: one native file registration, exact library controller, internal URL only, no duplicate invocation');
+
+vm.runInContext(extract('nativeDeviceTarget'),c);
+let selectedDevices=[];const deviceRows=[{deviceRow:1,deviceRoles:{path:'/media/Denon',readOnly:false}}];
+c.nativeDeviceRows={count:1,objectAt:i=>deviceRows[i]};c.Planck.librarianController.sourceViewIndex=0;c.Planck.librarianController.craylistController={getSourceDevice:()=>'/media/Denon'};
+c.nativeConnectedRows={count:1,objectAt:i=>({sourceRow:0,sourceRoles:{identifier:'/media/Denon'}})};
+const browser={connectedSourceModel:()=>({index:(row,column)=>({row,column,kind:'connected-source'})}),select:index=>{assert.equal(index.kind,'connected-source');selectedDevices.push(index)}};c.Planck.librarianController.browserSourceControllerPtr=()=>browser;
+c.Planck.librarianController.devicesController={craylistModelRootModelIndex:path=>({row:1,kind:'lists-root'}),getDatabaseUuid:()=> 'library',deviceModel:{index:(row,column)=>({row,column})},select:()=>{throw Error('wrong controller used')}};
+command.operation='select';command.identity={libraryUuid:'library'};c.createCandidates=[];c.handledCommands={};c.pollNativeCreate();c.pollNativeCreate();assert.equal(selectedDevices.length,1);assert.equal(selectedDevices[0].row,0);
+c.handledCommands={};command.identity.libraryUuid='wrong';c.pollNativeCreate();assert.equal(selectedDevices.length,1);
+command.identity.libraryUuid='library';deviceRows.push(deviceRows[0]);c.nativeDeviceRows.count=2;c.pollNativeCreate();assert.equal(selectedDevices.length,1);
+console.log('PASS: device selection without visible playlist, exact path/UUID and no duplicate call');
+let rootSelections=0;deviceRows.pop();c.nativeDeviceRows.count=1;c.Planck.librarianController.currentCollectionController=collection;c.Planck.librarianController.devicesController.getCurrentDevicePath=()=>'/media/Denon';c.Planck.librarianController.craylistController.select=(index,source,select,update)=>{assert.equal(index.kind,'lists-root');assert.equal(source,1);assert.equal(select,true);assert.equal(update,false);rootSelections++};
+command.operation='all_tracks';c.handledCommands={};c.pollNativeCreate();c.pollNativeCreate();assert.equal(rootSelections,1);
+c.handledCommands={};c.Planck.librarianController.devicesController.getCurrentDevicePath=()=>'/media/MP3 2';c.pollNativeCreate();assert.equal(rootSelections,1);
+console.log('PASS: internal All Tracks selection only after verified destination binding, without visible playlist');
+for(const name of ['lookupContextMatches','beginNativeLookup','scanNativeLookupChunk'])vm.runInContext(extract(name),c);
+let lookupReads=0,uriReads=0,lookupResults=[];const previousRequest=c.nativeRequest;c.nativeRequest=(method,path,data,cb)=>{if(data&&data.stage==='lookup_result')lookupResults.push(data);previousRequest(method,path,data,cb)};
+c.Planck.librarianController.devicesController.getCurrentDevicePath=()=>'/media/Denon';collection.getDevicePath=()=>'/media/Denon';collection.getCraylistIdOfCurrentCollectionDisplayed=()=>-1;collection.getTrackUrisFromUniversalIds=ids=>{uriReads++;assert.equal(ids[0],2251799813701950);return '["file:///media/Denon/Engine%20Library/Music/new.mp3"]'};
+collection.collectionModel={rowCount:()=>1001,index:row=>({row}),data:index=>{lookupReads++;return index.row===999?2251799813701950:2251799813685249+index.row}};c.AbstractCollectionModel={TrackId:271};command.operation='lookup';command.lookupLocalId=16702;c.lookupState=null;c.beginNativeLookup(command);c.scanNativeLookupChunk();assert(lookupReads<=200);assert.equal(uriReads,0);let chunks=0;while(c.lookupState&&chunks++<100)c.scanNativeLookupChunk();assert.equal(lookupResults.length,1);assert.equal(lookupResults[0].nativeTrackId,'2251799813701950');assert.equal(uriReads,1);assert.equal(registrations.length,1);
+c.beginNativeLookup(command);collection.getDevicePath=()=>'/media/MP3 2';c.scanNativeLookupChunk();assert.equal(c.lookupState,null);assert.equal(uriReads,1);assert.equal(acks[acks.length-1],'lookup_failed');
+console.log('PASS: bounded native ID scan, one real URI lookup, no selection/import writes, context-change abort');

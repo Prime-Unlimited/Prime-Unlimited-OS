@@ -19,21 +19,23 @@ import (
 )
 
 type mediaInsertEvent struct {
-	ID           string                   `json:"id"`
-	DisplayName  string                   `json:"displayName"`
-	Destinations []mediaImportDestination `json:"destinations"`
-	Resolved     bool                     `json:"-"`
-	mountKey     string
-	mountPath    string
+	ID               string                   `json:"id"`
+	DisplayName      string                   `json:"displayName"`
+	Destinations     []mediaImportDestination `json:"destinations"`
+	Resolved         bool                     `json:"-"`
+	mountKey         string
+	mountPath        string
+	deviceGeneration string
 }
 
 type mediaImportDestination struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	FreeBytes  uint64 `json:"freeBytes"`
-	TotalBytes uint64 `json:"totalBytes"`
-	mountKey   string
-	mountPath  string
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	FreeBytes        uint64 `json:"freeBytes"`
+	TotalBytes       uint64 `json:"totalBytes"`
+	mountKey         string
+	mountPath        string
+	deviceGeneration string
 }
 
 type mediaImportDecision struct {
@@ -43,6 +45,7 @@ type mediaImportDecision struct {
 }
 
 type mediaImportPreview struct {
+	Mode             string   `json:"mode"`
 	CommitAvailable  bool     `json:"commitAvailable"`
 	Accepted         bool     `json:"accepted"`
 	Prepared         bool     `json:"prepared"`
@@ -56,18 +59,20 @@ type mediaImportPreview struct {
 }
 
 type mediaPreviewState struct {
-	DestinationIdentity mediaDestinationIdentity
-	Plan                usbcopy.ImportPlan
-	DuplicateSummary    usbcopy.DuplicateSummary
-	EventID             string
-	SourceMountID       string
-	SourceDevice        string
-	SourceRoot          string
-	DestinationID       string
-	DestinationMountID  string
-	DestinationDevice   string
-	DestinationRoot     string
-	CreatedAt           time.Time
+	DestinationIdentity   mediaDestinationIdentity
+	Plan                  usbcopy.ImportPlan
+	DuplicateSummary      usbcopy.DuplicateSummary
+	EventID               string
+	SourceMountID         string
+	SourceDevice          string
+	SourceGeneration      string
+	SourceRoot            string
+	DestinationID         string
+	DestinationMountID    string
+	DestinationDevice     string
+	DestinationGeneration string
+	DestinationRoot       string
+	CreatedAt             time.Time
 }
 
 var mediaPreviewFileMu sync.Mutex
@@ -124,14 +129,18 @@ func (s *server) handleMediaImportPreview(w http.ResponseWriter, r *http.Request
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "import preview not found"})
 			return
 		}
-		s.clearMediaPreview(request.EventID)
 		for key, event := range s.mediaEvents {
 			if event.ID == request.EventID {
+				if err := s.rememberMediaResolution(event); err != nil {
+					writeJSON(w, 503, map[string]string{"error": "preview decision could not be saved"})
+					return
+				}
 				event.Resolved = true
 				s.mediaEvents[key] = event
 				break
 			}
 		}
+		s.clearMediaPreview(request.EventID)
 		removeMediaPreview(request.EventID)
 		writeJSON(w, http.StatusOK, map[string]bool{"accepted": true})
 		return
@@ -169,7 +178,7 @@ func (s *server) handleMediaImportPreview(w http.ResponseWriter, r *http.Request
 	}
 	source, sourceMounted := findVolumeByKey(volumes, state.SourceMountID+":"+state.SourceDevice)
 	destination, destinationMounted := findVolumeByKey(volumes, state.DestinationMountID+":"+state.DestinationDevice)
-	if !sourceMounted || !destinationMounted || !isInternalMediaDestination(destination) || destination.mountPath != state.DestinationRoot || !isReadableMediaSource(source) {
+	if !sourceMounted || !destinationMounted || source.deviceGeneration != state.SourceGeneration || destination.deviceGeneration != state.DestinationGeneration || !isInternalMediaDestination(destination) || destination.mountPath != state.DestinationRoot || !isReadableMediaSource(source) {
 		writeJSON(w, http.StatusGone, map[string]string{"error": "source or destination is no longer eligible"})
 		return
 	}
@@ -220,6 +229,7 @@ func (s *server) handleMediaImportPreview(w http.ResponseWriter, r *http.Request
 	}
 	result := mediaPreviewFromPlan(state.Plan, duplicates)
 	result.CommitAvailable = s.mediaCommitAvailable() && mediaMP3Plan(state.Plan)
+	s.setMediaPreviewMode(&result)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -356,10 +366,11 @@ func (s *server) handleMediaImportDecision(w http.ResponseWriter, r *http.Reques
 			s.mediaPreviews = make(map[string]*usbcopy.ImportPlan)
 		}
 		previewState := mediaPreviewState{DestinationIdentity: destinationIdentity,
-			Plan: plan, DuplicateSummary: duplicates, EventID: event.ID, SourceMountID: volume.mountID, SourceDevice: volume.deviceID, SourceRoot: volume.mountPath,
+			Plan: plan, DuplicateSummary: duplicates, EventID: event.ID, SourceMountID: volume.mountID, SourceDevice: volume.deviceID, SourceGeneration: volume.deviceGeneration, SourceRoot: volume.mountPath,
 			DestinationID: destination.ID, DestinationMountID: destinationMountID,
-			DestinationDevice: destinationDevice,
-			DestinationRoot:   destination.mountPath, CreatedAt: createdAt,
+			DestinationDevice:     destinationDevice,
+			DestinationGeneration: destination.deviceGeneration,
+			DestinationRoot:       destination.mountPath, CreatedAt: createdAt,
 		}
 		if err := writeMediaPreview(event.ID, previewState); err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "import preview could not be saved safely"})
@@ -368,6 +379,7 @@ func (s *server) handleMediaImportDecision(w http.ResponseWriter, r *http.Reques
 		s.mediaPreviews[eventKey] = &previewState.Plan
 		result := mediaPreviewFromPlan(plan, duplicates)
 		result.CommitAvailable = s.mediaCommitAvailable() && mediaMP3Plan(plan)
+		s.setMediaPreviewMode(&result)
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
@@ -376,6 +388,10 @@ func (s *server) handleMediaImportDecision(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	event := s.mediaEvents[eventKey]
+	if err := s.rememberMediaResolution(event); err != nil {
+		writeJSON(w, 503, map[string]string{"error": "media decision could not be saved"})
+		return
+	}
 	event.Resolved = true
 	s.mediaEvents[eventKey] = event
 	delete(s.mediaPreviews, eventKey)
@@ -406,7 +422,8 @@ func (s *server) mediaEventVolume(event mediaInsertEvent) (mountedBlockVolume, b
 	if err != nil {
 		return mountedBlockVolume{}, false
 	}
-	return findVolumeByKey(volumes, event.mountKey)
+	v, ok := findVolumeByKey(volumes, event.mountKey)
+	return v, ok && v.deviceGeneration == event.deviceGeneration
 }
 
 func (s *server) mediaDestinationsForEvent(event mediaInsertEvent, id string) (mediaImportDestination, bool) {
@@ -605,12 +622,12 @@ func (s *server) updateMediaInsertEvents(volumes []mountedBlockVolume) ([]mediaI
 			continue
 		}
 		destination, exists := s.mediaDestinations[key]
-		if !exists {
+		if !exists || destination.deviceGeneration != volume.deviceGeneration {
 			id, err := newServiceToken()
 			if err != nil {
 				return nil, errors.New("destination id unavailable")
 			}
-			destination = mediaImportDestination{ID: id, mountKey: key, mountPath: volume.mountPath}
+			destination = mediaImportDestination{ID: id, mountKey: key, mountPath: volume.mountPath, deviceGeneration: volume.deviceGeneration}
 		}
 		destination.Name = mediaVolumeDisplayName(volume.mountPath)
 		destination.FreeBytes = statfsBytes(stats.Bavail, int64(stats.Bsize))
@@ -640,17 +657,24 @@ func (s *server) updateMediaInsertEvents(volumes []mountedBlockVolume) ([]mediaI
 		}
 		key := volume.mountID + ":" + volume.deviceID
 		active[key] = true
-		if _, exists := s.mediaEvents[key]; exists {
-			continue
+		if old, exists := s.mediaEvents[key]; exists {
+			if old.deviceGeneration == volume.deviceGeneration {
+				continue
+			}
+			removeMediaPreview(old.ID)
+			delete(s.mediaEvents, key)
+			delete(s.mediaPreviews, key)
 		}
 		id, err := newServiceToken()
 		if err != nil {
 			return nil, errors.New("media event id unavailable")
 		}
-		s.mediaEvents[key] = mediaInsertEvent{
-			ID: id, DisplayName: mediaVolumeDisplayName(volume.mountPath), Destinations: append([]mediaImportDestination(nil), destinations...),
-			mountKey: key, mountPath: volume.mountPath,
+		event := mediaInsertEvent{ID: id, DisplayName: mediaVolumeDisplayName(volume.mountPath), Destinations: append([]mediaImportDestination(nil), destinations...), mountKey: key, mountPath: volume.mountPath, deviceGeneration: volume.deviceGeneration}
+		event, err = s.restoreMediaResolution(event)
+		if err != nil {
+			return nil, err
 		}
+		s.mediaEvents[key] = event
 	}
 	for key, event := range s.mediaEvents {
 		if !active[key] {
