@@ -1,6 +1,22 @@
 name: Mod promotion
 
 on:
+  workflow_call:
+    inputs:
+      mod:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      jc11s_sha256:
+        required: false
+        type: string
+        default: ""
+      jp24_sha256:
+        required: false
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       mod:
@@ -58,13 +74,36 @@ jobs:
             echo "Store the existing prime-unlimited-2026-1 key as an environment secret on mod-release. Do not generate a replacement key and do not store it as a repository secret."
             exit 1
           fi
-          args=()
-          if [ -n "$JC11S_SHA256" ]; then args+=(--sha "jc11s=$JC11S_SHA256"); fi
-          if [ -n "$JP24_SHA256" ]; then args+=(--sha "jp24=$JP24_SHA256"); fi
-          if [ "${#args[@]}" -eq 0 ]; then
-            echo "At least one device SHA-256 is required. Promotion is artifact-bound."
-            exit 1
-          fi
+          mapfile -t args < <(python - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          mod_id = os.environ["MOD"]
+          version = os.environ["VERSION"]
+          directory = pathlib.Path("mods/development") / mod_id / version
+          document = json.loads((directory / "mod.json").read_text(encoding="utf-8"))
+          release = json.loads((directory / "release.json").read_text(encoding="utf-8"))
+          targets = document.get("targets") or {}
+          assets = release.get("assets") or {}
+          supplied = {
+              device: os.environ.get(device.upper() + "_SHA256", "").strip()
+              for device in ("jc11s", "jp24")
+          }
+          supplied = {device: digest for device, digest in supplied.items() if digest}
+          if not supplied:
+              raise SystemExit("At least one device SHA-256 is required. Promotion is artifact-bound.")
+          for device, digest in supplied.items():
+              if device not in targets or digest != (assets.get(device) or {}).get("sha256"):
+                  raise SystemExit(f"{device} confirmation does not match the immutable release asset")
+          for device in sorted(targets):
+              digest = (assets.get(device) or {}).get("sha256")
+              if not digest:
+                  raise SystemExit(f"{device} has no immutable release digest")
+              print("--sha")
+              print(f"{device}={digest}")
+          PY
+          )
           python -m tools.mod_release promote --root . --mod "$MOD" --version "$VERSION" --run-id "github-run-$RUN_ID" "${args[@]}"
           python -m tools.mod_release sign --root .
           python -m tools.mod_release validate --root .
