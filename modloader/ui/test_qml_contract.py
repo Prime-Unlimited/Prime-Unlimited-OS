@@ -56,6 +56,11 @@ class QmlContractTests(unittest.TestCase):
         self.assertIn('"Download 0%"', text)
         self.assertIn('"Installation 100%"', text)
 
+    def test_web_access_is_only_offered_for_web_capable_services(self):
+        text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")
+        self.assertIn('modelData.service.capability === "splash-image"', text)
+        self.assertIn('text: "WEB ACCESS"', text)
+
     def test_header_order_and_reduced_lifecycle_controls(self):
         text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")
         header = text[text.index("id: header") : text.index("id: device")]

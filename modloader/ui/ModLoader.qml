@@ -556,7 +556,9 @@ Rectangle {
                         MouseArea { anchors.fill: parent; enabled: !busy; onClicked: pendingUninstall = modelData.id }
                     }
                     Rectangle {
-                        visible: modelData.service !== undefined && installed[modelData.id] !== undefined
+                        visible: modelData.service !== undefined
+                            && modelData.service.capability === "splash-image"
+                            && installed[modelData.id] !== undefined
                         x: 445; y: 91; width: 110; height: 28; radius: 7; color: "#ff541c"
                         Text { anchors.centerIn: parent; text: "WEB ACCESS"; color: "white"; font.bold: true }
                         MouseArea { anchors.fill: parent; enabled: !busy && installed[modelData.id] && installed[modelData.id].enabled
