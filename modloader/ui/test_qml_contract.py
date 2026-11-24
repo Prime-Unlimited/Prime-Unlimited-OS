@@ -33,6 +33,8 @@ class QmlContractTests(unittest.TestCase):
         self.assertIn('"/api/v1/developer-mode/qr.png"', text)
         self.assertIn('"#1f8a4c"', text)
         self.assertNotIn("developerToken", text)
+        self.assertIn("longMutation ? 720000 : 30000", text)
+        self.assertIn("Change timed out; checking device state", text)
 
     def test_independent_self_updater_contract(self):
         text = Path(__file__).with_name("ModLoader.qml").read_text(encoding="utf-8")

@@ -197,7 +197,11 @@ Rectangle {
 
     function mutation(action, id, version, done) {
         if (!authToken) { statusText = "Changes disabled: local authorization unavailable"; return }
-        var request = new XMLHttpRequest(); request.timeout = 30000
+        var request = new XMLHttpRequest()
+        var longMutation = action === "cache" || action === "stage" || action === "inspect"
+            || action === "install" || action === "update" || action === "rollback"
+            || action === "uninstall"
+        request.timeout = longMutation ? 720000 : 30000
         request.onreadystatechange = function() {
             if (request.readyState !== XMLHttpRequest.DONE) return
             try {
@@ -208,6 +212,7 @@ Rectangle {
             } catch (e) { busy = false; statusText = "Invalid service response"; if (done) done(false, ({})) }
         }
         request.onerror = function() { busy = false; statusText = "Connection failed"; if (done) done(false, ({})) }
+        request.ontimeout = function() { busy = false; statusText = "Change timed out; checking device state"; refreshState(); if (done) done(false, ({"error":"timeout"})) }
         busy = true
         request.open("POST", apiBase + "/api/v1/" + action)
         request.setRequestHeader("Content-Type", "application/json")
@@ -220,7 +225,7 @@ Rectangle {
         var steps = ["cache", "stage", "inspect", "install"]
         operationModId = id; operationProgress = 0; operationLabel = "Download 0%"
         function next(index) {
-            if (index >= steps.length) { operationProgress = 100; operationLabel = "Installation 100%"; statusText = "Verified installation completed"; refreshState(); return }
+            if (index >= steps.length) { operationProgress = 100; operationLabel = "Installation 100%"; operationModId = ""; statusText = "Verified installation completed"; refreshState(); return }
             operationProgress = index * 25
             operationLabel = index === 0 ? "Download " + operationProgress + "%" : "Installation " + operationProgress + "%"
             statusText = "Installation: " + steps[index]
@@ -236,6 +241,9 @@ Rectangle {
             var steps = ["cache", "stage", "inspect", "update"]
             function next(index) {
                 if (index >= steps.length) {
+                    operationProgress = 100
+                    operationLabel = "Installation 100%"
+                    operationModId = ""
                     statusText = "Verified update completed"
                     if (wasEnabled) mutation("enable", id, "", function() { refresh() })
                     else refresh()
@@ -244,7 +252,10 @@ Rectangle {
                 statusText = "Update: " + steps[index]
                 operationProgress = index * 25
                 operationLabel = index === 0 ? "Download " + operationProgress + "%" : "Installation " + operationProgress + "%"
-                mutation(steps[index], id, "", function(ok) { if (ok) next(index + 1) })
+                mutation(steps[index], id, "", function(ok) {
+                    if (ok) next(index + 1)
+                    else { operationModId = ""; operationProgress = 0; refreshState() }
+                })
             }
             next(0)
         }
