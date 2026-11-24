@@ -15,7 +15,7 @@ def test_pinned_bootstrap_is_complete_and_exact():
     assert json.loads(files["prime-unlimited/updater/version.json"][0]) == {
         "version": pin["version"], "revision": pin["revision"]
     }
-    assert len(ARCHIVE_ENTRIES) == 7
+    assert len(ARCHIVE_ENTRIES) == 8
     assert files["prime-ssh/activate.sh"][1] == 0o700
     assert files["prime-unlimited/ui/splash/SplashScreen.png"][0].startswith(b"\x89PNG\r\n\x1a\n")
     assert files["prime-unlimited/lib/libprime-ui-hook.so"][0].startswith(b"\x7fELF")

@@ -25,6 +25,7 @@ ARCHIVE_ENTRIES = {
     "bin/prime-unlimited-self-updater": ("prime-unlimited/bin/prime-unlimited-self-updater", 0o755),
     "ui/ModLoader.template.qml": ("prime-unlimited/ui/ModLoader.template.qml", 0o644),
     "ui/OverlayHost.template.qml": ("prime-unlimited/ui/OverlayHost.template.qml", 0o644),
+    "ui/patches/ControlCenterTab.qml": ("prime-unlimited/ui/patches/ControlCenterTab.qml", 0o644),
 }
 
 
