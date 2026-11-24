@@ -90,6 +90,12 @@ func TestStagePackageExtractsAtomicallyWithPrivateModes(t *testing.T) {
 	if err != nil || second != result {
 		t.Fatalf("valid existing stage not reused: %#v %v", second, err)
 	}
+	stable := item
+	stable.Version = "1.0.0"
+	promoted, err := stagePackage(stable, cacheRoot, stagingRoot, defaultStageLimits)
+	if err != nil || promoted.Version != stable.Version || promoted.SHA256 != item.SHA256 {
+		t.Fatalf("same-payload stable promotion did not reuse stage: %#v %v", promoted, err)
+	}
 	entries, _ := os.ReadDir(stagingRoot)
 	if len(entries) != 1 {
 		t.Fatalf("temporary staging data remained: %v", entries)

@@ -259,7 +259,10 @@ func stagePackage(item mod, cacheRoot, stagingRoot string, limits stageLimits) (
 func readValidStage(root string, expected stageResult) (stageResult, error) {
 	var metadata stageMetadata
 	data, err := readOwnedFile(filepath.Join(root, stageMarker), 2*1024*1024, "stage marker")
-	if err != nil || decodeStrictJSON(data, &metadata) != nil || !metadata.Staged || metadata.ID != expected.ID || metadata.Version != expected.Version || metadata.SHA256 != expected.SHA256 || len(metadata.Files) != metadata.FileCount {
+	// The extracted bytes are keyed by SHA-256. A release may promote the exact
+	// same verified payload from a prerelease version to a stable version, so the
+	// display version is deliberately not part of the reusable-stage identity.
+	if err != nil || decodeStrictJSON(data, &metadata) != nil || !metadata.Staged || metadata.ID != expected.ID || metadata.SHA256 != expected.SHA256 || len(metadata.Files) != metadata.FileCount {
 		return metadata.stageResult, errors.New("invalid stage marker")
 	}
 	expectedFiles := make(map[string]stagedFile, len(metadata.Files))
@@ -319,6 +322,7 @@ func readValidStage(root string, expected stageResult) (stageResult, error) {
 	if err != nil || count != metadata.FileCount || total != metadata.TotalBytes {
 		return metadata.stageResult, errors.New("stage inventory mismatch")
 	}
+	metadata.Version = expected.Version
 	return metadata.stageResult, nil
 }
 
