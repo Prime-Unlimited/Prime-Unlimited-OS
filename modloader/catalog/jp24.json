@@ -67,37 +67,6 @@
         "maintainer": "Prime Unlimited"
       },
       "architecture": "aarch64",
-      "description": "Experimental USB-to-internal import; visible and installable only while Developer Mode is enabled.",
-      "downloadUrl": "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/783278296",
-      "entrypoint": "usb-copy/start.sh",
-      "firmware": [
-        "5.3.0"
-      ],
-      "id": "usb-copy-jp24",
-      "models": [
-        "JP24"
-      ],
-      "name": "USB Copy",
-      "overlay": "usb-copy/ui/USBCopy.qml",
-      "revision": 1,
-      "service": {
-        "binary": "usb-copy/bin/usb-copy-service-aarch64",
-        "capability": "media-import",
-        "sha256": "ffe06d8f1a8369691be9d45e2884d9ad65f72d7f12d519d86c2e577e10e80d67"
-      },
-      "sha256": "277111480ab656b822bbc75a0abce2d13d12d6eb12eb6c42285850df878bec95",
-      "size": 832490,
-      "version": "0.1.4-beta.1"
-    },
-    {
-      "abi": "gnu",
-      "approval": {
-        "devices": [
-          "JP24"
-        ],
-        "maintainer": "Prime Unlimited"
-      },
-      "architecture": "aarch64",
       "description": "USB-to-internal import for MP3, WAV and FLAC on JP24.",
       "downloadUrl": "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/786086646",
       "entrypoint": "usb-copy/start.sh",
@@ -110,10 +79,6 @@
       ],
       "name": "USB Copy",
       "overlay": "usb-copy/ui/USBCopy.qml",
-      "release": {
-        "artifactSha256": "277111480ab656b822bbc75a0abce2d13d12d6eb12eb6c42285850df878bec95",
-        "hardwareVerification": "recorded-separately"
-      },
       "revision": 1,
       "service": {
         "binary": "usb-copy/bin/usb-copy-service-aarch64",
@@ -122,7 +87,6 @@
       },
       "sha256": "277111480ab656b822bbc75a0abce2d13d12d6eb12eb6c42285850df878bec95",
       "size": 832490,
-      "status": "development",
       "version": "0.1.4"
     }
   ],
