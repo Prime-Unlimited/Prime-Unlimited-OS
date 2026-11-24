@@ -79,10 +79,6 @@
       ],
       "name": "USB Copy",
       "overlay": "usb-copy/ui/USBCopy.qml",
-      "release": {
-        "artifactSha256": "277111480ab656b822bbc75a0abce2d13d12d6eb12eb6c42285850df878bec95",
-        "hardwareVerification": "recorded-separately"
-      },
       "revision": 1,
       "service": {
         "binary": "usb-copy/bin/usb-copy-service-aarch64",
@@ -91,7 +87,6 @@
       },
       "sha256": "277111480ab656b822bbc75a0abce2d13d12d6eb12eb6c42285850df878bec95",
       "size": 832490,
-      "status": "development",
       "version": "0.1.4-beta.1"
     }
   ],

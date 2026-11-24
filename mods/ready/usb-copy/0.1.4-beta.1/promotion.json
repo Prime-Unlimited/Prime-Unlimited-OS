@@ -1,0 +1,12 @@
+{
+  "modId": "usb-copy",
+  "version": "0.1.4-beta.1",
+  "confirmedBy": "github-environment:mod-release",
+  "workflowRun": "github-run-45342364144",
+  "targets": {
+    "jp24": {
+      "sha256": "277111480ab656b822bbc75a0abce2d13d12d6eb12eb6c42285850df878bec95",
+      "assetId": 783278296
+    }
+  }
+}
