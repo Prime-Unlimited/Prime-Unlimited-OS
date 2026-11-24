@@ -1,14 +1,14 @@
 # Prime Link deck telemetry spike
 
-`src/ui/DeckTelemetry.qml` is an uninstalled read-only overlay prototype for the JP24
+`src/ui/DeckTelemetry.qml` is a read-only overlay prototype for the JP24
 Engine QML context. It displays active deck title, artist, BPM, raw position
 and play state, and holds a bounded snapshot with length for a future local
 Prime Link service. It does not send data, control decks or touch audio.
 
 Property names were observed in the JP24 Engine binary and
-`/GUI/Decks/ActiveDecks` in the saved `EmbeddedMain.qml`. The translator types
-and overlay context still need a live, reversible hardware check before catalog
-approval or device installation. Missing fields remain empty or null.
+`/GUI/Decks/ActiveDecks` in the saved `EmbeddedMain.qml`. A reversible JP24
+trial confirmed that the overlay renders on-screen. The translator values still
+need a live deck check before catalog approval. Missing fields remain empty or null.
 Position and play-state values are shown raw until their units and enum values
 are verified on the device.
 

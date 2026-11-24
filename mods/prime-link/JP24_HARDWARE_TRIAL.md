@@ -81,3 +81,27 @@ Engine, independent SSH and normal API were verified; Safe Mode remains on.
 The corresponding source edit was also reverted. A real visibility check
 requires temporarily disabling Safe Mode with owner authorization, then
 restoring it after the test.
+
+## Overlay endpoint and visibility trial — 2026-11-24
+
+The next safety check found Safe Mode already off. A temporary API attempt
+under a different systemd unit name caused existing managed services, which
+bind to `prime-unlimited-modloader-api.service`, to fail reconciliation with
+HTTP 409. Prime Link was disabled and uninstalled through the normal API. The
+test-induced service failure counts were cleared through the authenticated
+recovery API after the original services were running again; no mod remained
+quarantined.
+
+The corrected trial reused the normal transient systemd unit name with the
+locally signed test catalog. Cache, stage, inspect, install and enable all
+succeeded. `GET /api/v1/overlays` returned the installed Prime Link QML URL
+alongside the existing USB Copy overlays. Engine remained active and no Prime
+Link QML load error appeared in the checked journal. The owner confirmed that
+the Prime Link overlay and its BPM label were visible on the device. Whether
+the BPM field showed a numeric value or `?`, and the other deck field values,
+are still being clarified.
+
+Cleanup disabled and uninstalled Prime Link, restarted the original API start
+script, and verified the unchanged original catalog hash, active Engine/API,
+installed USB Copy, absent Prime Link, and `{"safeMode":false,"mods":{}}`
+safety state. The original JP24 UI hook remained installed during this trial.
