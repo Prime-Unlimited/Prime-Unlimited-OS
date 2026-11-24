@@ -37,36 +37,6 @@
         "maintainer": "Prime Unlimited"
       },
       "architecture": "armv7l",
-      "description": "Administrator-approved JC11S release; hardware validation not yet completed.",
-      "downloadUrl": "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/773325277",
-      "entrypoint": "splash-manager/start.sh",
-      "firmware": [
-        "5.3.0"
-      ],
-      "id": "splash-manager-jc11s",
-      "models": [
-        "JC11S"
-      ],
-      "name": "Splash Manager",
-      "revision": 1,
-      "service": {
-        "binary": "splash-manager/bin/splash-server-armhf",
-        "capability": "splash-image",
-        "sha256": "c80dc37e978de7f85897bcfaa2c3da26bdfc583f9089f576675531a7c7939546"
-      },
-      "sha256": "bc799ab68329fab99c27ba0066d26d39795e6af1683dc2350948a826ea23c658",
-      "size": 2683439,
-      "version": "1.1.2"
-    },
-    {
-      "abi": "gnueabihf",
-      "approval": {
-        "devices": [
-          "JC11S"
-        ],
-        "maintainer": "Prime Unlimited"
-      },
-      "architecture": "armv7l",
       "description": "Development update for the managed splash service with a clean retry after verified package replacement.",
       "downloadUrl": "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/783278122",
       "entrypoint": "splash-manager/start.sh",
@@ -78,10 +48,6 @@
         "JC11S"
       ],
       "name": "Splash Manager",
-      "release": {
-        "artifactSha256": "d80aa2a58768b39981082e406771afa7f34f3842292fb63e6691608c1ab58405",
-        "hardwareVerification": "not-performed"
-      },
       "revision": 1,
       "service": {
         "binary": "splash-manager/bin/splash-server-armhf",
@@ -90,7 +56,6 @@
       },
       "sha256": "d80aa2a58768b39981082e406771afa7f34f3842292fb63e6691608c1ab58405",
       "size": 2682647,
-      "status": "development",
       "version": "1.1.3"
     }
   ],
