@@ -45,3 +45,10 @@ def test_activation_fails_closed_before_ui_bootstrap_is_ready():
     assert 'UI_READY="$PU/bootstrap/ready"' in script
     assert 'if [ -e "$UI_READY" ] && [ -x "$PU/lib/libprime-ui-hook.so" ]' in script
     assert 'if [ -e "$UI_READY" ] && [ ! -e "$RESTART_FLAG" ]' in script
+
+
+def test_activation_repairs_cross_platform_ext4_directory_metadata():
+    script = (ROOT / "modloader/device/jc11s/ui-hook/activate.sh").read_text()
+    assert 'chown -R root:root "$PU/ui" "$PU/catalog" "$PU/trust"' in script
+    assert 'chmod 755 "$PU/ui" "$PU/ui/patches" "$PU/ui/splash"' in script
+    assert 'chmod 700 "$PU/catalog" "$PU/trust"' in script

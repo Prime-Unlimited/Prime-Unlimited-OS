@@ -11,6 +11,15 @@ UI_READY="$PU/bootstrap/ready"
 mkdir -p "$BASE/hostkeys" /run/sshd "$PU/logs"
 chmod 700 "$BASE/hostkeys"
 
+# Some Windows e2fsprogs builds preserve the host account (for example UID
+# 1002 and mode 0770) on directories imported with mke2fs -d. The runtime
+# intentionally refuses to write authorized QML into such a directory.
+# Normalize only the Modloader-owned /data trees before either service starts.
+mkdir -p "$PU/ui/patches" "$PU/ui/splash" "$PU/catalog" "$PU/trust"
+chown -R root:root "$PU/ui" "$PU/catalog" "$PU/trust"
+chmod 755 "$PU/ui" "$PU/ui/patches" "$PU/ui/splash"
+chmod 700 "$PU/catalog" "$PU/trust"
+
 # Early development builds could leave a persistent ALSA configuration that
 # incorrectly loads the Qt resource interposer as an ALSA hook. That prevents
 # Engine from opening its MIDI sequencer and disables the physical controls.

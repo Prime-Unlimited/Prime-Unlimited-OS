@@ -14,6 +14,9 @@ def test_jc11s_ssh_starts_directly_without_systemd_unit():
     assert 'bootstrap-first-start.sh' in script
     assert 'prime-unlimited-modloader-api' in script
     assert 'modloader_payload' in image_builder
+    assert 'chown -R root:root "$PU/ui" "$PU/catalog" "$PU/trust"' in script
+    assert 'chmod 755 "$PU/ui" "$PU/ui/patches" "$PU/ui/splash"' in script
+    assert 'chmod 700 "$PU/catalog" "$PU/trust"' in script
 
 
 def test_jc11s_image_installs_both_alsa_hook_paths():

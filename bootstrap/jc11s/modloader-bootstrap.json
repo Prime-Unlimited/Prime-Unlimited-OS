@@ -10,7 +10,7 @@
   "size": 7490830,
   "sha256": "7b07a5df10a27f7ba1672d8c8272b540d8cd9b16280078f9d4c3a4b0788afcdb",
   "companionSha256": {
-    "prime-ssh/activate.sh": "e5464dc5fd4fca358ce99c56c7d598ea1fa7f7c4b3164ef4ee1904778827f306",
+    "prime-ssh/activate.sh": "d7971db43c29895e4ba5cd0f3b08d372618a483df8f81e9f942b39ad483ec4c3",
     "prime-unlimited/lib/libprime-ui-hook.so": "e3f88ddb082ff0ca390134e8af68c75b30bf4c556709289aeaeffe811ab9d7e9",
     "prime-unlimited/bin/runengine-hooked.sh": "275abeeb93b85b28dad4de447f288ca84caa7dc847a77f240813fae7e33857aa",
     "prime-unlimited/bin/bootstrap-first-start.sh": "e5276e16af00e79a066ffefc5ef5b23e537a520328b692027d04c187f958283f",
