@@ -669,6 +669,11 @@ func uninstallDisabledMod(id, root string) (uninstallResult, error) {
 		if err := stopManagedService(root, id); err != nil {
 			return result, err
 		}
+		if installed.Service.Capability == captureMeterCapability {
+			if err := disarmCaptureMeter(root); err != nil {
+				return result, err
+			}
+		}
 	}
 	quarantine := filepath.Join(versionRoot, ".uninstall-"+txid)
 	relativeQuarantine, err := filepath.Rel(root, quarantine)

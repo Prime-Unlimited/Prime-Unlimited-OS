@@ -178,6 +178,16 @@ def _safe_zip_name(name: str) -> str:
     return "/".join(parts)
 
 
+def _check_capture_tap(archive: zipfile.ZipFile, names: dict, binary: str, device: str) -> None:
+    sibling = str(Path(binary).parent / "libprime-analyzer-tap.so")
+    if sibling not in names or names[sibling].is_dir():
+        raise ModReleaseError("capture tap is missing")
+    payload = archive.read(sibling)
+    _check_elf(payload, device, sibling)
+    if int.from_bytes(payload[16:18], "little") != 3:
+        raise ModReleaseError("capture tap is not a shared library")
+
+
 def _check_elf(blob: bytes, device: str, label: str) -> None:
     spec = DEVICES[device]
     if len(blob) < 20 or blob[:4] != b"\x7fELF":
@@ -219,12 +229,14 @@ def validate_zip(path: Path, entrypoint: str, service: dict | None, device: str)
         capability = service.get("capability")
         if not isinstance(binary, str) or binary not in names or names[binary].is_dir():
             raise ModReleaseError("native service file is invalid")
-        if capability not in ("splash-image", "media-import") or not SHA_RE.fullmatch(str(digest or "")):
+        if capability not in ("splash-image", "media-import", "capture-meter") or not SHA_RE.fullmatch(str(digest or "")):
             raise ModReleaseError("native service file is invalid")
         payload = archive.read(binary)
         if _sha256(payload) != digest:
             raise ModReleaseError("service binary digest mismatch")
         _check_elf(payload, device, binary)
+        if capability == "capture-meter":
+            _check_capture_tap(archive, names, binary, device)
     archive.close()
     return _sha256(blob), len(blob)
 

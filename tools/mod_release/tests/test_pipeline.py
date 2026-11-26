@@ -116,6 +116,38 @@ class PipelineTests(unittest.TestCase):
             found = validate_tree(root)
             self.assertEqual(found[0]["targets"]["jp24"]["service"]["capability"], "media-import")
 
+    def test_capture_meter_requires_shared_tap_sibling(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            directory = _mod(root, "development", "prime-audio-analyzer", "0.2.0", ("jc11s",), service=True)
+            document = json.loads((directory / "mod.json").read_text())
+            service = document["targets"]["jc11s"]["service"]
+            service["capability"] = "capture-meter"
+            (directory / "mod.json").write_text(json.dumps(document))
+            with self.assertRaises(ModReleaseError):
+                validate_tree(root)
+            binary_name = service["binary"]
+            sibling = str(Path(binary_name).parent / "libprime-analyzer-tap.so")
+            archive_path = directory / "jc11s.zip"
+            with zipfile.ZipFile(archive_path, "a") as archive:
+                archive.writestr(sibling, _elf("jc11s"))
+            with self.assertRaises(ModReleaseError):
+                validate_tree(root)
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("prime-audio-analyzer/start.sh", b"#!/bin/sh\nexit 0\n")
+                archive.writestr(binary_name, _elf("jc11s"))
+                tap = bytearray(_elf("jc11s"))
+                tap[16] = 3
+                archive.writestr(sibling, bytes(tap))
+            blob = archive_path.read_bytes()
+            release = json.loads((directory / "release.json").read_text())
+            release["assets"]["jc11s"]["sha256"] = hashlib.sha256(blob).hexdigest()
+            release["assets"]["jc11s"]["size"] = len(blob)
+            (directory / "release.json").write_text(json.dumps(release))
+            found = validate_tree(root)
+            self.assertEqual(found[0]["targets"]["jc11s"]["service"]["capability"], "capture-meter")
+
     def test_new_development_mod_is_detected_for_both_devices(self):
         root = Path(self.id().replace(".", "-"))
         # Use a temp directory rather than the test id as a relative path.

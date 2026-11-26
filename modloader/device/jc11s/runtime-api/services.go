@@ -65,7 +65,7 @@ func validateServiceSpec(spec *serviceSpec) error {
 	}
 	path, err := safeArchivePath(spec.Binary, defaultStageLimits)
 	digest, decodeErr := hex.DecodeString(spec.SHA256)
-	if err != nil || path != spec.Binary || len(digest) != 32 || decodeErr != nil || strings.ToLower(spec.SHA256) != spec.SHA256 || (spec.Capability != "splash-image" && spec.Capability != "media-import") {
+	if err != nil || path != spec.Binary || len(digest) != 32 || decodeErr != nil || strings.ToLower(spec.SHA256) != spec.SHA256 || !knownServiceCapability(spec.Capability) {
 		return errors.New("invalid native service declaration")
 	}
 	return nil
@@ -177,6 +177,12 @@ func startManagedService(root string, item installedMod) error {
 	if err != nil {
 		return err
 	}
+	capture := item.Service != nil && item.Service.Capability == captureMeterCapability
+	if capture {
+		if err := armCaptureMeter(root, item); err != nil {
+			return err
+		}
+	}
 	old, err := loadServiceRecord(root, item.ID)
 	if err == nil && old.PackageSHA256 == item.PackageSHA256 {
 		if serviceCommand("systemctl", "is-active", "--quiet", serviceName(item.ID)+".service") == nil {
@@ -241,9 +247,17 @@ func startManagedService(root string, item installedMod) error {
 	if err := writeAtomicJSON(stdin, credentials); err != nil {
 		return err
 	}
+	stdinProperty := "--property=StandardInput=file:" + stdin
+	command := []string{executable, "--managed"}
+	if capture {
+		// The meter reads no broker token. PrivateDevices still bind-mounts the
+		// host /dev/shm, which is the object Engine maps.
+		stdinProperty = "--property=StandardInput=null"
+		command = []string{executable}
+	}
 	args := []string{"--quiet", "--unit=" + serviceName(item.ID),
 		"--property=Type=exec", "--property=DynamicUser=yes",
-		"--property=StandardInput=file:" + stdin,
+		stdinProperty,
 		"--property=ProtectSystem=strict", "--property=ProtectHome=yes",
 		"--property=PrivateTmp=yes", "--property=PrivateDevices=yes",
 		"--property=NoNewPrivileges=yes", "--property=RestrictSUIDSGID=yes",
@@ -253,10 +267,13 @@ func startManagedService(root string, item installedMod) error {
 		"--property=MemoryMax=128M", "--property=TasksMax=32",
 		"--property=KillMode=control-group", "--property=TimeoutStopSec=10s",
 		"--property=BindsTo=prime-unlimited-modloader-api.service",
-		"--property=After=prime-unlimited-modloader-api.service",
-		executable, "--managed"}
+		"--property=After=prime-unlimited-modloader-api.service"}
+	args = append(args, command...)
 	if err := serviceCommand("systemd-run", args...); err != nil {
 		// Keep the record so the reconciler can stop a partially started unit.
+		if capture {
+			_ = disarmCaptureMeter(root)
+		}
 		return err
 	}
 	return nil
@@ -310,6 +327,11 @@ func reconcileServicesPolicy(root string, approve func(installedMod) bool) error
 			if err := stopManagedService(root, id); err != nil {
 				return err
 			}
+			if item.Service != nil && item.Service.Capability == captureMeterCapability {
+				if err := disarmCaptureMeter(root); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		running[id] = item
@@ -321,6 +343,9 @@ func reconcileServicesPolicy(root string, approve func(installedMod) bool) error
 			continue
 		}
 		if err := startManagedService(root, item); err != nil {
+			if item.Service != nil && item.Service.Capability == captureMeterCapability {
+				_ = disarmCaptureMeter(root)
+			}
 			stopErr := stopManagedService(root, id)
 			failure := safety.Mods[id]
 			if failure.FailureCount < failureQuarantineThreshold {

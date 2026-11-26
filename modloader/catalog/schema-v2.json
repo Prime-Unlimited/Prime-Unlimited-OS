@@ -86,7 +86,7 @@
       "properties": {
         "binary": {"type": "string", "minLength": 1},
         "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-        "capability": {"enum": ["splash-image", "media-import"]}
+        "capability": {"enum": ["splash-image", "media-import", "capture-meter"]}
       }
     },
     "library": {

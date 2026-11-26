@@ -2,7 +2,12 @@
 
 A service declaration in a verified schema-v2 catalog permits one native ELF
 binary and a bounded runtime capability. Current capabilities are
-`splash-image` and `media-import`. The latter exposes opaque USB insertion
+`splash-image`, `media-import`, and `capture-meter`. `capture-meter` copies
+the sibling `libprime-analyzer-tap.so` from the verified package into
+`/data/prime-unlimited/lib/` and inserts only that library into the existing
+Engine `LD_PRELOAD` line, on the same inode, without removing other libraries
+and without restarting Engine. The service process publishes levels on
+loopback. `media-import` exposes opaque USB insertion
 events, internal destination summaries, and a bounded USB import preparation
 flow to the trusted OverlayHost. Preparation reads audio tags, artwork and
 playlists in the runtime process and stores a short-lived private preview;
