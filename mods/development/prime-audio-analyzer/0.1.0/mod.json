@@ -1,0 +1,18 @@
+{
+  "id": "prime-audio-analyzer",
+  "name": "Audio Analyzer",
+  "version": "0.1.0",
+  "revision": 1,
+  "firmware": ["5.3.0"],
+  "entrypoint": "prime-audio-analyzer/start.sh",
+  "overlay": "prime-audio-analyzer/ui/Overlay.qml",
+  "hardwareVerification": "not-performed",
+  "approval": {"maintainer": "Prime Unlimited", "devices": ["JC11S"]},
+  "dependencies": [],
+  "conflicts": [],
+  "targets": {
+    "jc11s": {
+      "description": "Read-only eight-channel capture meters for the Prime 4+. No level change and no Deck 4 DVS control. Shows NO CAPTURE until a local publisher answers 127.0.0.1:9146."
+    }
+  }
+}
