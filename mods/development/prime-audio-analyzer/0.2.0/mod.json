@@ -1,0 +1,30 @@
+{
+  "id": "prime-audio-analyzer",
+  "name": "Audio Analyzer",
+  "version": "0.2.0",
+  "revision": 1,
+  "firmware": [
+    "5.3.0"
+  ],
+  "entrypoint": "prime-audio-analyzer/start.sh",
+  "overlay": "prime-audio-analyzer/ui/Overlay.qml",
+  "hardwareVerification": "not-performed",
+  "approval": {
+    "maintainer": "Prime Unlimited",
+    "devices": [
+      "JC11S"
+    ]
+  },
+  "dependencies": [],
+  "conflicts": [],
+  "targets": {
+    "jc11s": {
+      "description": "Read-only eight-channel capture meters for the Prime 4+. No level change and no Deck 4 DVS control. Enable installs libprime-analyzer-tap.so beside the existing preload and starts the meter on 127.0.0.1:9146. The running Engine keeps its old preload until the next Engine start.",
+      "service": {
+        "binary": "prime-audio-analyzer/bin/prime-analyzer",
+        "sha256": "e8cd541f343e73fd4dfad3ac5eca002ea354bf692a863be349692127dff94071",
+        "capability": "capture-meter"
+      }
+    }
+  }
+}
