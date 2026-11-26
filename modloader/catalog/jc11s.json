@@ -11,8 +11,8 @@
         "maintainer": "Prime Unlimited"
       },
       "architecture": "armv7l",
-      "description": "Read-only eight-channel capture meters for the Prime 4+. No level change and no Deck 4 DVS control. Shows NO CAPTURE until a local publisher answers 127.0.0.1:9146.",
-      "downloadUrl": "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/794517638",
+      "description": "Read-only eight-channel capture meters for the Prime 4+. No level change and no Deck 4 DVS control. Enable installs libprime-analyzer-tap.so beside the existing preload and starts the meter on 127.0.0.1:9146. The running Engine keeps its old preload until the next Engine start.",
+      "downloadUrl": "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/794681018",
       "entrypoint": "prime-audio-analyzer/start.sh",
       "firmware": [
         "5.3.0"
@@ -24,14 +24,19 @@
       "name": "Audio Analyzer",
       "overlay": "prime-audio-analyzer/ui/Overlay.qml",
       "release": {
-        "artifactSha256": "fe8540e1004b7be401f2465163b171975bf389d6fda9eb0295927f34504a463e",
+        "artifactSha256": "8788225cc7cee99de4888480ed0d6eb72fc1fec429ad3641ba940fb68bd2a779",
         "hardwareVerification": "not-performed"
       },
       "revision": 1,
-      "sha256": "fe8540e1004b7be401f2465163b171975bf389d6fda9eb0295927f34504a463e",
-      "size": 5093,
+      "service": {
+        "binary": "prime-audio-analyzer/bin/prime-analyzer",
+        "capability": "capture-meter",
+        "sha256": "e8cd541f343e73fd4dfad3ac5eca002ea354bf692a863be349692127dff94071"
+      },
+      "sha256": "8788225cc7cee99de4888480ed0d6eb72fc1fec429ad3641ba940fb68bd2a779",
+      "size": 41673,
       "status": "development",
-      "version": "0.1.0"
+      "version": "0.2.0"
     },
     {
       "abi": "gnueabihf",
