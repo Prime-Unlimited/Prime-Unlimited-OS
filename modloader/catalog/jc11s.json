@@ -11,6 +11,37 @@
         "maintainer": "Prime Unlimited"
       },
       "architecture": "armv7l",
+      "description": "Read-only eight-channel capture meters for the Prime 4+. No level change and no Deck 4 DVS control. Shows NO CAPTURE until a local publisher answers 127.0.0.1:9146.",
+      "downloadUrl": "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/794517638",
+      "entrypoint": "prime-audio-analyzer/start.sh",
+      "firmware": [
+        "5.3.0"
+      ],
+      "id": "prime-audio-analyzer-jc11s",
+      "models": [
+        "JC11S"
+      ],
+      "name": "Audio Analyzer",
+      "overlay": "prime-audio-analyzer/ui/Overlay.qml",
+      "release": {
+        "artifactSha256": "fe8540e1004b7be401f2465163b171975bf389d6fda9eb0295927f34504a463e",
+        "hardwareVerification": "not-performed"
+      },
+      "revision": 1,
+      "sha256": "fe8540e1004b7be401f2465163b171975bf389d6fda9eb0295927f34504a463e",
+      "size": 5093,
+      "status": "development",
+      "version": "0.1.0"
+    },
+    {
+      "abi": "gnueabihf",
+      "approval": {
+        "devices": [
+          "JC11S"
+        ],
+        "maintainer": "Prime Unlimited"
+      },
+      "architecture": "armv7l",
       "description": "Compact local clock and monotonic stopwatch overlay with stable native touch dragging.",
       "downloadUrl": "https://api.github.com/repos/Prime-Unlimited/Prime-Unlimited-OS/releases/assets/770107450",
       "entrypoint": "prime-clock/start.sh",
